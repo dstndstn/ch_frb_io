@@ -34,7 +34,6 @@ def copy_item(name, ingroup, outgroup):
 
     """
 
-    print name
     tocopy = ingroup[name]
 
     if isinstance(tocopy, h5py.Group):
@@ -54,7 +53,6 @@ def main(p):
     args = p.parse_args()
 
     file_paths = glob.glob(path.join(args.acq_dir, ("[0-9]" * 8 + '.h5')))
-    print file_paths
 
     for file_path in file_paths:
         filename = path.basename(file_path)
