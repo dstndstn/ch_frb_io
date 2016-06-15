@@ -1,0 +1,74 @@
+#! /usr/bin/python
+"""
+Decompress CHIME FRB data.
+"""
+
+import argparse
+import glob
+from os import path
+
+import h5py
+from bitshuffle import h5
+
+
+main_parser = argparse.ArgumentParser(
+        description="Decompress CHIME FRB data.",
+        )
+
+main_parser.add_argument('acq_dir',
+        type=str,
+        help='Acquisition directory containing CHIME FRB data to be'
+             ' decompressed',
+        )
+
+main_parser.add_argument('out_dir',
+        type=str,
+        help='Directory to write decompressed files. Existing files will be'
+             ' clobbered.',
+        )
+
+def copy_item(name, ingroup, outgroup):
+    """Copies an item from one group to another given an name.
+
+    Datasets are copied without compression.
+
+    """
+
+    print name
+    tocopy = ingroup[name]
+
+    if isinstance(tocopy, h5py.Group):
+        out = outgroup.create_group(name)
+    elif isinstance(tocopy, h5py.Dataset):
+        out = outgroup.create_dataset(name, data=tocopy)
+    else:
+        raise RuntimeError()
+    copy_attrs(tocopy, out)
+
+def copy_attrs(from_, to):
+    for name, value in from_.attrs.iteritems():
+        to.attrs[name] = value
+
+def main(p):
+
+    args = p.parse_args()
+
+    file_paths = glob.glob(path.join(args.acq_dir, ("[0-9]" * 8 + '.h5')))
+    print file_paths
+
+    for file_path in file_paths:
+        filename = path.basename(file_path)
+        out_path = path.join(args.out_dir, filename)
+
+        infile = h5py.File(file_path, mode='r')
+        outfile = h5py.File(out_path, mode='w')
+
+        copy_attrs(infile, outfile)
+
+        fun = lambda name: copy_item(name, infile, outfile)
+        infile.visit(fun)
+
+
+
+if __name__ == '__main__':
+    main(main_parser)

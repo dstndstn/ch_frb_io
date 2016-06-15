@@ -29,7 +29,7 @@ setup(
     version = __version__,
     packages = ['ch_frb_io', 'ch_frb_io.tests'],
     ext_modules = extensions,
-    scripts=[],
+    scripts=['bin/decompress-chfrb-data'],
     install_requires=REQUIRES,
     package_data = {'ch_frb_io.tests' : ['data/*']},
 
