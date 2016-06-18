@@ -33,7 +33,7 @@ DEPENDENCIES
 	export HDF5_PLUGIN_PATH=$HOME/lib/hdf5_plugins
 
 	# If you have root privs and want to install "system-wide", omit the --user flag
-	# The --h5plugin* flags will build and install the plugin needed to use bitshuffle from C++
+	# The --h5plugin* flags will build/install the plugin needed to use bitshuffle from C++
 
 	python setup.py install --user --h5plugin --h5plugin-dir=$HOME/lib/hdf5_plugins
 
