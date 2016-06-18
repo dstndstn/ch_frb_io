@@ -1,0 +1,77 @@
+ch_frb_io: C++/python library for CHIME-FRB file formats and (eventually!) network packets
+
+CHIME FRB data has a similar format to CHIME cosmology data and can be read
+using the tools in 'caput', in particular the caput.tod module. This
+package contains additional tools, such as simple file data streamers and a C
+interface.  (https://github.com/radiocosmology/caput)
+
+Currently there is no shared code between the C++ and python parts, so this is really two
+independent libraries in the same git repository.  In fact the C++ and python parts use
+different build systems, so you have to build and install them independently.  This is
+something that should probably be fixed later!
+
+
+DEPENDENCIES
+------------
+
+  1. libhdf5 (https://www.hdfgroup.org/HDF5/release/obtain5.html)
+     Note that this is a link to HDF5 v1.8.  I imagine v1.10 also works but haven't tested it yet.
+
+  2. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
+     You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
+     data is generally bitshuffle-compresed).
+
+     A hint for installing bitshuffle:
+
+        git clone https://github.com/kiyo-masui/bitshuffle.git
+        cd bitshuffle/
+
+	# The HDF5 library can dynamically load the bitshuffle plugin, i.e. you don't need
+	# to link the bitshuffle library when you compile ch_frb_io, but you need to set this
+	# environment variable to tell libhdf5 where to look.  Suggest adding this to .bashrc!
+
+	export HDF5_PLUGIN_PATH=$HOME/lib/hdf5_plugins
+
+	# If you have root privs and want to install "system-wide", omit the --user flag
+	# The --h5plugin* flags will build and install the plugin needed to use bitshuffle from C++
+
+	python setup.py install --user --h5plugin --h5plugin-dir=$HOME/lib/hdf5_plugins
+
+
+INSTALLATION (C++)
+------------------
+
+  - cd cpp/
+
+  - Create a file ./Makefile.local containing compiler flags, library locations, etc.
+    The details are described in the Makefile.  The example file
+       site/Makefile.local.chimpanzee
+    works for me on all CHIME machines, so you can probably just do
+       ln -s site/Makefile.local.chimpanzee Makefile.local
+
+  - make all install
+
+  - To run a ~5-minute unit test, first copy the "reference" pathfinder data from 
+       microwave:/home/kmsmith/reference_pathfinder_data/compressed/
+
+    and do:    
+       # assumes bitshuffle is installed, otherwise use uncompressed data
+       ch-show-intensity-file -t ~/reference_pathfinder_data/compressed/*.h5
+
+    There's nothing interesting in the reference data (such as a pulsar), it's just
+    an arbitrary capture (it does have a significant packet drop rate, which should
+    help the generality of the unit tests).
+
+    Note that microwave is the Toronto chimefrb test node, email Keith Vanderlinde
+    if you need an account.
+
+
+INSTALLATION (PYTHON)
+---------------------
+
+  - To build and install, do
+       python setup.py install --user
+    (If you have root privs and want to install "system-wide", omit the --user flag)
+
+  - Note that there is a binary 'bin/decompress-chfrb-data' which will bitshuffle-decompress
+    chimefrb intensity data
