@@ -1,8 +1,9 @@
 # Makefile.local must define the following variables
-#   BINDIR   install dir for executables
-#   LIBDIR   install dir for C++ libraries
-#   INCDIR   install dir for C++ headers
-#   CPP      c++ compiler command line (must support c++0x)
+#   BINDIR      install dir for executables
+#   LIBDIR      install dir for C++ libraries
+#   INCDIR      install dir for C++ headers
+#   CPP         c++ compiler command line (must support c++11)
+#   CPP_LFLAGS  any c++ flags which should only be specified when linking
 #
 # See examples in site/ directory.
 
@@ -34,7 +35,7 @@ clean:
 	$(CPP) -c -o $@ $<
 
 libch_frb_io.so: $(OFILES)
-	$(CPP) -o $@ -shared $^ $(LIBS)
+	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)
 
 ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) -o $@ $< -lch_frb_io
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
