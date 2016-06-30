@@ -8,6 +8,7 @@ import numpy as np
 from ch_frb_io import __version__
 
 
+
 REQUIRES = ['numpy', 'scipy', 'cython', 'h5py', 'bitshuffle',]
 
 # Generate test data.

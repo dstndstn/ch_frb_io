@@ -60,7 +60,7 @@ def generate(outdir=None):
         outdir = TEST_DATA_DIR
 
     # Generate some meta-data.
-    freq = ADC_SAMPLE_RATE - ADC_SAMPLE_RATE / NFREQ * np.arange(NFREQ)
+    freq = ADC_SAMPLE_RATE - ADC_SAMPLE_RATE / 2 / NFREQ * np.arange(NFREQ)
     pol = ['XX', 'YY']
 
     # Set up paths.
