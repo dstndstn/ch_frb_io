@@ -9,9 +9,9 @@ BINDIR=$(HOME)/bin
 
 #
 # C++ command line
-# Must support c++0x
+# Must support c++11
 # Don't forget to put -L. and -L$(LIBDIR) on the command line (in this order)
 # Don't forget to add . and $(LIBDIR) in your LD_LIBRARY_PATH environment variable (in this order)
 # Don't forget -fPIC
 #
-CPP=g++ -O3 -march=native -std=c++0x -Wall -ffast-math -funroll-loops -fPIC -I$(INCDIR) -L. -L$(LIBDIR)
+CPP=g++ -std=c++11 -O3 -march=native -Wall -ffast-math -funroll-loops -fPIC -I. -I$(INCDIR) -L. -L$(LIBDIR)

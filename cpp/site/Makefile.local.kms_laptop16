@@ -14,7 +14,7 @@ BINDIR=$(HOME)/bin
 # Must support c++11
 # Don't forget -fPIC
 #
-CPP=clang++ -std=c++11 -fPIC -Wall -O3 -ffast-math -funroll-loops -I$(INCDIR)
+CPP=clang++ -std=c++11 -fPIC -Wall -O3 -ffast-math -funroll-loops -I. -I$(INCDIR)
 
 # Any C++ flags which should only be specified when linking 
 # Don't forget to put -L. and -L$(LIBDIR) on the command line (in this order)
