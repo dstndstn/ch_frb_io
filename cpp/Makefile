@@ -34,7 +34,7 @@ LIBFILES=libch_frb_io.so
 INSTALLED_BINARIES=ch-show-intensity-file
 
 LIBS=-lhdf5
-OFILES=hdf5.o intensity_hdf5_file.o
+OFILES=hdf5.o intensity_hdf5_file.o intensity_hdf5_ofile.o
 
 all: $(INSTALLED_BINARIES) $(LIBFILES)
 

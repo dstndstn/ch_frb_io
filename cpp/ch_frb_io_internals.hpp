@@ -78,6 +78,12 @@ template<typename T> inline std::string vstr(const std::vector<T> &buf)
     return vstr(&buf[0], buf.size());
 }
 
+template<typename T, typename... Args>
+std::unique_ptr<T> make_unique(Args&& ...args)
+{
+    return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
 
 // -------------------------------------------------------------------------------------------------
 //

@@ -13,6 +13,9 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
+// declared in ch_frb_io_internals.hpp
+template<typename T> struct hdf5_extendable_dataset;
+
 
 struct noncopyable
 {
@@ -22,6 +25,8 @@ struct noncopyable
 };
 
 
+// Note that there are two "intensity file" classes: intensity_hdf5_file 
+// for reading, and intensity_hdf5_ofile for wrtiing.
 struct intensity_hdf5_file : noncopyable {
     std::string filename;
     
@@ -98,6 +103,38 @@ struct intensity_hdf5_file : noncopyable {
     void get_unpolarized_intensity(float *out_int, float *out_wt, int out_t0, int out_nt, int out_stride=0) const;
 
     void run_unit_tests() const;
+};
+
+
+// Note that there are two "intensity file" classes: intensity_hdf5_file 
+// for reading, and intensity_hdf5_ofile for wrtiing.
+struct intensity_hdf5_ofile {
+    std::string filename;
+    double dt_sample;
+    int nfreq;
+    int npol;
+
+    ssize_t curr_nt;       // current size of file (in time samples, not including gaps)
+    ssize_t curr_ipos;     // keeps track of gaps
+    double curr_time;     // time in seconds relative to arbitrary origin
+
+    std::unique_ptr<hdf5_extendable_dataset<double> > time_dataset;
+    std::unique_ptr<hdf5_extendable_dataset<float> > intensity_dataset;
+    std::unique_ptr<hdf5_extendable_dataset<float> > weights_dataset;
+
+    // The freq0+freq1 constructor syntax supports either frequency channel ordering.
+    // E.g. for CHIME (where frequency channels are ordered highest to lowest), set freq0=800. freq1=400.
+    // The default nt_chunk=128 comes from ch_vdif_assembler chunk size, assuming downsampling by factor 512.
+    intensity_hdf5_ofile(const std::string &filename, int nfreq, const std::vector<std::string> &pol,
+			 double freq0, double freq1, double dt_sample, ssize_t ipos0=0,
+			 double time0=0.0, int bitshuffle=2, int nt_chunk=128);
+
+    ~intensity_hdf5_ofile() { }
+
+    // The 'intensity' and 'weight' arrays have shape (nfreq, npol, nt_chunk)
+    // Note that there is no write() method, the data is incrementally written, and flushed when the destructor is called.
+    void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos, double chunk_t0);
+    void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos);
 };
 
 
