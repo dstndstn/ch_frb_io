@@ -1,6 +1,7 @@
 # C++ library
 cpp/Makefile.local
 cpp/ch-show-intensity-file
+cpp/test-intensity-hdf5-file
 cpp/*.o
 
 # emacs save files
