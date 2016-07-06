@@ -161,6 +161,10 @@ struct hdf5_group : noncopyable {
 	this->_write_dataset(dataset_name, hdf5_type<T>(), reinterpret_cast<const void *> (data), shape);
     }
 
+    // This is a convenient interface for writing a small string-valued dataset.
+    // FIXME at some point I'll make the string-valued dataset API more internally consistent.
+    void write_string_dataset(const std::string &dataset_name, const std::vector<std::string> &data, const std::vector<hsize_t> &shape);
+
     // Helpers
     void _get_attribute_shape(const std::string &attr_name, hid_t attr_id, std::vector<hsize_t> &shape) const;
     void _read_attribute(const std::string &attr_name, hid_t hdf5_type, void *out, const std::vector<hsize_t> &expected_shape) const;

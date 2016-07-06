@@ -292,6 +292,50 @@ void hdf5_group::_write_dataset(const string &dataset_name, hid_t hdf5_type, con
 	H5Sclose(space_id);
 }
 
+// Reference: https://www.hdfgroup.org/ftp/HDF5/examples/misc-examples/sample-programs/strings.c
+void hdf5_group::write_string_dataset(const string &dataset_name, const vector<string> &data, const vector<hsize_t> &shape)
+{
+    if (data.size() != prod(shape))
+	throw runtime_error(filename + ": write_string_dataset() called with wrong data.size()");
+
+    vector<const char *> cstr_array(data.size());
+    for (unsigned int i = 0; i < data.size(); i++)
+	cstr_array[i] = data[i].c_str();
+
+    hid_t space_id = H5Screate_simple(shape.size(), &shape[0], NULL);
+    if (space_id < 0)
+	throw runtime_error(filename + ": couldn't create dataspace for dataset '" + dataset_name + "'?!");
+
+    hid_t datatype_id = H5Tcopy(H5T_C_S1);
+    if (datatype_id < 0)
+	throw runtime_error(filename + ": couldn't create datatype for dataset '" + dataset_name + "'?!");
+
+    herr_t status = H5Tset_size(datatype_id, H5T_VARIABLE);
+    if (status < 0)
+	throw runtime_error(filename + ": H5Tset_size() failed when creating dataset '" + dataset_name + "'?!");    
+
+    hid_t proplist_id = H5Pcreate(H5P_DATASET_CREATE);
+    if (proplist_id < 0)
+	throw runtime_error(filename + ": H5Pcreate() failed when creating dataset '" + dataset_name + "'?!");    
+
+    hid_t dataset_id = H5Dcreate1(group_id, dataset_name.c_str(), datatype_id, space_id, proplist_id);
+    if (dataset_id < 0)
+	throw runtime_error(filename + ": couldn't create string-valued dataset '" + dataset_name + "'");
+
+    status = H5Dwrite(dataset_id, datatype_id, H5S_ALL, H5S_ALL, H5P_DEFAULT, &cstr_array[0]);
+    if (status < 0)
+	throw runtime_error(filename + ": couldn't write string-valued dataset '" + dataset_name + "'");
+
+    if (dataset_id >= 0)
+	H5Dclose(dataset_id);
+    if (proplist_id >= 0)
+	H5Pclose(proplist_id);
+    if (datatype_id >= 0)
+	H5Tclose(datatype_id);
+    if (space_id >= 0)
+	H5Sclose(space_id);
+}
+
 
 bool hdf5_group::has_attribute(const string &attr_name) const
 {
