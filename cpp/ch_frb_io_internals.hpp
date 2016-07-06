@@ -110,14 +110,15 @@ struct hdf5_group : noncopyable {
     std::string group_name;
     hid_t group_id;
 
-    hdf5_group(const hdf5_file &f, const std::string &group_name);
+    // If create=true, the group will be created if it doesn't exist.
+    hdf5_group(const hdf5_file &f, const std::string &group_name, bool create=false);
     ~hdf5_group();
 
     bool has_attribute(const std::string &attr_name) const;
     bool has_dataset(const std::string &dataset_name) const;
 
     void get_attribute_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
-    void get_dataset_shape(const std::string &dataset_name, std::vector<hsize_t> &shape) const;
+    void get_dataset_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
     
     // For a string-valued dataset, 'slen' is the string length, plus one byte for the null terminator
     ssize_t get_dataset_slen(const std::string &dataset_name) const;
@@ -169,6 +170,40 @@ struct hdf5_group : noncopyable {
     void _write_dataset(const std::string &dataset_name, hid_t hdf5_type, const void *data, const std::vector<hsize_t> &shape);
 };
 
+
+// This class isn't intended to be used directly; use the wrapper hdf5_extendable_dataset<T> below
+struct _hdf5_extendable_dataset : noncopyable {
+    std::string filename;
+    std::string group_name;
+    std::string dataset_name;
+    std::string full_name;
+    std::vector<hsize_t> curr_shape;
+    int axis;
+
+    hid_t type;
+    hid_t dataset_id;
+
+    _hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis, hid_t type);
+    ~_hdf5_extendable_dataset();
+
+    void write(const void *data, const std::vector<hsize_t> &shape);
+};
+
+
+template<typename T>
+struct hdf5_extendable_dataset {
+    _hdf5_extendable_dataset base;
+
+    hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis) :
+	base(g, dataset_name, chunk_shape, axis, hdf5_type<T>())
+    { }
+
+    void write(const T *data, const std::vector<hsize_t> &shape)
+    {
+	base.write(data, shape);
+    }
+
+};
 
 }  // namespace ch_frb_io
 

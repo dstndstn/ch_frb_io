@@ -9,16 +9,6 @@
 // probably won't get closed.
 //
 
-
-// The libhdf5 API changed between version 1.6 and 1.8.  
-// This block of macros ensures that the code below will work with either version.
-#if H5_VERS_MINOR == 6
-# define H5Acreate1 H5Acreate
-# define H5Dopen1 H5Dopen
-# define H5Dcreate1 H5Dcreate
-# define H5Gopen1 H5Gopen
-#endif
-
 using namespace std;
 
 namespace ch_frb_io {
@@ -51,14 +41,14 @@ hdf5_file::~hdf5_file()
 }
 
 
-hdf5_group::hdf5_group(const hdf5_file &f, const string &group_name_)
+hdf5_group::hdf5_group(const hdf5_file &f, const string &group_name_, bool create)
 {
     this->filename = f.filename;
     this->group_name = group_name_;
-    this->group_id = H5Gopen1(f.file_id, group_name.c_str());
+    this->group_id = create ? H5Gcreate1(f.file_id, group_name.c_str(), 0) : H5Gopen1(f.file_id, group_name.c_str());
 
     if (group_id < 0)
-	throw runtime_error(filename + ": couldn't open group'" + group_name);
+	throw runtime_error(filename + ": couldn't open group '" + group_name);
 }
 
 
@@ -296,6 +286,102 @@ bool hdf5_group::has_dataset(const string &dataset_name) const
 
     // FIXME: check that error is due to non-existence of dataset with given name, rather than some other problem.
     return false;
+}
+
+
+_hdf5_extendable_dataset::_hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name_, const std::vector<hsize_t> &chunk_shape, int axis_, hid_t type_) :
+    filename(g.filename),
+    group_name(g.group_name),
+    dataset_name(dataset_name_),
+    full_name(g.filename + ": " + group_name + "/" + dataset_name),
+    curr_shape(chunk_shape),
+    axis(axis_),
+    type(type_)
+{
+    int ndim = chunk_shape.size();
+
+    if (ndim < 1)
+	throw runtime_error("hdf5_extendable_dataset: attempt to create zero-dimensional dataset");
+    if ((axis < 0) || (axis >= ndim))
+	throw runtime_error("hdf5_extendable_dataset: axis is out of range");    
+
+    for (int i = 0; i < ndim; i++) {
+	if (chunk_shape[i] <= 0)
+	    throw runtime_error("hdf5_extendable_dataset: chunk_shape entry is <= 0");
+    }
+
+    vector<hsize_t> max_shape = chunk_shape;
+    curr_shape[axis] = 0;
+    max_shape[axis] = H5S_UNLIMITED;
+
+    hid_t space_id = H5Screate_simple(ndim, &curr_shape[0], &max_shape[0]);
+    if (space_id < 0)
+	throw runtime_error(full_name + ": H5Screate_simple() failed?!");
+
+    hid_t prop_id = H5Pcreate(H5P_DATASET_CREATE);
+    if (prop_id < 0)
+	throw runtime_error(full_name + ": H5Pcreate() failed?!");
+
+    herr_t err = H5Pset_chunk(prop_id, ndim, &chunk_shape[0]);
+    if (err < 0)
+	throw runtime_error(full_name + ": H5Pset_chunk() failed?!");
+
+    this->dataset_id = H5Dcreate2(g.group_id, dataset_name.c_str(), type, space_id, H5P_DEFAULT, prop_id, H5P_DEFAULT);
+    if (dataset_id < 0)
+	throw runtime_error(full_name + ": couldn't create dataset");
+
+    H5Pclose(prop_id);
+    H5Sclose(space_id);
+}
+
+
+_hdf5_extendable_dataset::~_hdf5_extendable_dataset()
+{
+    H5Dclose(dataset_id);
+}
+
+
+void _hdf5_extendable_dataset::write(const void *data, const vector<hsize_t> &shape)
+{
+    if (shape.size() != curr_shape.size())
+	throw runtime_error(full_name + ": array argument to write() has wrong number of dimensions");
+
+    for (int i = 0; i < (int)shape.size(); i++) {
+	if ((i == axis) && (shape[i] <= 0))
+	    throw runtime_error(full_name + ": array argument to write() has length-zero axis");
+	if ((i != axis) && (shape[i] != curr_shape[i]))
+	    throw runtime_error(full_name + ": array argument to write() has dimension mismatched to chunk dimension");
+    }
+
+    std::vector<hsize_t> offsets(shape.size(), 0);
+    std::vector<hsize_t> new_shape = curr_shape;
+    new_shape[axis] += shape[axis];
+    offsets[axis] = curr_shape[axis];
+
+    herr_t status = H5Dset_extent(dataset_id, &new_shape[0]);
+    if (status < 0)
+	throw runtime_error(full_name + ": H5Dset_extent() failed?!");
+
+    hid_t file_space_id = H5Dget_space(dataset_id);
+    if (file_space_id < 0)
+	throw runtime_error(full_name + ": H5Dget_space() failed?!");
+	
+    status = H5Sselect_hyperslab(file_space_id, H5S_SELECT_SET, &offsets[0], NULL, &shape[0], NULL);
+    if (status < 0)
+	throw runtime_error(full_name + ": H5Sselect_hyperslab() failed?!");	
+
+    hid_t mem_space_id = H5Screate_simple(shape.size(), &shape[0], NULL);
+    if (mem_space_id < 0)
+	throw runtime_error(full_name + ": H5Screate_simple() failed?!");
+
+    status = H5Dwrite(dataset_id, type, mem_space_id, file_space_id, H5P_DEFAULT, data);
+    if (status < 0)
+	throw runtime_error(full_name + ": write to extendable dataset failed");
+
+    this->curr_shape = new_shape;
+
+    H5Sclose(mem_space_id);
+    H5Sclose(file_space_id);
 }
 
 
