@@ -3,6 +3,9 @@ cpp/Makefile.local
 cpp/ch-show-intensity-file
 cpp/*.o
 
+# emacs save files
+*~
+
 # Automatically generated test data.
 ch_frb_io/tests/data/
 
