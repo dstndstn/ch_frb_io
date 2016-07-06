@@ -183,7 +183,9 @@ struct _hdf5_extendable_dataset : noncopyable {
     hid_t type;
     hid_t dataset_id;
 
-    _hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis, hid_t type);
+    _hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, 
+			     const std::vector<hsize_t> &chunk_shape, int axis, hid_t type, int bitshuffle);
+
     ~_hdf5_extendable_dataset();
 
     void write(const void *data, const std::vector<hsize_t> &shape);
@@ -194,8 +196,18 @@ template<typename T>
 struct hdf5_extendable_dataset {
     _hdf5_extendable_dataset base;
 
-    hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis) :
-	base(g, dataset_name, chunk_shape, axis, hdf5_type<T>())
+    //
+    // The 'bitshuffle' argument has the following meaning:
+    //   0 = no compression
+    //   1 = try to compress, but if plugin fails then just write uncompressed data instead
+    //   2 = try to compress, but if plugin fails then print a warning and write uncompressed data instead
+    //   3 = compression mandatory
+    //
+    // List of all filter_ids: https://www.hdfgroup.org/services/contributions.html
+    // Note that the compile-time constant 'bitshuffle_id' (=32008) is defined above.
+    //
+    hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis, int bitshuffle=0) :
+	base(g, dataset_name, chunk_shape, axis, hdf5_type<T>(), bitshuffle)
     { }
 
     void write(const T *data, const std::vector<hsize_t> &shape)

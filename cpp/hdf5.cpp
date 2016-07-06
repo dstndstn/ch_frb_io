@@ -1,3 +1,4 @@
+#include <iostream>
 #include "ch_frb_io.hpp"
 #include "ch_frb_io_internals.hpp"
 
@@ -15,6 +16,37 @@ namespace ch_frb_io {
 #if 0
 };  // pacify emacs c-mode!
 #endif
+
+
+//
+// The 'prop_id' argument should be a property list id created with H5Pcreate().
+//
+// The 'bitshuffle' argument has the following meaning:
+//   0 = no compression
+//   1 = try to compress, but if plugin fails then just write uncompressed data instead
+//   2 = try to compress, but if plugin fails then print a warning and write uncompressed data instead
+//   3 = compression mandatory
+//
+static void set_bitshuffle(const string &name, hid_t prop_id, int bitshuffle)
+{
+    if (bitshuffle < 0 || bitshuffle > 3)
+	throw runtime_error(name + ": bad value of 'bitshuffle' argument (expected 0 <= bitshuffle <= 3)");
+
+    if (bitshuffle == 0)
+	return;
+
+    H5Z_filter_t filter_id = 32008;
+    vector<unsigned int> cd_values = { 0, 2 };  // trailing "2" means combine with LZ4 compression
+
+    herr_t status = H5Pset_filter(prop_id, (H5Z_filter_t)filter_id, H5Z_FLAG_MANDATORY, cd_values.size(), &cd_values[0]);
+    if (status >= 0)
+	return;  // success
+
+    if (bitshuffle == 3)
+	throw runtime_error(name + ": fatal: couldn't load bitshuffle plugin, and mandatory compression was specified");
+    if (bitshuffle == 2)
+	cerr << (name + ": warning: couldn't load bitshuffle plugin, data will be written uncompressed");
+}
 
 
 hdf5_file::hdf5_file(const string &filename_, bool write, bool clobber)
@@ -289,7 +321,8 @@ bool hdf5_group::has_dataset(const string &dataset_name) const
 }
 
 
-_hdf5_extendable_dataset::_hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name_, const std::vector<hsize_t> &chunk_shape, int axis_, hid_t type_) :
+_hdf5_extendable_dataset::_hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name_, 
+						   const std::vector<hsize_t> &chunk_shape, int axis_, hid_t type_, int bitshuffle) :
     filename(g.filename),
     group_name(g.group_name),
     dataset_name(dataset_name_),
@@ -325,6 +358,8 @@ _hdf5_extendable_dataset::_hdf5_extendable_dataset(const hdf5_group &g, const st
     herr_t err = H5Pset_chunk(prop_id, ndim, &chunk_shape[0]);
     if (err < 0)
 	throw runtime_error(full_name + ": H5Pset_chunk() failed?!");
+
+    set_bitshuffle(full_name, prop_id, bitshuffle);
 
     this->dataset_id = H5Dcreate2(g.group_id, dataset_name.c_str(), type, space_id, H5P_DEFAULT, prop_id, H5P_DEFAULT);
     if (dataset_id < 0)
