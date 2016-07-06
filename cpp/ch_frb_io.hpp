@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <hdf5.h>
 
 namespace ch_frb_io {
 #if 0
@@ -135,6 +136,149 @@ struct intensity_hdf5_ofile {
     // Note that there is no write() method, the data is incrementally written, and flushed when the destructor is called.
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos, double chunk_t0);
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos);
+};
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// HDF5 wrappers (these are generally useful since the libhdf5 C/C++ api is so clunky)
+
+
+template<typename T> inline hid_t hdf5_type();
+
+// Reference: https://www.hdfgroup.org/HDF5/doc/H5.user/Datatypes.html
+template<> inline hid_t hdf5_type<int>()            { return H5T_NATIVE_INT; }
+template<> inline hid_t hdf5_type<float>()          { return H5T_NATIVE_FLOAT; }
+template<> inline hid_t hdf5_type<double>()         { return H5T_NATIVE_DOUBLE; }
+template<> inline hid_t hdf5_type<unsigned char>()  { return H5T_NATIVE_UCHAR; }
+
+
+struct hdf5_file : noncopyable {
+    std::string filename;
+    hid_t file_id;
+
+    // If write=false, the file is opened read-only, and an exception is thrown if it doesn't exist.
+    // If write=true, the file is opened for writing.  If the file already exists, it will either be clobbered
+    // or an exception will be thrown, depending on the value of 'clobber'.
+    hdf5_file(const std::string &filename, bool write=false, bool clobber=true);
+    ~hdf5_file();
+};
+
+
+struct hdf5_group : noncopyable {
+    std::string filename;
+    std::string group_name;
+    hid_t group_id;
+
+    // If create=true, the group will be created if it doesn't exist.
+    hdf5_group(const hdf5_file &f, const std::string &group_name, bool create=false);
+    ~hdf5_group();
+
+    bool has_attribute(const std::string &attr_name) const;
+    bool has_dataset(const std::string &dataset_name) const;
+
+    void get_attribute_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
+    void get_dataset_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
+    
+    // For a string-valued dataset, 'slen' is the string length, plus one byte for the null terminator
+    ssize_t get_dataset_slen(const std::string &dataset_name) const;
+
+    // Read scalar attribute
+    template<typename T> T read_attribute(const std::string &attr_name) const
+    {
+	T ret;
+	this->_read_attribute(attr_name, hdf5_type<T>(), reinterpret_cast<void *> (&ret), std::vector<hsize_t>());
+	return ret;
+    }
+
+    // Write scalar attribute
+    template<typename T> void write_attribute(const std::string &attr_name, const T &x)
+    {
+	this->_write_attribute(attr_name, hdf5_type<T>(), reinterpret_cast<const void *> (&x), std::vector<hsize_t>());
+    }
+
+    // Write 1D vector attribute
+    template<typename T> void write_attribute(const std::string &attr_name, const std::vector<T> &x)
+    {
+	std::vector<hsize_t> shape(1, x.size());
+	this->_write_attribute(attr_name, hdf5_type<T>(), reinterpret_cast<const void *> (&x[0]), shape);
+    }
+
+    // Read multidimensional dataset
+    template<typename T> void read_dataset(const std::string &dataset_name, T *out, const std::vector<hsize_t> &expected_shape) const
+    {
+	this->_read_dataset(dataset_name, hdf5_type<T>(), reinterpret_cast<void *> (out), expected_shape);
+    }
+
+    // Read multidimensional string-valued dataset.
+    // The 'slen' arg should be the string length, plus one for the null terminator (as returned by hdf5_group::get_dataset_slen()).
+    // The 'out' arg should point to an array of length prod(expected_shape) * slen.
+    void read_string_dataset(const std::string &dataset_name, char *out, const std::vector<hsize_t> &expected_shape, ssize_t slen) const;
+    
+    // Write multidimensional dataset
+    template<typename T> void write_dataset(const std::string &dataset_name, const T *data, const std::vector<hsize_t> &shape)
+    {
+	this->_write_dataset(dataset_name, hdf5_type<T>(), reinterpret_cast<const void *> (data), shape);
+    }
+
+    // This is a convenient interface for writing a small string-valued dataset.
+    // FIXME at some point I'll make the string-valued dataset API more internally consistent.
+    void write_string_dataset(const std::string &dataset_name, const std::vector<std::string> &data, const std::vector<hsize_t> &shape);
+
+    // Helpers
+    void _get_attribute_shape(const std::string &attr_name, hid_t attr_id, std::vector<hsize_t> &shape) const;
+    void _read_attribute(const std::string &attr_name, hid_t hdf5_type, void *out, const std::vector<hsize_t> &expected_shape) const;
+    void _write_attribute(const std::string &attr_name, hid_t hdf5_type, const void *data, const std::vector<hsize_t> &shape);
+    void _get_dataset_shape(const std::string &dataset_name, hid_t dataset_id, std::vector<hsize_t> &shape) const;
+    void _read_dataset(const std::string &dataset_name, hid_t hdf5_type, void *out, const std::vector<hsize_t> &expected_shape) const;
+    void _write_dataset(const std::string &dataset_name, hid_t hdf5_type, const void *data, const std::vector<hsize_t> &shape);
+};
+
+
+// This class isn't intended to be used directly; use the wrapper hdf5_extendable_dataset<T> below
+struct _hdf5_extendable_dataset : noncopyable {
+    std::string filename;
+    std::string group_name;
+    std::string dataset_name;
+    std::string full_name;
+    std::vector<hsize_t> curr_shape;
+    int axis;
+
+    hid_t type;
+    hid_t dataset_id;
+
+    _hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, 
+			     const std::vector<hsize_t> &chunk_shape, int axis, hid_t type, int bitshuffle);
+
+    ~_hdf5_extendable_dataset();
+
+    void write(const void *data, const std::vector<hsize_t> &shape);
+};
+
+
+template<typename T>
+struct hdf5_extendable_dataset {
+    _hdf5_extendable_dataset base;
+
+    //
+    // The 'bitshuffle' argument has the following meaning:
+    //   0 = no compression
+    //   1 = try to compress, but if plugin fails then just write uncompressed data instead
+    //   2 = try to compress, but if plugin fails then print a warning and write uncompressed data instead
+    //   3 = compression mandatory
+    //
+    // List of all filter_ids: https://www.hdfgroup.org/services/contributions.html
+    // Note that the compile-time constant 'bitshuffle_id' (=32008) is defined above.
+    //
+    hdf5_extendable_dataset(const hdf5_group &g, const std::string &dataset_name, const std::vector<hsize_t> &chunk_shape, int axis, int bitshuffle=0) :
+	base(g, dataset_name, chunk_shape, axis, hdf5_type<T>(), bitshuffle)
+    { }
+
+    void write(const T *data, const std::vector<hsize_t> &shape)
+    {
+	base.write(data, shape);
+    }
+
 };
 
 

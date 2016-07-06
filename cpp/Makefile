@@ -32,11 +32,12 @@ endif
 INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
 LIBFILES=libch_frb_io.so
 INSTALLED_BINARIES=ch-show-intensity-file
+TEST_BINARIES=test-intensity-hdf5-file
 
 LIBS=-lhdf5
 OFILES=hdf5.o intensity_hdf5_file.o intensity_hdf5_ofile.o
 
-all: $(INSTALLED_BINARIES) $(LIBFILES)
+all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 
 install: $(INCFILES) $(LIBFILES) $(INSTALLED_BINARIES)
 	mkdir -p $(INCDIR) $(LIBDIR) $(BINDIR)
@@ -50,7 +51,7 @@ uninstall:
 	for f in $(BINFILES); do rm -f $(BINDIR)/$$f; done
 
 clean:
-	rm -f *~ site/*~ *.o *.so $(INSTALLED_BINARIES)
+	rm -f *~ site/*~ *.o *.so $(TEST_BINARIES) $(INSTALLED_BINARIES)
 
 %.o: %.cpp $(INCFILES)
 	$(CPP) -c -o $@ $<
@@ -60,3 +61,7 @@ libch_frb_io.so: $(OFILES)
 
 ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
+test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+

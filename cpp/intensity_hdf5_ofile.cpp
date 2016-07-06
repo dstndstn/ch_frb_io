@@ -1,4 +1,5 @@
 #include <memory>
+#include <iostream>
 #include "ch_frb_io.hpp"
 #include "ch_frb_io_internals.hpp"
 
@@ -48,10 +49,11 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
 
     bool create = true;
     hdf5_group g_index_map(f, "index_map", create);
-    
+    hdf5_group g_root(f, ".");
+
     vector<double> freq(nfreq);
-    for (int i = 0; i < nfreq; i++)
-	freq[i] = (i*freq1 * (nfreq-i)*freq0) / (double)nfreq;
+    for (int ifreq = 0; ifreq < nfreq; ifreq++)
+	freq[ifreq] = (ifreq*freq1 + (nfreq-ifreq)*freq0) / (double)nfreq;
 
     vector<hsize_t> freq_shape = { (hsize_t)nfreq };
     g_index_map.write_dataset("freq", &freq[0], freq_shape);
@@ -64,8 +66,8 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
     this->time_dataset = make_unique<hdf5_extendable_dataset<double> >(g_index_map, "time", tchunk_shape, 0);
 
     vector<hsize_t> chunk_shape = { (hsize_t)nfreq, 2, (hsize_t)nt_chunk };
-    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float> > (g_index_map, "intensity", chunk_shape, 2, bitshuffle);
-    this->weights_dataset = make_unique<hdf5_extendable_dataset<float> > (g_index_map, "weight", chunk_shape, 2, bitshuffle);
+    this->intensity_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "intensity", chunk_shape, 2, bitshuffle);
+    this->weights_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "weight", chunk_shape, 2, bitshuffle);
 }
 
 
@@ -80,7 +82,7 @@ void intensity_hdf5_ofile::append_chunk(ssize_t nt_chunk, float *intensity, floa
 
     if (this->curr_nt > 0) {
 	if (chunk_ipos < this->curr_ipos)
-	    throw runtime_error(filename + ": append_chunk() was called with non-increasing or overlapping time ranges");
+	    throw runtime_error(filename + ": append_chunk() was called with non-increasing or overlapping sample_ipos ranges");
 
 	double expected_chunk_t0 = curr_time + dt_sample * (chunk_ipos - curr_ipos);
 	double allowed_drift = 1.0e-2 * dt_sample;
