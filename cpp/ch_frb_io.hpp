@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <hdf5.h>
 
 namespace ch_frb_io {
