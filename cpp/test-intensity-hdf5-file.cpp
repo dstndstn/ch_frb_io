@@ -1,3 +1,4 @@
+#include <cassert>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
@@ -34,12 +35,12 @@ int main(int argc, char **argv)
     const int nfreq = 1024;
     const int npol = 2;
     const int nt_file = 16384;
-    const double freq0 = 800.0;
-    const double freq1 = 400.0;
+    const double freq0_MHz = 800.0;
+    const double freq1_MHz = 400.0;
     const double dt_sample = 1.0e-3;
 
     vector<string> pol = { "XX", "YY" };
-    unique_ptr<intensity_hdf5_ofile> f = make_unique<intensity_hdf5_ofile> (filename, nfreq, pol, freq0, freq1, dt_sample);
+    unique_ptr<intensity_hdf5_ofile> f = make_unique<intensity_hdf5_ofile> (filename, nfreq, pol, freq0_MHz, freq1_MHz, dt_sample);
 
     ssize_t expected_file_ipos = 0;
     vector<ssize_t> chunk_ipos_list;
@@ -80,6 +81,14 @@ int main(int argc, char **argv)
 	throw runtime_error("rename() failed");
 
     intensity_hdf5_file f2(filename2);
-    
+
+    assert(f2.nfreq == nfreq);
+    assert(f2.npol == npol);
+    assert(f2.nt_file == nt_file);
+    assert(!f2.frequencies_are_increasing);
+    assert(fabs(f2.freq_lo_MHz - freq1_MHz) < 1.0e-4);
+    assert(fabs(f2.freq_hi_MHz - freq0_MHz) < 1.0e-4);
+    assert(fabs(f2.dt_sample - dt_sample) < 1.0e-10);
+
     return 0;
 }

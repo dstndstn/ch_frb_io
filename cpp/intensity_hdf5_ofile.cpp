@@ -10,8 +10,9 @@ namespace ch_frb_io {
 #endif
 
 
-intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, const vector<string> &pol, double freq0, double freq1,
-					   double dt_sample_, ssize_t ipos0, double time0, int bitshuffle, int nt_chunk)
+intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, const vector<string> &pol, 
+					   double freq0_MHz, double freq1_MHz, double dt_sample_, ssize_t ipos0, 
+					   double time0, int bitshuffle, int nt_chunk)
     : filename(filename_), 
       dt_sample(dt_sample_),
       nfreq(nfreq_), 
@@ -52,7 +53,8 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
 
     vector<double> freq(nfreq);
     for (int ifreq = 0; ifreq < nfreq; ifreq++)
-	freq[ifreq] = (ifreq*freq1 + (nfreq-ifreq)*freq0) / (double)nfreq;
+	// The 1.0e6 converts MHz -> Hz
+	freq[ifreq] = 1.0e6 * (ifreq*freq1_MHz + (nfreq-ifreq)*freq0_MHz) / (double)nfreq;
 
     vector<hsize_t> freq_shape = { (hsize_t)nfreq };
     g_index_map.write_dataset("freq", &freq[0], freq_shape);

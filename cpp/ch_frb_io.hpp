@@ -127,7 +127,7 @@ struct intensity_hdf5_ofile {
     // E.g. for CHIME (where frequency channels are ordered highest to lowest), set freq0=800. freq1=400.
     // The default nt_chunk=128 comes from ch_vdif_assembler chunk size, assuming downsampling by factor 512.
     intensity_hdf5_ofile(const std::string &filename, int nfreq, const std::vector<std::string> &pol,
-			 double freq0, double freq1, double dt_sample, ssize_t ipos0=0,
+			 double freq0_MHz, double freq1_MHz, double dt_sample, ssize_t ipos0=0,
 			 double time0=0.0, int bitshuffle=2, int nt_chunk=128);
 
     ~intensity_hdf5_ofile();
