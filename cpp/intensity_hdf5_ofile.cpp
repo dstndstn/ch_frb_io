@@ -1,4 +1,3 @@
-#include <memory>
 #include <iostream>
 #include "ch_frb_io.hpp"
 #include "ch_frb_io_internals.hpp"
@@ -68,6 +67,16 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
     vector<hsize_t> chunk_shape = { (hsize_t)nfreq, 2, (hsize_t)nt_chunk };
     this->intensity_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "intensity", chunk_shape, 2, bitshuffle);
     this->weights_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "weight", chunk_shape, 2, bitshuffle);
+}
+
+
+intensity_hdf5_ofile::~intensity_hdf5_ofile()
+{
+    time_dataset = unique_ptr<hdf5_extendable_dataset<double> > ();
+    intensity_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
+    weights_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
+
+    cerr << ("wrote " + filename + "\n");
 }
 
 

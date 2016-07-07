@@ -7,12 +7,13 @@ using namespace ch_frb_io;
 
 inline double intval(int ifreq, int ipol, int it)
 {
-    return 1.3183*ifreq + 1502.382*ipol + 0.328*it - 3201.91;
+    return 1.3183*ifreq + 1502.382*ipol - 0.328*it - 3201.91;
 }
 
 inline double wtval(int ifreq, int ipol, int it)
 {
-    return 1.021*ifreq - 1502.382*ipol - 0.283*it + 2038.18;
+    // all signs positive
+    return 1.021*ifreq + 1502.382*ipol + 0.283*it + 2038.18;
 }
 
 
@@ -68,5 +69,17 @@ int main(int argc, char **argv)
 	expected_file_ipos = chunk_ipos + chunk_nt;
     }
 
+    // calls intensity_hdf5_ofile destructor, which flushes data to disk
+    f = unique_ptr<intensity_hdf5_ofile> ();
+
+    // check that data has really been flushed, by immediate renaming file and reading it back
+    const char *filename2 = "test_intensity_hdf5_file_renamed.hdf5";
+
+    int err = rename(filename, filename2);
+    if (err)
+	throw runtime_error("rename() failed");
+
+    intensity_hdf5_file f2(filename2);
+    
     return 0;
 }

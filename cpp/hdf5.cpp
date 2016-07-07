@@ -192,23 +192,18 @@ void hdf5_group::_get_dataset_shape(const string &dataset_name, hid_t dataset_id
 }
 
 
-ssize_t hdf5_group::get_dataset_slen(const string &dataset_name) const
+void hdf5_group::_check_dataset_shape(const string &dataset_name, hid_t dataset_id, const vector<hsize_t> &expected_shape) const
 {
-    hid_t dataset_id = H5Dopen(this->group_id, dataset_name.c_str(), H5P_DEFAULT);
-    if (dataset_id < 0)
-	throw runtime_error(filename + ": dataset '" + dataset_name + "' not found");
+    vector<hsize_t> shape;
+    this->_get_dataset_shape(dataset_name, dataset_id, shape);
 
-    hid_t filetype = H5Dget_type(dataset_id);
-    if (filetype < 0)
-	throw runtime_error(filename + "/" + dataset_name + ": H5Dget_type() failed");
+    if (shape.size() != expected_shape.size())
+	throw runtime_error(filename + ": dataset '" + dataset_name + "' is a " + to_string(shape.size()) + "-d array, expected " + to_string(expected_shape.size()) + "-d array");
 
-    // FIXME should add check that dataset is a string type!
-
-    size_t size = H5Tget_size(filetype);
-    if (size == 0)
-	throw runtime_error(filename + "/" + dataset_name + ": H5Tget_size() failed");
-
-    return size + 1;
+    for (unsigned int i = 0; i < shape.size(); i++) {
+	if (shape[i] != expected_shape[i])
+	    throw runtime_error(filename + ": dataset '" + dataset_name + "' has shape " + vstr(shape) + ", expected shape " + vstr(expected_shape));
+    }
 }
 
 
@@ -230,16 +225,7 @@ void hdf5_group::_read_dataset(const string &dataset_name, hid_t hdf5_type, void
     if (dataset_id < 0)
 	throw runtime_error(filename + ": dataset '" + dataset_name + "' not found");
 
-    vector<hsize_t> shape;
-    this->_get_dataset_shape(dataset_name, dataset_id, shape);
-
-    if (shape.size() != expected_shape.size())
-	throw runtime_error(filename + ": dataset '" + dataset_name + "' is a " + to_string(shape.size()) + "-d array, expected " + to_string(expected_shape.size()) + "-d array");
-
-    for (unsigned int i = 0; i < shape.size(); i++) {
-	if (shape[i] != expected_shape[i])
-	    throw runtime_error(filename + ": dataset '" + dataset_name + "' has shape " + vstr(shape) + ", expected shape " + vstr(expected_shape));
-    }
+    this->_check_dataset_shape(dataset_name, dataset_id, expected_shape);
 
     int err = H5Dread(dataset_id, hdf5_type, H5S_ALL, H5S_ALL, H5P_DEFAULT, out);
     if (err < 0)
@@ -247,24 +233,6 @@ void hdf5_group::_read_dataset(const string &dataset_name, hid_t hdf5_type, void
 
     if (dataset_id >= 0)
 	H5Dclose(dataset_id);
-}
-
-
-void hdf5_group::read_string_dataset(const string &dataset_name, char *out, const vector<hsize_t> &expected_shape, ssize_t slen) const
-{
-    if (slen < 2)
-	throw runtime_error(filename + "/" + dataset_name + ": expected slen >= 2 in hdf5_group::read_string_dataset()");
-
-    hid_t memtype = H5Tcopy(H5T_C_S1);
-    if (memtype < 0)
-	throw runtime_error(filename + ": H5Tcopy(H5T_C_S1) failed?!");
-
-    herr_t status = H5Tset_size(memtype, slen);
-    if (status < 0)
-	throw runtime_error(filename + ": ");
-
-    memset(out, 0, prod(expected_shape) * slen);
-    this->_read_dataset(dataset_name, memtype, reinterpret_cast<void *> (out), expected_shape);
 }
 
 
@@ -292,7 +260,89 @@ void hdf5_group::_write_dataset(const string &dataset_name, hid_t hdf5_type, con
 	H5Sclose(space_id);
 }
 
-// Reference: https://www.hdfgroup.org/ftp/HDF5/examples/misc-examples/sample-programs/strings.c
+
+//
+// References: 
+//   https://www.hdfgroup.org/ftp/HDF5/examples/examples-by-api/hdf5-examples/1_8/C/H5T/h5ex_t_string.c
+//   https://www.hdfgroup.org/ftp/HDF5/examples/examples-by-api/hdf5-examples/1_8/C/H5T/h5ex_t_vlstring.c
+//
+void hdf5_group::read_string_dataset(const std::string &dataset_name, std::vector<std::string> &data, const std::vector<hsize_t> &expected_shape) const
+{
+    hid_t memtype = H5Tcopy(H5T_C_S1);
+    if (memtype < 0)
+	throw runtime_error(filename + ": H5Tcopy() failed?!");
+
+    hid_t dataset_id = H5Dopen1(this->group_id, dataset_name.c_str());
+    if (dataset_id < 0)
+	throw runtime_error(filename + ": dataset '" + dataset_name + "' not found");
+
+    this->_check_dataset_shape(dataset_name, dataset_id, expected_shape);    
+
+    hid_t space_id = H5Dget_space(dataset_id);
+    if (space_id < 0)
+	throw runtime_error(filename + ": H5Dget_space() failed on string-valued dataset '" + dataset_name + "'");
+
+    hid_t datatype_id = H5Dget_type(dataset_id);
+    if (datatype_id < 0)
+	throw runtime_error(filename + ": H5Dget_type() failed on string-valued dataset '" + dataset_name + "'");
+
+    htri_t is_variable = H5Tis_variable_str(datatype_id);
+    if (is_variable < 0)
+	throw runtime_error(filename + ": H5Tis_variable_str() failed on string-valued dataset '" + dataset_name + "'");
+
+    hsize_t nstrings = prod(expected_shape);
+    data = vector<string> (nstrings);
+    
+    if (is_variable) {
+	vector<char *> c_strings(nstrings, nullptr);
+    
+	herr_t status = H5Tset_size(memtype, H5T_VARIABLE);
+	if (status < 0)
+	    throw runtime_error(filename + ": H5Tset_size() failed?!");
+
+	status = H5Dread(dataset_id, memtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, &c_strings[0]);
+	if (status < 0)
+	    throw runtime_error(filename + ": couldn't read string-valued dataset '" + dataset_name + "'");
+
+	for (hsize_t i = 0; i < nstrings; i++)
+	    data[i] = std::string(c_strings[i]);
+	
+	H5Dvlen_reclaim(memtype, space_id, H5P_DEFAULT, &c_strings[0]);
+    }
+    else {
+	size_t size = H5Tget_size(datatype_id);
+	if (size == 0)
+	    throw runtime_error(filename + ": H5Tget_size() failed on string-valued dataset '" + dataset_name + "'");
+
+	herr_t status = H5Tset_size(memtype, size+1);
+	if (status < 0)
+	    throw runtime_error(filename + ": ");
+	
+	vector<char> buf(nstrings * (size+1), 0);
+	this->_read_dataset(dataset_name, memtype, reinterpret_cast<void *> (&buf[0]), expected_shape);
+
+	for (hsize_t i = 0; i < nstrings; i++)
+	    data[i] = std::string(&buf[i*(size+1)]);
+    }
+
+    if (memtype >= 0)
+	H5Tclose(memtype);
+    if (dataset_id >= 0)
+	H5Dclose(dataset_id);
+    if (space_id >= 0)
+	H5Sclose(space_id);
+    if (datatype_id >= 0)
+	H5Tclose(datatype_id);
+}
+
+
+//
+// References: 
+//   https://www.hdfgroup.org/ftp/HDF5/examples/examples-by-api/hdf5-examples/1_8/C/H5T/h5ex_t_string.c
+//   https://www.hdfgroup.org/ftp/HDF5/examples/examples-by-api/hdf5-examples/1_8/C/H5T/h5ex_t_vlstring.c
+//
+// FIXME should have a switch to write fixed-length strings.
+//
 void hdf5_group::write_string_dataset(const string &dataset_name, const vector<string> &data, const vector<hsize_t> &shape)
 {
     if (data.size() != prod(shape))

@@ -130,7 +130,7 @@ struct intensity_hdf5_ofile {
 			 double freq0, double freq1, double dt_sample, ssize_t ipos0=0,
 			 double time0=0.0, int bitshuffle=2, int nt_chunk=128);
 
-    ~intensity_hdf5_ofile() { }
+    ~intensity_hdf5_ofile();
 
     // The 'intensity' and 'weight' arrays have shape (nfreq, npol, nt_chunk)
     // Note that there is no write() method, the data is incrementally written, and flushed when the destructor is called.
@@ -179,9 +179,6 @@ struct hdf5_group : noncopyable {
 
     void get_attribute_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
     void get_dataset_shape(const std::string &attr_name, std::vector<hsize_t> &shape) const;
-    
-    // For a string-valued dataset, 'slen' is the string length, plus one byte for the null terminator
-    ssize_t get_dataset_slen(const std::string &dataset_name) const;
 
     // Read scalar attribute
     template<typename T> T read_attribute(const std::string &attr_name) const
@@ -209,11 +206,6 @@ struct hdf5_group : noncopyable {
     {
 	this->_read_dataset(dataset_name, hdf5_type<T>(), reinterpret_cast<void *> (out), expected_shape);
     }
-
-    // Read multidimensional string-valued dataset.
-    // The 'slen' arg should be the string length, plus one for the null terminator (as returned by hdf5_group::get_dataset_slen()).
-    // The 'out' arg should point to an array of length prod(expected_shape) * slen.
-    void read_string_dataset(const std::string &dataset_name, char *out, const std::vector<hsize_t> &expected_shape, ssize_t slen) const;
     
     // Write multidimensional dataset
     template<typename T> void write_dataset(const std::string &dataset_name, const T *data, const std::vector<hsize_t> &shape)
@@ -221,15 +213,16 @@ struct hdf5_group : noncopyable {
 	this->_write_dataset(dataset_name, hdf5_type<T>(), reinterpret_cast<const void *> (data), shape);
     }
 
-    // This is a convenient interface for writing a small string-valued dataset.
-    // FIXME at some point I'll make the string-valued dataset API more internally consistent.
+    // This interface is intended for small string-valued datasets.
     void write_string_dataset(const std::string &dataset_name, const std::vector<std::string> &data, const std::vector<hsize_t> &shape);
+    void read_string_dataset(const std::string &dataset_name, std::vector<std::string> &data, const std::vector<hsize_t> &expected_shape) const;
 
     // Helpers
     void _get_attribute_shape(const std::string &attr_name, hid_t attr_id, std::vector<hsize_t> &shape) const;
     void _read_attribute(const std::string &attr_name, hid_t hdf5_type, void *out, const std::vector<hsize_t> &expected_shape) const;
     void _write_attribute(const std::string &attr_name, hid_t hdf5_type, const void *data, const std::vector<hsize_t> &shape);
     void _get_dataset_shape(const std::string &dataset_name, hid_t dataset_id, std::vector<hsize_t> &shape) const;
+    void _check_dataset_shape(const std::string &dataset_name, hid_t dataset_id, const std::vector<hsize_t> &expected_shape) const;
     void _read_dataset(const std::string &dataset_name, hid_t hdf5_type, void *out, const std::vector<hsize_t> &expected_shape) const;
     void _write_dataset(const std::string &dataset_name, hid_t hdf5_type, const void *data, const std::vector<hsize_t> &shape);
 };

@@ -57,21 +57,13 @@ static void _init_polarizations(intensity_hdf5_file &f, hdf5_group &g)
 
     if (pol_shape.size() != 1)
 	throw runtime_error(f.filename + ": expected index_map.pol.ndim == 1");
+    if ((pol_shape[0] != 1) && (pol_shape[0] != 2))
+	throw runtime_error(f.filename + ": expected npol==1 or npol==2");
 
     f.npol = pol_shape[0];
-    
-    if ((f.npol != 1) && (f.npol != 2))
-	throw runtime_error(f.filename + ": expected npol==1 or npol==2");
-    
-    ssize_t slen = g.get_dataset_slen("pol");
-    vector<char> tmp(f.npol * slen, 0);
-    g.read_string_dataset("pol", &tmp[0], pol_shape, slen);
-
-    f.polarizations.resize(f.npol);
+    g.read_string_dataset("pol", f.polarizations, pol_shape);
 
     for (int ipol = 0; ipol < f.npol; ipol++) {
-	f.polarizations[ipol] = string(&tmp[0] + ipol*slen);
-
 	if ((f.polarizations[ipol] != "XX") && (f.polarizations[ipol] != "YY"))
 	    throw runtime_error(f.filename + ": expected polarization string to be either 'XX' or 'YY', got '" + f.polarizations[ipol] + "'");
 
