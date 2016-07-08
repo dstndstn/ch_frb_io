@@ -91,7 +91,7 @@ intensity_hdf5_ofile::~intensity_hdf5_ofile()
     else {
 	double frac_ungapped = double(curr_nt) / double(curr_ipos-initial_ipos);
 	double frac_unmasked = double(wsum) / double(wmax) / double(nfreq*npol*curr_nt);
-	ss << ": frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked << endl;
+	ss << ": frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked;
     }
     
     ss << "\n";
