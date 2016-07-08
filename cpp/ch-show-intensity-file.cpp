@@ -50,7 +50,7 @@ int main(int argc, char **argv)
 	     << "    time_hi = " << f.time_hi << endl
 	     << "    dt_sample = " << f.dt_sample << endl
 	     << "    frac_ungapped = " << f.frac_ungapped << "     # Fraction of time interval which is present in file (i.e. nt_file/nt_logical)\n"
-	     << "    frac_unmasked = " << f.frac_unmasked << "     # Fraction of _unmasked_ data which is assigned an order-one weight\n";
+	     << "    frac_unmasked = " << f.frac_unmasked << "     # This is sum(weights)/max(weights) with time gaps omitted\n";
 	
 	if (run_unit_tests)
 	    f.run_unit_tests();
