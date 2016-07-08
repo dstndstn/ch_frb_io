@@ -32,6 +32,7 @@ endif
 INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
 LIBFILES=libch_frb_io.so
 INSTALLED_BINARIES=ch-show-intensity-file
+INSTALLED_SCRIPTS=ch-plot-intensity-file
 TEST_BINARIES=test-intensity-hdf5-file
 
 LIBS=-lhdf5
@@ -43,12 +44,12 @@ install: $(INCFILES) $(LIBFILES) $(INSTALLED_BINARIES)
 	mkdir -p $(INCDIR) $(LIBDIR) $(BINDIR)
 	cp -f $(INCFILES) $(INCDIR)/
 	cp -f $(LIBFILES) $(LIBDIR)/
-	cp -f $(INSTALLED_BINARIES) $(BINDIR)/
+	cp -f $(INSTALLED_BINARIES) $(INSTALLED_SCRIPTS) $(BINDIR)/
 
 uninstall:
 	for f in $(INCFILES); do rm -f $(INCDIR)/$$f; done
 	for f in $(LIBFILES); do rm -f $(LIBDIR)/$$f; done
-	for f in $(BINFILES); do rm -f $(BINDIR)/$$f; done
+	for f in $(INSTALLED_BINARIES) $(INSTALLED_SCRIPTS); do rm -f $(BINDIR)/$$f; done
 
 clean:
 	rm -f *~ site/*~ *.o *.so $(TEST_BINARIES) $(INSTALLED_BINARIES)
