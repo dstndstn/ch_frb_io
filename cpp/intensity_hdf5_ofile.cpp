@@ -18,8 +18,11 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
       nfreq(nfreq_), 
       npol(pol.size()),
       curr_nt(0),
+      curr_time(time0),
       curr_ipos(ipos0),
-      curr_time(time0)
+      initial_ipos(ipos0),
+      wsum(0.0),
+      wmax(0.0)
 {
     // A lot of argument checking
 
@@ -78,7 +81,21 @@ intensity_hdf5_ofile::~intensity_hdf5_ofile()
     intensity_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
     weights_dataset = unique_ptr<hdf5_extendable_dataset<float> > ();
 
-    cerr << ("wrote " + filename + "\n");
+    stringstream ss;
+    ss << "wrote " << filename;
+
+    if (this->curr_nt == 0)
+	ss << " (empty file)\n";
+    else if (wmax <= 0.0)
+	ss << " (all-masked file)\n";
+    else {
+	double frac_ungapped = double(curr_nt) / double(curr_ipos-initial_ipos);
+	double frac_unmasked = double(wsum) / double(wmax) / double(nfreq*npol*curr_nt);
+	ss << ": frac_ungapped=" << frac_ungapped << ", frac_unmasked=" << frac_unmasked << endl;
+    }
+    
+    ss << "\n";
+    cerr << ss.str().c_str();
 }
 
 
@@ -91,6 +108,9 @@ void intensity_hdf5_ofile::append_chunk(ssize_t nt_chunk, float *intensity, floa
     if (!intensity || !weights)
 	throw runtime_error(filename + ": append_chunk() was called with null pointer");
 
+    if (this->curr_nt == 0)
+	this->initial_ipos = chunk_ipos;
+
     if (this->curr_nt > 0) {
 	if (chunk_ipos < this->curr_ipos)
 	    throw runtime_error(filename + ": append_chunk() was called with non-increasing or overlapping sample_ipos ranges");
@@ -102,6 +122,18 @@ void intensity_hdf5_ofile::append_chunk(ssize_t nt_chunk, float *intensity, floa
 	    throw runtime_error(filename + ": append_chunk() was called with wrong timestamp or too much timestamp drift");
     }
 
+    // Update wsum, wmax
+    double wmin = 0.0;
+    for (int i = 0; i < nfreq*npol*nt_chunk; i++) {
+	double w = weights[i];
+	wmin = min(wmin, w);
+	wmax = max(wmax, w);
+	wsum += w;
+    }
+
+    if (wmin < 0.0)
+	throw runtime_error(filename + ": attempt to write negative weights, this is currently treated as an error");
+    
     // Write data
 
     vector<double> times(nt_chunk);

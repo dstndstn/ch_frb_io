@@ -117,8 +117,13 @@ struct intensity_hdf5_ofile {
     int npol;
 
     ssize_t curr_nt;       // current size of file (in time samples, not including gaps)
-    ssize_t curr_ipos;     // keeps track of gaps
     double curr_time;      // time in seconds relative to arbitrary origin
+    ssize_t curr_ipos;     // keeps track of gaps
+    ssize_t initial_ipos;
+
+    // used internally to print summary info when file is written
+    double wsum;
+    double wmax;
 
     std::unique_ptr<hdf5_extendable_dataset<double> > time_dataset;
     std::unique_ptr<hdf5_extendable_dataset<float> > intensity_dataset;
