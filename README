@@ -44,26 +44,13 @@ INSTALLATION (C++)
   - cd cpp/
 
   - Create a file ./Makefile.local containing compiler flags, library locations, etc.
-    The details are described in the Makefile.  The example file
-       site/Makefile.local.chimpanzee
-    works for me on all CHIME machines, so you can probably just do
-       ln -s site/Makefile.local.chimpanzee Makefile.local
+    The details are described in the Makefile.  There are some examples in the site/
+    directory.  (You may be able to just symlink one of these examples to ./Makefile.local)
 
   - make all install
 
-  - To run a ~5-minute unit test, first copy the "reference" pathfinder data from 
-       microwave:/home/kmsmith/reference_pathfinder_data/compressed/
-
-    and do:    
-       # assumes bitshuffle is installed, otherwise use uncompressed data
-       ch-show-intensity-file -t ~/reference_pathfinder_data/compressed/*.h5
-
-    There's nothing interesting in the reference data (such as a pulsar), it's just
-    an arbitrary capture (it does have a significant packet drop rate, which should
-    help the generality of the unit tests).
-
-    Note that microwave is the Toronto chimefrb test node, email Keith Vanderlinde
-    if you need an account.
+  - If you want to run the unit test (warning: creates 100MB temp file in current directory):
+       ./test-intensity-hdf5-file
 
 
 INSTALLATION (PYTHON)
