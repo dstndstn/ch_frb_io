@@ -43,7 +43,7 @@ static void set_bitshuffle(const string &name, hid_t prop_id, int bitshuffle)
 	return;  // success
 
     if (bitshuffle == 3)
-	throw runtime_error(name + ": fatal: couldn't load bitshuffle plugin, and mandatory compression was specified");
+	throw runtime_error(name + ": Fatal: couldn't load bitshuffle plugin.  See README for instructions for compiling bitshuffle, and make sure $HDF5_PLUGIN_PATH is set");
     if (bitshuffle == 2)
 	cerr << (name + ": warning: couldn't load bitshuffle plugin, data will be written uncompressed");
 }
