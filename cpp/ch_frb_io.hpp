@@ -118,23 +118,46 @@ struct intensity_hdf5_ofile {
 
     ssize_t curr_nt;       // current size of file (in time samples, not including gaps)
     ssize_t curr_ipos;     // keeps track of gaps
-    double curr_time;     // time in seconds relative to arbitrary origin
+    double curr_time;      // time in seconds relative to arbitrary origin
 
     std::unique_ptr<hdf5_extendable_dataset<double> > time_dataset;
     std::unique_ptr<hdf5_extendable_dataset<float> > intensity_dataset;
     std::unique_ptr<hdf5_extendable_dataset<float> > weights_dataset;
 
-    // The freq0+freq1 constructor syntax supports either frequency channel ordering.
-    // E.g. for CHIME (where frequency channels are ordered highest to lowest), set freq0=800. freq1=400.
+    //
+    // The 'pol' argument is typically { "XX", "YY" }.  Note that pol.size() determines intensity_hdf5_file::npol,
+    // which in turn determines the expected shape of the 'intensity' and 'weights' arguments passed to append_chunk().
+    //
+    // The 'freq0_MHz' and 'freq1_MHz' args should be the edges of the band, ordered the same way as the channel
+    // indices.  For example in CHIME data, frequencies are ordered from highest to lowest, so we take freq0_MHz=800
+    // and freq1_MHz=400.
+    //
+    // The optional 'ipos0' and 'time0' args are:
+    //   ipos0 = index of first sample in file (in downsampled units, i.e. one sample is ~1.3 msec, not ~2.5 usec)
+    //   time0 = arrival time of first sample in file (in seconds).
+    //
+    // The meaning of the 'bitshuffle' arg is:
+    //   0 = no compression
+    //   1 = try to compress, but if plugin fails then just write uncompressed data instead
+    //   2 = try to compress, but if plugin fails then print a warning and write uncompressed data instead
+    //   3 = compression mandatory
+    //
     // The default nt_chunk=128 comes from ch_vdif_assembler chunk size, assuming downsampling by factor 512.
+    //
     intensity_hdf5_ofile(const std::string &filename, int nfreq, const std::vector<std::string> &pol,
 			 double freq0_MHz, double freq1_MHz, double dt_sample, ssize_t ipos0=0,
 			 double time0=0.0, int bitshuffle=2, int nt_chunk=128);
 
+    // Note that there is no close() member function.  The file is flushed to disk and closed when the
+    // intensity_hdf5_ofile destructor is called.
     ~intensity_hdf5_ofile();
-
-    // The 'intensity' and 'weight' arrays have shape (nfreq, npol, nt_chunk)
-    // Note that there is no write() method, the data is incrementally written, and flushed when the destructor is called.
+    
+    //
+    // Append a chunk of data, of length 'nt_chunk.
+    // The 'intensity' and 'weight' arrays have shape (nfreq, npol, nt_chunk).
+    // The mandatory 'chunk_ipos' arg is the index of the first sample in the chunk (in downsampled units).
+    // The optional 'chunk_t0' arg is the arrival time of the first sample in the chunk (if omitted, will be inferred from 'chunk_ipos').
+    //
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos, double chunk_t0);
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos);
 };

@@ -62,7 +62,7 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
     vector<hsize_t> pol_shape = { pol.size() };
     g_index_map.write_string_dataset("pol", pol, pol_shape);
     
-    // No bitshuffle compression
+    // The index_map.time dataset doesn't get bitshuffle compressed.
     vector<hsize_t> tchunk_shape = { 16384 };
     this->time_dataset = make_unique<hdf5_extendable_dataset<double> >(g_index_map, "time", tchunk_shape, 0);
 
