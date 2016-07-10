@@ -196,7 +196,7 @@ void test_lexical_cast()
     check_convert_throws<int>("0.1");
 
     check_convert_uint16_t("0", 0);
-    check_convert_uint16_t("0", 65535);
+    check_convert_uint16_t("65535", 65535);
     check_convert_throws<uint16_t> ("-1");
     check_convert_throws<uint16_t> ("65536");
 
