@@ -78,6 +78,21 @@ template<typename T> inline std::string vstr(const std::vector<T> &buf)
 }
 
 
+template<typename T>
+inline T *aligned_alloc(size_t nelts)
+{
+    if (nelts == 0)
+	return NULL;
+
+    // align to 64-byte cache lines
+    void *p = NULL;
+    if (posix_memalign(&p, 64, nelts * sizeof(T)) != 0)
+	throw std::runtime_error("couldn't allocate memory");
+
+    memset(p, 0, nelts * sizeof(T));
+    return reinterpret_cast<T *> (p);
+}
+
 template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args&& ...args)
 {
