@@ -35,8 +35,12 @@ INSTALLED_BINARIES=ch-show-intensity-file
 INSTALLED_SCRIPTS=ch-plot-intensity-file
 TEST_BINARIES=test-intensity-hdf5-file
 
-LIBS=-lhdf5
-OFILES=hdf5.o intensity_hdf5_file.o intensity_hdf5_ofile.o
+LIBS = -lhdf5
+
+OFILES = hdf5.o \
+	intensity_hdf5_file.o \
+	intensity_hdf5_ofile.o \
+	lexical_cast.o
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 

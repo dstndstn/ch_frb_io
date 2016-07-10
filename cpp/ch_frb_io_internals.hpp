@@ -77,6 +77,11 @@ template<typename T> inline std::string vstr(const std::vector<T> &buf)
     return vstr(&buf[0], buf.size());
 }
 
+
+// Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
+template<typename T> extern T lexical_cast(const std::string &x);
+
+
 template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args&& ...args)
 {
