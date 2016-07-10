@@ -72,6 +72,17 @@ template<> int lexical_cast<int> (const string &x)
 }
 
 
+template<> uint16_t lexical_cast<uint16_t> (const string &x)
+{
+    long ret = lexical_cast<long> (x);
+    
+    if ((ret < 0) || (ret > 65535))
+	throw runtime_error(string("lexical_cast<uint16_t> failed: arg=\"" ) + x + "\"");
+
+    return ret;
+}
+
+
 template<> double lexical_cast<double> (const string &x)
 { 
     const char *ptr = x.c_str();
@@ -135,6 +146,25 @@ static void check_convert_double(const string &x, double y)
 }
 
 
+static void check_convert_uint16_t(const string &x, uint16_t y)
+{
+    uint16_t ret;
+
+    try {
+	ret = lexical_cast<uint16_t> (x);
+    }
+    catch (...) {
+	cerr << "test_lexical_cast(): threw unexpected exception\n";
+	exit(1);
+    }
+
+    if (ret != y) {
+	cerr << "test_lexical_cast(): didn't correctly convert\n";
+	exit(1);
+    }
+}
+
+
 template<typename T> static void check_convert_throws(const string &x)
 {
     try {
@@ -164,6 +194,11 @@ void test_lexical_cast()
     check_convert_throws<int>("1234abc");
     check_convert_throws<int>("1234 abc");
     check_convert_throws<int>("0.1");
+
+    check_convert_uint16_t("0", 0);
+    check_convert_uint16_t("0", 65535);
+    check_convert_throws<uint16_t> ("-1");
+    check_convert_throws<uint16_t> ("65536");
 
     check_convert_double("1.23", 1.23);
     check_convert_double("-1.23e-5", -1.23e-5);
