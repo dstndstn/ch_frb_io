@@ -13,6 +13,11 @@ namespace ch_frb_io {
 #endif
 
 
+// -------------------------------------------------------------------------------------------------
+//
+// chunk_exchanger helper class
+
+
 struct chunk_exchanger {
     // Compile-time constants
     static constexpr int capacity = 4;
@@ -24,6 +29,7 @@ struct chunk_exchanger {
     const int nbytes_per_chunk;
     const double throughput_target;
 
+    // This socket is connected to the destination IP address and UDP port
     int sockfd;
 
     pthread_mutex_t mutex;
@@ -246,6 +252,46 @@ void chunk_exchanger::producer_end_stream()
     pthread_mutex_lock(&mutex);
     endflag = true;
     pthread_mutex_unlock(&mutex);    
+}
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// Network write thread
+//
+// FIXME implement throughput_target
+
+
+static void *network_thread_main(void *opaque_arg)
+{
+    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr
+    shared_ptr<chunk_exchanger> *arg = (shared_ptr<chunk_exchanger> *) opaque_arg;
+    shared_ptr<chunk_exchanger> exchanger = *arg;   // 'exchanger' is safe to use below
+    delete arg;
+    
+    const int sockfd = exchanger->sockfd;
+    const int npackets_per_chunk = exchanger->npackets_per_chunk;
+    const int nbytes_per_packet = exchanger->nbytes_per_packet;
+    const double throughput_target = exchanger->throughput_target;
+
+    const uint8_t *chunk = nullptr;
+    
+    for (;;) {
+	chunk = exchanger->consumer_get_chunk(chunk);
+	if (!chunk)
+	    return NULL;
+       
+	// FIXME: sendmmsg() may improve performance here
+	for (int ipacket = 0; ipacket < npackets_per_chunk; ipacket++) {
+	    const uint8_t *packet = chunk + ipacket * nbytes_per_packet;
+	    ssize_t n = send(sockfd, packet, nbytes_per_packet, 0);
+
+	    if (n < 0)
+		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed:") + strerror(errno));
+	    if (n != nbytes_per_packet)
+		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
+	}
+    }
 }
 
 
