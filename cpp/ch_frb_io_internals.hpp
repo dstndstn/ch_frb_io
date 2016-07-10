@@ -78,15 +78,17 @@ template<typename T> inline std::string vstr(const std::vector<T> &buf)
 }
 
 
-// Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
-template<typename T> extern T lexical_cast(const std::string &x);
-
-
 template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args&& ...args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
+
+// Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
+template<typename T> extern T lexical_cast(const std::string &x);
+
+// Unit test
+extern void test_lexical_cast();
 
 
 }  // namespace ch_frb_io
