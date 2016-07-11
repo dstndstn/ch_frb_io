@@ -15,8 +15,10 @@ namespace ch_frb_io {
 }; // pacify emacs c-mode
 #endif
 
-// declared in ch_frb_io_internals.hpp
 template<typename T> struct hdf5_extendable_dataset;
+
+// helper class defined in intensity_network_ostream.cpp
+struct chunk_exchanger;
 
 
 struct noncopyable
@@ -27,8 +29,14 @@ struct noncopyable
 };
 
 
-// Note that there are two "intensity file" classes: intensity_hdf5_file 
-// for reading, and intensity_hdf5_ofile for wrtiing.
+// -------------------------------------------------------------------------------------------------
+//
+// HDF5 file I/O
+//
+// Note that there are two classes here: one for reading (intensity_hdf5_file),
+// and one for writing (intensity_hdf5_ofile).
+
+
 struct intensity_hdf5_file : noncopyable {
     std::string filename;
     
@@ -108,8 +116,6 @@ struct intensity_hdf5_file : noncopyable {
 };
 
 
-// Note that there are two "intensity file" classes: intensity_hdf5_file 
-// for reading, and intensity_hdf5_ofile for wrtiing.
 struct intensity_hdf5_ofile {
     std::string filename;
     double dt_sample;
@@ -165,6 +171,56 @@ struct intensity_hdf5_ofile {
     //
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos, double chunk_t0);
     void append_chunk(ssize_t nt_chunk, float *intensity, float *weights, ssize_t chunk_ipos);
+};
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// Network I/O
+
+
+//
+// The ostream writes data in "chunks", which are packetized into one or more packets.
+
+// The constructor spawns a network thread.
+//
+// FIXME implement throughput target, reordering...
+//  
+struct intensity_network_ostream : noncopyable {
+    const int nbeam;
+    const int nupfreq;
+    const int nfreq_per_chunk;
+    const int nfreq_per_packet;
+    const int nt_per_chunk;
+    const int nt_per_packet;
+    const int fpga_counts_per_sample;
+    const float wt_cutoff;
+
+    const std::vector<uint16_t> ibeam;
+    const std::vector<uint16_t> ifreq_chunk;
+
+    pthread_t network_thread;
+    bool network_thread_valid = false;
+
+    // shared data structure for communicating with network thread
+    std::shared_ptr<chunk_exchanger> exchanger;
+    
+    // buffers for packet encoding
+    std::vector<float> tmp_intensity_vec;
+    std::vector<float> tmp_mask_vec;
+    uint8_t *packet_buf = nullptr;
+    int nbytes_per_packet = 0;
+    
+    intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
+			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
+			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
+			      float wt_cutoff);
+
+    ~intensity_network_ostream();
+
+    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
+    
+    void end_stream();
 };
 
 

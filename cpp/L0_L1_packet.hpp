@@ -13,9 +13,8 @@
 // For full CHIME, we expect to use (nbeam, nfreq, nupfreq, ntsamp) = (8, 4, 16, 16)
 // which gives a 304-byte header and an 8192-byte data segment.
 //
-// For the pathfinder with no 16K-upchannelization, I'm currently using 
-// (nbeam, nfreq, nupfreq, ntsamp) = (1, 32, 1, 256) which gives a 346-byte
-// header and an 8192-byte data segment.
+// For the pathfinder, I'm currently using  (nbeam, nfreq, nupfreq, ntsamp) = (1, 32, 1, 256) 
+// which gives a 346-byte header and an 8192-byte data segment.
 //
 
 struct L0_L1_header {
