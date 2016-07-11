@@ -536,7 +536,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 
     // Outer loop over packets
     for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
-	for (int it_outer = 0; it_outer < nt_outer; if_outer++) {
+	for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
 	    int ipacket = if_outer * nt_outer + it_outer;
 
 	    // Packet offset in 'intensity' and 'weights' arrays
