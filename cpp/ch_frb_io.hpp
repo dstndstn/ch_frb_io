@@ -176,12 +176,12 @@ struct intensity_hdf5_ofile {
 
 // -------------------------------------------------------------------------------------------------
 //
-// Network I/O
+// Network ostream
 
 
 //
 // The ostream writes data in "chunks", which are packetized into one or more packets.
-
+//
 // The constructor spawns a network thread.
 //
 // FIXME implement throughput target, reordering...
@@ -222,6 +222,15 @@ struct intensity_network_ostream : noncopyable {
     
     void end_stream();
 };
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// The network_istream path is more complicated!
+
+
+// Placeholder interface for now
+void spawn_network_istream(int udp_port);
 
 
 // -------------------------------------------------------------------------------------------------

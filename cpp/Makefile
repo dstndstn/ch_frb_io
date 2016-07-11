@@ -40,6 +40,7 @@ LIBS = -lhdf5
 OFILES = hdf5.o \
 	intensity_hdf5_file.o \
 	intensity_hdf5_ofile.o \
+	intensity_network_stream.o \
 	intensity_network_ostream.o \
 	lexical_cast.o
 
