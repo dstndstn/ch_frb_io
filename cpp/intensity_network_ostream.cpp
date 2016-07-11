@@ -257,6 +257,7 @@ void chunk_exchanger::producer_end_stream()
 {
     pthread_mutex_lock(&mutex);
     endflag = true;
+    pthread_cond_broadcast(&cond_chunk_produced);
     pthread_mutex_unlock(&mutex);    
 }
 
