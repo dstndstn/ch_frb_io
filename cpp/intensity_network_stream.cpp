@@ -24,7 +24,8 @@ struct network_thread_context {
 
 static void *network_thread_main(void *opaque_arg)
 {
-    static const int socket_bufsize = 2 << 26;   // 64 MB
+    // FIXME is this a good choice?  I don't see anything wrong with using a larger value, but 2MB is the max allowed on my osx laptop!
+    static const int socket_bufsize = 2 << 21;   // 2 MB
 
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_thread_main()");
@@ -51,7 +52,7 @@ static void *network_thread_main(void *opaque_arg)
     int err = ::bind(sock_fd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
-	
+
     err = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt() failed: ") + strerror(errno));
