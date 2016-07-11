@@ -208,22 +208,22 @@ const uint8_t *chunk_exchanger::consumer_get_chunk(const uint8_t *prev_chunk)
 // static member function
 int chunk_exchanger::make_socket_from_dstname(const string &dstname)
 {
-    string hostname;
-    uint16_t port = 0;
-
     // Parse dstname: expect string of the form HOSTNAME:PORT
 
-    try {
-	size_t i = dstname.find(":");
+    size_t i = dstname.find(":");
 
-	if (i == std::string::npos)
-	    throw runtime_error("ch_frb_io: couldn't parse dstname='" + dstname + "'");
+    if (i == std::string::npos)
+	throw runtime_error("ch_frb_io: expected dstname='" + dstname + "' to be a colon-separated HOSTNAME:PORT string");
 	
-	hostname = dstname.substr(0,i);
-	port = lexical_cast<uint16_t> (dstname.substr(i+1));
+    string hostname = dstname.substr(0,i);
+    string portstr = dstname.substr(i+1);
+    uint16_t port = 0;
+
+    try {
+	port = lexical_cast<uint16_t> (portstr);
     }
     catch (...) {
-	throw runtime_error("ch_frb_io: couldn't parse dstname='" + dstname + "'");
+	throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
     }
 
     struct sockaddr_in saddr;
@@ -231,11 +231,12 @@ int chunk_exchanger::make_socket_from_dstname(const string &dstname)
     saddr.sin_family = AF_INET;
     saddr.sin_port = htons(port);
     
+    // FIXME need getaddrinfo() here
     int err = inet_pton(AF_INET, hostname.c_str(), &saddr.sin_addr);
     if (err == 0)
-	throw runtime_error("ch_frb_io: couldn't parse dstname='" + dstname + "'");
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: general parse error");
     if (err < 0)
-	throw runtime_error("ch_frb_io: couldn't parse dstname='" + dstname + "': " + strerror(errno));
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: " + strerror(errno) + "general parse error");
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
