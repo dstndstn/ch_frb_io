@@ -275,19 +275,31 @@ struct intensity_beam_assembler : noncopyable {
 struct intensity_packet_stream : noncopyable {
     static constexpr int max_beams = 16;
 
+    // Not protected by lock, only accesesed by network thread
     int nassemblers = 0;
     L0L1_packet_list packet_lists[max_beams];         // first 'nassemblers' entries in the array are initialized
     std::vector<std::shared_ptr<intensity_beam_assembler> > beam_assemblers;   // vector has length 'nassemblers'
 
+    // Not protected by lock, only accessed by "master" thread
+    // Note: it would be easy to generalize to a case with multiple network threads.
+    bool network_thread_valid = false;
+    pthread_t network_thread;
+
     intensity_packet_stream() { }
     ~intensity_packet_stream();
 
+    // Called by "master" thread
     void add_beam(const std::shared_ptr<intensity_beam_assembler> &b);
-    bool process_packet(int nbytes, const uint8_t *in);
+
+    // Called by network thread.
+    bool process_packet(int nbytes, const uint8_t *in);   // returns false if end of stream
+    void finalize();                                      // flushes all packet lists to assemblers
 };
 
 
+// Called from "master" context
 extern void spawn_network_thread(int udp_port, const std::shared_ptr<intensity_packet_stream> &stream);
+extern void wait_for_end_of_stream(const std::shared_ptr<intensity_packet_stream> &stream);
 
 
 // -------------------------------------------------------------------------------------------------

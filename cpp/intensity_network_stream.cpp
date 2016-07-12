@@ -1,3 +1,5 @@
+// General FIXME: currently, we silently drop bad packets
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -119,6 +121,8 @@ intensity_packet_stream::~intensity_packet_stream()
 
 void intensity_packet_stream::add_beam(const shared_ptr<intensity_beam_assembler> &b)
 {
+    if (network_thread_valid)
+	throw runtime_error("ch_frb_io: add_beam() called on packet stream with network thread already running");
     if (nassemblers >= max_beams)
 	throw runtime_error("ch_frb_io: intensity_packet_stream::add_beam(): max number of beams has already been reached");
 
@@ -138,12 +142,12 @@ bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *i
     if (_unlikely(nassemblers == 0))
 	throw runtime_error("ch_frb_io: intensity_packet_stream::process_packet() called on stream with no assemblers");
 
-    if (_unlikely(packet_nbytes < 32))
-	return false;
-    
+    if (_unlikely(packet_nbytes < 24))
+	return true;  // silently drop bad packets
+
     uint32_t protocol_version = *((uint32_t *) in);
     if (_unlikely(protocol_version != 1))
-	return false;
+	return true;  // silently drop bad packets
 
     int data_nbytes = *((int16_t *) (in+4));
     int packet_nbeam = *((uint16_t *) (in+16));
@@ -151,14 +155,17 @@ bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *i
     int packet_nupfreq = *((uint16_t *) (in+20));
     int packet_ntsamp = *((uint16_t *) (in+22));
 
+    if (packet_nbytes == 24)
+	return false;   // this is the only path which returns false (indicating end of stream)
+
     // The following way of writing the comparisons (using uint64_t) guarantees no overflow
     uint64_t n4 = uint64_t(packet_nbeam) * uint64_t(packet_nfreq) * uint64_t(packet_nupfreq) * uint64_t(packet_ntsamp);
     if (_unlikely(!n4 || (n4 > 10000)))
-	return false;
+	return true;    // silently drop bad packets
     if (_unlikely(data_nbytes != int(n4)))
-	return false;
+	return true;    // silently drop bad packets
     if (_unlikely(packet_nbytes != packet_size(packet_nbeam, packet_nfreq, packet_nupfreq, packet_ntsamp)))
-	return false;
+	return true;    // silently drop bad packets
 
     const uint16_t *packet_beam_ids = (const uint16_t *) (in + 24);
     const uint8_t *packet_freq_ids = in + 24 + 2*packet_nbeam;
@@ -171,7 +178,7 @@ bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *i
     for (int ibeam = 0; ibeam < packet_nbeam; ibeam++) {
 	for (int jbeam = 0; jbeam < ibeam; jbeam++)
 	    if (_unlikely(packet_beam_ids[ibeam] == packet_beam_ids[jbeam]))
-		return false;   // duplicate beam_ids in packet
+		return true;   // duplicate beam_ids in packet, silently drop
 	
 	// Find assembler matching beam ID
 
@@ -180,7 +187,7 @@ bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *i
 
 	for (;;) {
 	    if (assembler_ix >= nassemblers)
-		return false;   // bad beam_id in packet
+		return true;   // bad beam_id in packet, silently drop
 	    if (packet_lists[assembler_ix].beam_id == beam_id)
 		break;          // found assembler
 	    assembler_ix++;
@@ -217,6 +224,19 @@ bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *i
     }
 
     return true;
+}
+
+
+void intensity_packet_stream::finalize()
+{
+    for (int i = 0; i < nassemblers; i++) {
+	if (packet_lists[i].npackets > 0)
+	    beam_assemblers[i]->send_packet_list(packet_lists[i]);
+	packet_lists[i].destroy();
+    }
+
+    this->beam_assemblers.clear();
+    this->nassemblers = 0;
 }
 
 
@@ -278,24 +298,30 @@ static void *network_thread_main(void *opaque_arg)
 
     vector<uint8_t> packet_buf(max_packet_size);
 
-    cerr << "waiting for packets...\n";
+    cerr << ("ch_frb_io: network thread listening for packets on port " + to_string(context->udp_port) + "\n");
     
     for (;;) {
 	ssize_t bytes_read = read(sock_fd, (char *) &packet_buf[0], max_packet_size);
 
-	if (bytes_read >= max_packet_size) {
-	    cerr << "!!! bad packet !!!\n";
-	    continue;
-	}
+	if (bytes_read >= max_packet_size)
+	    continue;  // silently drop bad packet
 
-	if (!stream->process_packet(bytes_read, &packet_buf[0]))
-	    cerr << "!!! bad packet !!!\n";
+	bool end_of_stream = !stream->process_packet(bytes_read, &packet_buf[0]);
+	if (end_of_stream)
+	    break;
     }
+
+    cerr << "ch_frb_io: end of stream, network thread exiting\n";
+
+    stream->finalize();
+    return NULL;
 }
 
 
 void spawn_network_thread(int udp_port, const shared_ptr<intensity_packet_stream> &stream)
 {
+    if (stream->network_thread_valid)
+	throw runtime_error("ch_frb_io: spawn_network_thread() called on packet stream with network thread already running");
     if ((udp_port <= 0) || (udp_port >= 65536))
 	throw runtime_error("ch_frb_io: spawn_network_thread(): bad udp port " + to_string(udp_port));
 
@@ -303,14 +329,26 @@ void spawn_network_thread(int udp_port, const shared_ptr<intensity_packet_stream
 
     // To hand off the context to the network thread, we use a bare pointer to a shared pointer
     shared_ptr<network_thread_context> *p = new shared_ptr<network_thread_context> (context);
-    pthread_t network_thread;
 
-    int err = pthread_create(&network_thread, NULL, network_thread_main, p);
+    int err = pthread_create(&stream->network_thread, NULL, network_thread_main, p);
     
     if (err) {
 	delete p;   // thread didn't start, caller is responsible for deleting p
 	throw runtime_error("ch_frb_io: spawn_network_thread(): pthread_create failed");
     }
+
+    // network thread started and is responsible for deleting p
+    stream->network_thread_valid = true;
+}
+
+
+void wait_for_end_of_stream(const shared_ptr<intensity_packet_stream> &stream)
+{
+    if (!stream->network_thread_valid)
+	throw runtime_error("ch_frb_io: wait_for_end_of_stream() called on packet stream with no network thread");
+
+    pthread_join(stream->network_thread, NULL);
+    stream->network_thread_valid = false;
 }
 
 
