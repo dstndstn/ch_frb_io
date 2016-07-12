@@ -311,23 +311,29 @@ static void *network_thread_main(void *opaque_arg)
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
     // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
 
-    cerr << "ch_frb_io: ending end-of-stream packets...";
+    cerr << "ch_frb_io: ending end-of-stream packets\n";
 
-    for (int i = 0; i < 10; i++) {
+    for (int ipacket = 0; ipacket < 10; ipacket++) {
 	vector<uint8_t> packet(24, uint8_t(0));
 	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
-	
-	ssize_t n = send(sockfd, &packet[0], packet.size(), 0);
-	
-	if (n < 0)
-	    throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed:") + strerror(errno));
-	if (n != packet.size())
-	    throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
 
-	usleep(100000);  // 10^5 microseconds
+	ssize_t n = send(sockfd, &packet[0], packet.size(), 0);
+
+	if (n == (ssize_t)packet.size()) {
+	    usleep(100000);  // 10^5 microseconds
+	    continue;
+	}
+
+	// Emit warning if we fail on the first packet.  No warning emitted if subsequent packets
+	// fail, since a likely explanation is that we're running over the loopback interface and
+	// the receiving socket has been closed.
+
+	if (ipacket == 0)
+	    cerr << "warning: end-of-stream packets failed to send\n";
+
+	break;
     }
 
-    cerr << "done\n";
     return NULL;
 }
 
