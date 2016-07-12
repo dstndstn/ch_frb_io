@@ -229,12 +229,60 @@ struct intensity_network_ostream : noncopyable {
 // The packet input stream case is more complicated!
 
 
+//
+// Helper class which exchanges data between intensity_packet_stream and intensity_beam_assembler.
+//
+// Warning: this is a "dumb" struct with no C++ constructor/destructor/copy/move ops!
+// Caller is responsible for managing ownership and making sure initialize() gets paired with destroy()
+//
+struct L0L1_packet_list : noncopyable {
+    static constexpr int max_packets = 512;
+    static constexpr int max_bytes = 1024 * 1024;
+    static constexpr int max_packet_size = 16384;
+
+    int beam_id;
+    int npackets;
+    int nbytes;
+
+    // capacity=max_bytes, size=nbytes
+    uint8_t *data_buf;
+
+    // capacity=(max_packets+1), size=(npackets+1), element at index 'npackets' is equal to 'nbytes'
+    int *packet_offsets;
+    
+    void initialize(int beam_id);
+    void destroy();
+
+    // assumes caller has already appended packet data at (data_buf + nbytes), returns true if buffer is full
+    bool add_packet(int nbytes);
+
+    // clears packet list which has already been allocated
+    void clear();
+};
+
+
+struct intensity_beam_assembler : noncopyable {
+    int beam_id;
+
+    // Note: overwrites the packet list with new pointers and npackets=nbytes=0
+    void send_packet_list(L0L1_packet_list &packet_list);
+
+    intensity_beam_assembler(int beam_id);
+    ~intensity_beam_assembler() { }
+};
+
+
 struct intensity_packet_stream : noncopyable {
-    int nbeams = 0;
+    static constexpr int max_beams = 16;
+
+    int nassemblers = 0;
+    L0L1_packet_list packet_lists[max_beams];         // first 'nassemblers' entries in the array are initialized
+    std::vector<std::shared_ptr<intensity_beam_assembler> > beam_assemblers;   // vector has length 'nassemblers'
 
     intensity_packet_stream() { }
-    ~intensity_packet_stream() { }
+    ~intensity_packet_stream();
 
+    void add_beam(const std::shared_ptr<intensity_beam_assembler> &b);
     bool process_packet(int nbytes, const uint8_t *in);
 };
 

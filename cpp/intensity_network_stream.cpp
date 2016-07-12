@@ -22,34 +22,200 @@ inline int packet_size(int nbeam, int nfreq, int nupfreq, int ntsamp)
 
 // -------------------------------------------------------------------------------------------------
 //
+// L0L1_packet_list
+
+
+void L0L1_packet_list::initialize(int beam_id_)
+{
+    if ((beam_id_ < 0) || (beam_id_ >= 65536))
+	throw runtime_error("ch_frb_io: L0L1_packet_list::initialize(): invalid beam_id");
+
+    this->beam_id = beam_id_;
+    this->npackets = 0;
+    this->nbytes = 0;
+    this->data_buf = aligned_alloc<uint8_t> (max_bytes);
+    this->packet_offsets = aligned_alloc<int> (max_packets+1);
+    this->packet_offsets[0] = 0;
+}
+
+
+void L0L1_packet_list::destroy()
+{
+    free(data_buf);
+    free(packet_offsets);
+
+    this->npackets = this->nbytes = 0;
+    this->packet_offsets = nullptr;
+    this->data_buf = nullptr;
+}
+
+
+bool L0L1_packet_list::add_packet(int packet_nbytes)
+{
+    // decided to pay a few cpu cycles for an extra check here...
+    bool internal_error = ((packet_nbytes <= 0) || 
+			   (packet_nbytes > max_packet_size) ||
+			   (this->npackets >= max_packets) || 
+			   (this->nbytes >= (max_bytes - max_packet_size)));
+
+    if (_unlikely(internal_error))
+	throw runtime_error("ch_frb_io: internal error in L0L1_packet_list::add_packet()");
+
+    this->npackets++;
+    this->nbytes += packet_nbytes;
+    this->packet_offsets[npackets] = nbytes;
+
+    bool is_full = (npackets >= max_packets) || (nbytes >= (max_bytes - max_packet_size));
+    return is_full;
+}
+
+
+void L0L1_packet_list::clear()
+{
+    this->npackets = 0;
+    this->nbytes = 0;
+    this->packet_offsets[0] = 0;
+}
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// intensity_beam_assembler
+
+
+intensity_beam_assembler::intensity_beam_assembler(int beam_id_) :
+    beam_id(beam_id_)
+{ 
+    if ((beam_id < 0) || (beam_id >= 65536))
+	throw runtime_error("ch_frb_io: intensity_beam_assembler constructor: invalid beam_id");
+}
+
+
+void intensity_beam_assembler::send_packet_list(L0L1_packet_list &packet_list)
+{
+    if (packet_list.beam_id != this->beam_id)
+	throw runtime_error("ch_frb_io: intensity_beam_assembler::send_packet_list(): beam_id mismatch");
+
+    // placeholder
+    packet_list.npackets = 0;
+    packet_list.nbytes = 0;
+}
+
+
+// -------------------------------------------------------------------------------------------------
+//
 // intensity_packet_stream
+
+
+intensity_packet_stream::~intensity_packet_stream()
+{
+    for (int i = 0; i < nassemblers; i++)
+	this->packet_lists[i].destroy();
+
+    this->beam_assemblers.clear();
+    this->nassemblers = 0;
+}
+
+
+void intensity_packet_stream::add_beam(const shared_ptr<intensity_beam_assembler> &b)
+{
+    if (nassemblers >= max_beams)
+	throw runtime_error("ch_frb_io: intensity_packet_stream::add_beam(): max number of beams has already been reached");
+
+    int beam_id = b->beam_id;
+    for (int i = 0; i < nassemblers; i++)
+	if (packet_lists[i].beam_id == beam_id)
+	    throw runtime_error("ch_frb_io: intensity_packet_streram::add_beam(): duplicate beam_id");
+    
+    this->packet_lists[nassemblers].initialize(beam_id);
+    this->beam_assemblers.push_back(b);
+    this->nassemblers++;
+}
 
 
 bool intensity_packet_stream::process_packet(int packet_nbytes, const uint8_t *in)
 {
-    if (packet_nbytes < 32)
+    if (_unlikely(nassemblers == 0))
+	throw runtime_error("ch_frb_io: intensity_packet_stream::process_packet() called on stream with no assemblers");
+
+    if (_unlikely(packet_nbytes < 32))
 	return false;
     
     uint32_t protocol_version = *((uint32_t *) in);
-    if (protocol_version != 1)
+    if (_unlikely(protocol_version != 1))
 	return false;
 
     int data_nbytes = *((int16_t *) (in+4));
-    int nbeam = *((uint16_t *) (in+16));
-    int nfreq = *((uint16_t *) (in+18));
-    int nupfreq = *((uint16_t *) (in+20));
-    int ntsamp = *((uint16_t *) (in+22));
+    int packet_nbeam = *((uint16_t *) (in+16));
+    int packet_nfreq = *((uint16_t *) (in+18));
+    int packet_nupfreq = *((uint16_t *) (in+20));
+    int packet_ntsamp = *((uint16_t *) (in+22));
 
     // The following way of writing the comparisons (using uint64_t) guarantees no overflow
-    uint64_t n4 = uint64_t(nbeam) * uint64_t(nfreq) * uint64_t(nupfreq) * uint64_t(ntsamp);
-    if (!n4 || (n4 > 10000))
+    uint64_t n4 = uint64_t(packet_nbeam) * uint64_t(packet_nfreq) * uint64_t(packet_nupfreq) * uint64_t(packet_ntsamp);
+    if (_unlikely(!n4 || (n4 > 10000)))
 	return false;
-    if (data_nbytes != int(n4))
+    if (_unlikely(data_nbytes != int(n4)))
 	return false;
-    if (packet_nbytes != packet_size(nbeam,nfreq,nupfreq,ntsamp))
+    if (_unlikely(packet_nbytes != packet_size(packet_nbeam, packet_nfreq, packet_nupfreq, packet_ntsamp)))
 	return false;
 
-    cerr << "!!! good packet: nbeam=" << nbeam << ", nfreq=" << nfreq << ", nupfreq=" << nupfreq << ", ntsamp=" << ntsamp << " !!!\n";
+    const uint16_t *packet_beam_ids = (const uint16_t *) (in + 24);
+    const uint8_t *packet_freq_ids = in + 24 + 2*packet_nbeam;
+    const uint8_t *packet_scales = in + 24 + 2*packet_nbeam + 2*packet_nfreq;
+    const uint8_t *packet_offsets = in + 24 + 2*packet_nbeam + 2*packet_nfreq + 4*packet_nbeam*packet_nfreq;
+    const uint8_t *packet_data = in + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
+    
+    // Loop over beams in the packet, matching to beam_assembler objects.
+
+    for (int ibeam = 0; ibeam < packet_nbeam; ibeam++) {
+	for (int jbeam = 0; jbeam < ibeam; jbeam++)
+	    if (_unlikely(packet_beam_ids[ibeam] == packet_beam_ids[jbeam]))
+		return false;   // duplicate beam_ids in packet
+	
+	// Find assembler matching beam ID
+
+	int beam_id = packet_beam_ids[ibeam];
+	int assembler_ix = 0;
+
+	for (;;) {
+	    if (assembler_ix >= nassemblers)
+		return false;   // bad beam_id in packet
+	    if (packet_lists[assembler_ix].beam_id == beam_id)
+		break;          // found assembler
+	    assembler_ix++;
+	}
+	
+	// Make subpacket
+	
+	uint8_t *subpacket = packet_lists[assembler_ix].data_buf + packet_lists[assembler_ix].nbytes;
+	uint8_t *subpacket_freq_ids = subpacket + 26;
+	uint8_t *subpacket_scales = subpacket + 26 + 2*packet_nfreq;
+	uint8_t *subpacket_offsets = subpacket + 26 + 6*packet_nfreq;
+	uint8_t *subpacket_data = subpacket + 26 + 10*packet_nfreq;
+
+	int subpacket_data_size = packet_nfreq * packet_nupfreq * packet_ntsamp;
+	int subpacket_total_size = subpacket_data_size + 26 + 10*packet_nfreq;
+
+	memcpy(subpacket, in, 24);                                // copy header and overwrite a few fields...
+	*((int16_t *) (subpacket+4)) = subpacket_data_size;       // overwrite 'data_nbytes' field
+	*((uint16_t *) (subpacket+16)) = uint16_t(1);             // overwrite 'nbeams' field
+	*((uint16_t *) (subpacket+24)) = packet_beam_ids[ibeam];  // beam_id field
+
+	memcpy(subpacket_freq_ids, packet_freq_ids, 2*packet_nfreq);
+	memcpy(subpacket_scales, packet_scales + 4*ibeam*packet_nfreq, 4*packet_nfreq);
+	memcpy(subpacket_offsets, packet_offsets + 4*ibeam*packet_nfreq, 4*packet_nfreq);
+	memcpy(subpacket_data, packet_data + ibeam*subpacket_data_size, subpacket_data_size);
+
+	// Record the subpacket in the packet_list
+	bool packet_list_is_full = packet_lists[assembler_ix].add_packet(subpacket_total_size);
+	
+	// If packet_list is full, hand it off to assembler thread (nonblocking).
+	// When send_packet_list() returns, the packet list will be empty and ready to receive new packets.
+	if (packet_list_is_full)
+	    beam_assemblers[assembler_ix]->send_packet_list(packet_lists[assembler_ix]);
+    }
+
     return true;
 }
 

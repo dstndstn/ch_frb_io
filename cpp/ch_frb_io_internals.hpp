@@ -15,6 +15,12 @@
 #include <stdexcept>
 #include "ch_frb_io.hpp"
 
+// Branch predictor hint
+#ifndef _unlikely
+#define _unlikely(cond)  (__builtin_expect(cond,0))
+#endif
+
+
 namespace ch_frb_io {
 #if 0
 }; // pacify emacs c-mode
