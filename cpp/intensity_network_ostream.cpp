@@ -298,7 +298,7 @@ static void *network_thread_main(void *opaque_arg)
 	    ssize_t n = send(sockfd, packet, nbytes_per_packet, 0);
 	    
 	    if (n < 0)
-		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed:") + strerror(errno));
+		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
 	    if (n != nbytes_per_packet)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
 	}
