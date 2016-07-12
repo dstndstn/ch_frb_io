@@ -99,6 +99,7 @@ void intensity_beam_assembler::send_packet_list(L0L1_packet_list &packet_list)
 	throw runtime_error("ch_frb_io: intensity_beam_assembler::send_packet_list(): beam_id mismatch");
 
     // placeholder
+    cerr << "!!! assembler received packet list, npackets=" << packet_list.npackets << " !!!\n";
     packet_list.npackets = 0;
     packet_list.nbytes = 0;
 }
