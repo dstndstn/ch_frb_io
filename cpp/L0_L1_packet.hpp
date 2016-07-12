@@ -42,8 +42,8 @@ struct L0_L1_header {
     uint16_t    ntsamp;     // number of time samples in packet, byte offset 22
 
     // The beams and FPGA freqencies in a particular (L0,L1) pair are not assumed contiguous.
-    uint16_t    beam_ix[nbeam];   // index between 0 and nbeams_tot, byte offset 24
-    uint16_t    freq_ix[nfreq];   // index between 0 and 1024, byte offset 24 + 2*nbeam
+    uint16_t    beam_ids[nbeam];   // beam_ids are between 0 and 1024 for full chime, byte offset of array is 24
+    uint16_t    freq_ids[nfreq];   // freq_ids are between 0 and 1024 for full chime, byte offset of array is (24+2*nbeam)
     
     //
     // The intensities are 8-bit encoded with 'scale' and 'offset' parameters:
