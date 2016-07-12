@@ -290,7 +290,7 @@ static void *network_thread_main(void *opaque_arg)
 	
 	// consumer_get_chunk() returns NULL if end of stream is reached (normal termination)
 	if (!chunk)
-	    return NULL;
+	    break;
 	
 	// FIXME: sendmmsg() may improve performance here
 	for (int ipacket = 0; ipacket < npackets_per_chunk; ipacket++) {
@@ -303,6 +303,32 @@ static void *network_thread_main(void *opaque_arg)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
 	}
     }
+
+    // FIXME temporary hack.  For testing, it is convenient to have a way of ending the stream. 
+    // We make the rule that a packet with nbeam = nfreq = nupfreq = ntsamp = 0 means "end of stream".
+    // Later this will be replaced by something better!  
+    //
+    // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
+    // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
+
+    cerr << "ch_frb_io: ending end-of-stream packets...";
+
+    for (int i = 0; i < 10; i++) {
+	vector<uint8_t> packet(24, uint8_t(0));
+	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
+	
+	ssize_t n = send(sockfd, &packet[0], packet.size(), 0);
+	
+	if (n < 0)
+	    throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed:") + strerror(errno));
+	if (n != packet.size())
+	    throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
+
+	usleep(100000);  // 10^5 microseconds
+    }
+
+    cerr << "done\n";
+    return NULL;
 }
 
 
