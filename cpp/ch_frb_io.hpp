@@ -226,11 +226,20 @@ struct intensity_network_ostream : noncopyable {
 
 // -------------------------------------------------------------------------------------------------
 //
-// The network_istream path is more complicated!
+// The packet input stream case is more complicated!
 
 
-// Placeholder interface for now
-void spawn_network_istream(int udp_port);
+struct intensity_packet_stream : noncopyable {
+    int nbeams = 0;
+
+    intensity_packet_stream() { }
+    ~intensity_packet_stream() { }
+
+    bool process_packet(int nbytes, const uint8_t *in);
+};
+
+
+extern void spawn_network_thread(int udp_port, const std::shared_ptr<intensity_packet_stream> &stream);
 
 
 // -------------------------------------------------------------------------------------------------
