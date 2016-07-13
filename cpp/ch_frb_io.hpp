@@ -290,19 +290,18 @@ public:
     // the call will block if the 'blocking' flag is set, otherwise it will print a warning and drop packets.
     void put_unassembled_packets(udp_packet_list &packet_list, bool blocking);
 
-    // Called by assembler thread.  Returns true on success, false if end_assembler() has been called.  In the
-    // latter case, the assembler thread should exit.  The 'packet_list' arg will be swapped for the packets in
-    // need of assembly.
+    // Called by assembler thread.  The routine get_unassembled_packets() returns true on success, false if
+    // end_assembler() has been called.  In the latter case, the assembler should exit.  The 'packet_list' arg 
+    // should be an unused buffer, which is swapped for the buffer of new packets.
+    void assembler_thread_register();
     bool get_unassembled_packets(udp_packet_list &packet_list);
+    void assembler_thread_unregister();
 
     // Called by assembler thread 
     // void put_assembled_packets();
 
     // Called by "downstream" thread
     // void get_assembled_packets();
-
-    // Called by assembler thread on startup
-    void assembler_thread_register();
 
     ~intensity_beam_assembler();
 
@@ -313,18 +312,20 @@ private:
     // for intensity_beam_assembler::make(), but can't be called otherwise.
     intensity_beam_assembler(int beam_id);
 
+    // All state below is protected by a single lock (FIXME could be made more granular)
     pthread_mutex_t lock;
-    pthread_t assembler_thread;
-    bool assembler_started = false;
-    bool assembler_ended = false;
-    bool assembler_joined = false;
 
-    // Unassembled packets
+    pthread_t assembler_thread;
+    pthread_cond_t cond_assembler_state_changed;
+    bool assembler_thread_registered = false;
+    bool assembler_ended = false;
+    bool assembler_thread_unregistered = false;
+    bool assembler_thread_joined = false;
+
     udp_packet_list unassembled_ringbuf[unassembled_ringbuf_capacity];
     int unassembled_ringbuf_pos = 0;
     int unassembled_ringbuf_size = 0;
     
-    pthread_cond_t cond_assembler_thread_started;     // constructor waits here for assembler thread to start
     pthread_cond_t cond_unassembled_packets_added;    // assembler thread waits here for packets to arrive
     pthread_cond_t cond_unassembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
 };
