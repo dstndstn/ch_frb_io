@@ -235,7 +235,7 @@ struct intensity_network_ostream : noncopyable {
 // Warning: this is a "dumb" struct with no C++ constructor/destructor/copy/move ops!
 // Caller is responsible for managing ownership and making sure initialize() gets paired with destroy()
 //
-struct L0L1_packet_list : noncopyable {
+struct udp_packet_list : noncopyable {
     static constexpr int max_packets = 512;
     static constexpr int max_bytes = 1024 * 1024;
     static constexpr int max_packet_size = 16384;
@@ -243,63 +243,132 @@ struct L0L1_packet_list : noncopyable {
     int beam_id;
     int npackets;
     int nbytes;
+    bool is_full;
 
-    // capacity=max_bytes, size=nbytes
-    uint8_t *data_buf;
-
-    // capacity=(max_packets+1), size=(npackets+1), element at index 'npackets' is equal to 'nbytes'
-    int *packet_offsets;
+    uint8_t *data_start;    // capacity=max_bytes, size=nbytes
+    uint8_t *data_end;      // always points to (data_start + nbytes)
+    int *packet_offsets;    // capacity=(max_packets+1), size=(npackets+1), element at index 'npackets' is equal to 'nbytes'
     
     void initialize(int beam_id);
     void destroy();
 
+    void swap(udp_packet_list &x);
+    void clear();   // doesn't deallocate buffers
+
     // assumes caller has already appended packet data at (data_buf + nbytes), returns true if buffer is full
-    bool add_packet(int nbytes);
-
-    // clears packet list which has already been allocated
-    void clear();
+    void add_packet(int nbytes);
 };
 
 
-struct intensity_beam_assembler : noncopyable {
-    int beam_id;
+//
+// An intensity_beam_assembler object is always backed by an assembler thread, running in the background.
+// An "upstream" thread must supply the assembler's input, by calling intensity_beam_assembler::put_unassembled_packets().
+// A "downstream" thread must fetch the assembler's output, by calling intensity_beam_assembler::get_assembled_packets().
+//
+// The assembler starts its shutdown process when intensity_beam_assembler::end_assembler() is called.  This call will
+// probably be made by the "upstream" thread when it reaches end-of-stream, but we don't need to assume this.  After
+// end_assembler() is called, any subsequent calls to put_unassembled_packets() will throw exceptions.  Calls to
+// get_assembled_packets() will succeed until all packets have been extracted, then this call will start returning
+// 'false' to indicate end-of-stream.
+//
+class intensity_beam_assembler : noncopyable {
+public:
+    const int beam_id;
 
-    // Note: overwrites the packet list with new pointers and npackets=nbytes=0
-    void send_packet_list(L0L1_packet_list &packet_list);
+    // The function intensity_beam_assembler::make() is the de facto intensity_beam_assembler constructor.
+    // Thus intensity_beam_assemblers are always used through shared_ptrs.  The reason we do this is that
+    // the assembler thread is always running in the background and needs to keep a reference via a shared_ptr.
+    static std::shared_ptr<intensity_beam_assembler> make(int beam_id);
 
+    // This is the de facto intensity_beam_assembler destructor.  It tells the assembler thread that no more
+    // packets will arrive.  If the 'join_thread' flag is set, this call will block until the assembler thread exits.
+    void end_assembler(bool join_thread);
+
+    // Called by "upstream" thread to add packets to the assembler.  The 'packet_list' arg is swapped for an
+    // empty buffer, which the caller now owns a reference to.  This call can fail if the assembler is running
+    // too slowly to keep up with the upstream thread, and an internal ring buffer becomes full.  In this case,
+    // the call will block if the 'blocking' flag is set, otherwise it will print a warning and drop packets.
+    void put_unassembled_packets(udp_packet_list &packet_list, bool blocking);
+
+    // Called by assembler thread.  Returns true on success, false if end_assembler() has been called.  In the
+    // latter case, the assembler thread should exit.  The 'packet_list' arg will be swapped for the packets in
+    // need of assembly.
+    bool get_unassembled_packets(udp_packet_list &packet_list);
+
+    // Called by assembler thread 
+    // void put_assembled_packets();
+
+    // Called by "downstream" thread
+    // void get_assembled_packets();
+
+    // Called by assembler thread on startup
+    void assembler_thread_register();
+
+    ~intensity_beam_assembler();
+
+private:
+    static constexpr int unassembled_ringbuf_capacity = 16;
+
+    // The actual constructor is private, so it can be a helper function 
+    // for intensity_beam_assembler::make(), but can't be called otherwise.
     intensity_beam_assembler(int beam_id);
-    ~intensity_beam_assembler() { }
+
+    pthread_mutex_t lock;
+    pthread_t assembler_thread;
+    bool assembler_started = false;
+    bool assembler_ended = false;
+    bool assembler_joined = false;
+
+    // Unassembled packets
+    udp_packet_list unassembled_ringbuf[unassembled_ringbuf_capacity];
+    int unassembled_ringbuf_pos = 0;
+    int unassembled_ringbuf_size = 0;
+    
+    pthread_cond_t cond_assembler_thread_started;     // constructor waits here for assembler thread to start
+    pthread_cond_t cond_unassembled_packets_added;    // assembler thread waits here for packets to arrive
+    pthread_cond_t cond_unassembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
 };
 
 
-struct intensity_packet_stream : noncopyable {
-    static constexpr int max_beams = 16;
+//
+// An intensity_network_stream object is always backed by an assembler thread, running in the background.
+//
+// It should be easy to generalize to the case of multiple network interfaces.  In this case I think it would be
+// easiest to have one intensity_network_stream object, backed by multiple network threads.
+//
+struct intensity_network_stream : noncopyable {
+public:
+    const std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
+    const int udp_port;
 
-    // Not protected by lock, only accesesed by network thread
-    int nassemblers = 0;
-    L0L1_packet_list packet_lists[max_beams];         // first 'nassemblers' entries in the array are initialized
-    std::vector<std::shared_ptr<intensity_beam_assembler> > beam_assemblers;   // vector has length 'nassemblers'
+    // De facto constructor.
+    static std::shared_ptr<intensity_network_stream> make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
 
-    // Not protected by lock, only accessed by "master" thread
-    // Note: it would be easy to generalize to a case with multiple network threads.
-    bool network_thread_valid = false;
+    // The wait_for_end_of_stream() method is the de facto destructor.
+    void start_stream();                              // sets stream_started flag
+    void wait_for_end_of_stream(bool join_threads);   // if 'join_threads' is true, assembler threads will be joined too
+
+    // Called by network thread 
+    void network_thread_register();     // sets network_thread_started flag
+    void wait_for_start_of_stream();    // waits for stream_started flag
+    void network_thread_unregister();   // sets stream_ended flag
+
+    ~intensity_network_stream() { }
+
+private:
+    pthread_mutex_t lock;
+    pthread_cond_t cond_state_changed;
     pthread_t network_thread;
 
-    intensity_packet_stream() { }
-    ~intensity_packet_stream();
+    bool network_thread_started = false;   // set by network thread shortly after creation
+    bool stream_started = false;           // set by intensity_network_stream::start_stream()
+    bool stream_ended = false;             // set by network thread when stream ends
+    bool network_thread_joined = false;    // set by intensity_network_stream::wait_for_end_of_stream() if 'join_threads' flag is set
 
-    // Called by "master" thread
-    void add_beam(const std::shared_ptr<intensity_beam_assembler> &b);
-
-    // Called by network thread.
-    bool process_packet(int nbytes, const uint8_t *in);   // returns false if end of stream
-    void finalize();                                      // flushes all packet lists to assemblers
+    // The actual constructor is private, so it can be a helper function 
+    // for intensity_network_stream::make(), but can't be called otherwise.
+    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
 };
-
-
-// Called from "master" context
-extern void spawn_network_thread(int udp_port, const std::shared_ptr<intensity_packet_stream> &stream);
-extern void wait_for_end_of_stream(const std::shared_ptr<intensity_packet_stream> &stream);
 
 
 // -------------------------------------------------------------------------------------------------

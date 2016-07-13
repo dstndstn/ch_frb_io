@@ -38,11 +38,13 @@ TEST_BINARIES=test-intensity-hdf5-file test-misc
 LIBS = -lhdf5
 
 OFILES = hdf5.o \
+	intensity_beam_assembler.o \
 	intensity_hdf5_file.o \
 	intensity_hdf5_ofile.o \
 	intensity_network_stream.o \
 	intensity_network_ostream.o \
-	lexical_cast.o
+	lexical_cast.o \
+	udp_packet_list.o
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 
