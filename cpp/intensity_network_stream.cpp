@@ -323,7 +323,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
     // think about what really makes sense.
     //
 
-    bool first_packet_received = false;
+    bool first_packet_flag = true;
 
     for (;;) {
 	int packet_nbytes = read(sock_fd, (char *) packet, udp_packet_list::max_packet_size);
@@ -364,9 +364,11 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	const uint8_t *packet_offsets = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 4*packet_nbeam*packet_nfreq;
 	const uint8_t *packet_data = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
 
-	if (!first_packet_received) {
+	if (first_packet_flag) {
 	    stream->set_first_packet_params(packet_fpga_counts_per_sample, packet_nupfreq);
-	    first_packet_received = true;
+	    for (int i = 0; i < nassemblers; i++)
+		assemblers[i]->start_stream(packet_fpga_counts_per_sample, packet_nupfreq);
+	    first_packet_flag = false;
 	}
 	
 	// Loop over beams in the packet, matching to beam_assembler objects.
@@ -408,8 +410,17 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	    
 	    packet_lists[assembler_ix].add_packet(subpacket_total_size);
 
-	    if (packet_lists[assembler_ix].is_full)
-		assemblers[assembler_ix]->put_unassembled_packets(packet_lists[assembler_ix], false);   // "false" means nonblocking
+	    if (!packet_lists[assembler_ix].is_full)
+		continue;
+
+	    // Packet list is full, so send it to the assembler thread.
+	    bool assembler_alive = assemblers[assembler_ix]->put_unassembled_packets(packet_lists[assembler_ix]);
+
+	    if (!assembler_alive) {
+		// Is this what we should do?
+		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
+		return;
+	    }
 	}
     }
 }

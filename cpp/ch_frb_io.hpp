@@ -297,19 +297,14 @@ public:
     // Thus intensity_beam_assemblers are always used through shared_ptrs.  The reason we do this is that
     // the assembler thread is always running in the background and needs to keep a reference via a shared_ptr.
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id);
-
-    // This is the de facto intensity_beam_assembler destructor.  It tells the assembler thread that no more
-    // packets will arrive.  If the 'join_thread' flag is set, this call will block until the assembler thread exits.
     
-    //
-    // Called by "upstream" thread.
-    // Called by "upstream" thread to add packets to the assembler.  The 'packet_list' arg is swapped for an
-    // empty buffer, which the caller now owns a reference to.  This call can fail if the assembler is running
-    // too slowly to keep up with the upstream thread, and an internal ring buffer becomes full.  In this case,
-    // the call will block if the 'blocking' flag is set, otherwise it will print a warning and drop packets.
-    //
-    void put_unassembled_packets(udp_packet_list &packet_list, bool blocking);
-    void end_stream(bool join_thread);
+    // Helper function called by intensity_beam_assembler::make()
+    void wait_for_assembler_thread_startup();
+
+    // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
+    void start_stream(int fpga_counts_per_sample, int nupfreq);
+    bool put_unassembled_packets(udp_packet_list &packet_list);
+    void end_stream(bool join_thread);   // can also be called by assembler thread, if it exits unexpectedly
 
     //
     // Called by assembler thread.  
@@ -318,17 +313,13 @@ public:
     // In the latter case, the assembler should exit.  The 'packet_list' arg  should be an unused buffer, which 
     // is swapped for the buffer of new packets.
     //
-    // The function put_assembled_chunk()
-    //
-    void assembler_thread_register();
+    void assembler_thread_startup();
     bool get_unassembled_packets(udp_packet_list &packet_list);
-    void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &);
-    void assembler_thread_unregister();
+    void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
 
-    //
     // Called by "downstream" thread
-    //
-    void wait_for_stream_start();
+    bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
+    bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
 
     ~intensity_beam_assembler();
 
@@ -347,30 +338,26 @@ private:
     pthread_t assembler_thread;
 
     // Assembler state model
-    bool assembler_thread_registered = false;
-    bool stream_initialized = false;
+    bool assembler_thread_started = false;
+    bool stream_started = false;
     bool stream_ended = false;
-    bool assembler_thread_unregistered = false;
     bool assembler_thread_joined = false;
     pthread_cond_t cond_assembler_state_changed;
 
     // Stream parameters 
-    int fpga_counts_per_sample;
-    int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
+    int fpga_counts_per_sample = 0;
+    int nupfreq = 0;
 
     udp_packet_list unassembled_ringbuf[unassembled_ringbuf_capacity];
     int unassembled_ringbuf_pos = 0;
     int unassembled_ringbuf_size = 0;
 
-    pthread_cond_t cond_unassembled_packets_added;    // assembler thread waits here for packets to arrive
-    pthread_cond_t cond_unassembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
-
     std::shared_ptr<assembled_chunk> assembled_ringbuf[assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;
     int assembled_ringbuf_size = 0;
 
-    pthread_cond_t cond_assembled_packets_added;    // assembler thread waits here for packets to arrive
-    pthread_cond_t cond_assembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
+    pthread_cond_t cond_unassembled_packets_added;  // assembler thread waits here for packets
+    pthread_cond_t cond_assembled_chunks_added;     // downstream thread waits here for assembled chunks
 };
 
 
@@ -413,10 +400,10 @@ private:
     pthread_t network_thread;
 
     bool network_thread_started = false;    // set before intensity_network_stream::make() returns
-    bool stream_started = false;               // set when intensity_network_stream::start_stream() is called
-    bool packets_received = false;             // set when first packet arrives
-    bool stream_ended = false;                 // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
-    bool network_thread_joined = false;        // set in wait_for_end_of_stream(), but only if join_threads flag is set
+    bool stream_started = false;            // set when intensity_network_stream::start_stream() is called
+    bool packets_received = false;          // set when first packet arrives
+    bool stream_ended = false;              // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
+    bool network_thread_joined = false;     // set in wait_for_end_of_stream(), but only if join_threads flag is set
     pthread_cond_t cond_state_changed;
 
     // Stream parameters.  These fields become valid after the first packet is recevied (packets_received=true).
