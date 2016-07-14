@@ -381,7 +381,6 @@ public:
 
     void start_stream();   // tells network thread to start reading packets
     void wait_for_network_thread_startup();
-    bool wait_for_first_packet_params(int &fpga_counts_per_sample, int &nupfreq);
     void wait_for_end_of_stream(bool join_threads);
     void end_stream(bool join_threads);
 
@@ -389,7 +388,6 @@ public:
     // When the network thread exits (typically when end-of-stream packet is received), it calls end_stream().
     void network_thread_startup();
     bool wait_for_start_stream();     // returns false if stream has been cancelled
-    void set_first_packet_params(int fpga_counts_per_sample, int nupfreq);
 
     ~intensity_network_stream();
 
@@ -401,15 +399,9 @@ private:
 
     bool network_thread_started = false;    // set before intensity_network_stream::make() returns
     bool stream_started = false;            // set when intensity_network_stream::start_stream() is called
-    bool packets_received = false;          // set when first packet arrives
     bool stream_ended = false;              // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
     bool network_thread_joined = false;     // set in wait_for_end_of_stream(), but only if join_threads flag is set
     pthread_cond_t cond_state_changed;
-
-    // Stream parameters.  These fields become valid after the first packet is recevied (packets_received=true).
-    // To retrieve them, call wait_for_packets(), which blocks until packets are received (if necessary).
-    int fpga_counts_per_sample = 0;
-    int nupfreq = 0;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.

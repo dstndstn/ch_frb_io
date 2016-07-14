@@ -132,40 +132,6 @@ bool intensity_network_stream::wait_for_start_stream()
 }
 
 
-void intensity_network_stream::set_first_packet_params(int fpga_counts_per_sample_, int nupfreq_)
-{
-    pthread_mutex_lock(&this->lock);
-
-    if (!stream_started || packets_received) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: bad call to intensity_network_stream::set_first_packet_params()");
-    }
-
-    this->fpga_counts_per_sample = fpga_counts_per_sample_;
-    this->nupfreq = nupfreq_;
-    this->packets_received = true;
-
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
-}
-
-
-bool intensity_network_stream::wait_for_first_packet_params(int &fpga_counts_per_sample_, int &nupfreq_)
-{
-    pthread_mutex_lock(&this->lock);
-    
-    while (!packets_received)
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
-
-    fpga_counts_per_sample_ = this->fpga_counts_per_sample;
-    nupfreq_ = this->nupfreq;
-
-    bool retval = !this->stream_ended;
-    pthread_mutex_unlock(&this->lock);
-    return retval;
-}
-
-
 void intensity_network_stream::end_stream(bool join_threads)
 {
     bool call_join_after_releasing_lock = false;
@@ -175,7 +141,6 @@ void intensity_network_stream::end_stream(bool join_threads)
     // Set flags as if stream had run to completion.  This is convenient e.g. for waking up threads
     // which are blocked in wait_for_packets().
     this->stream_started = true;
-    this->packets_received = true;
     this->stream_ended = true;
 
     if (join_threads && !network_thread_joined) {
@@ -365,7 +330,6 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	const uint8_t *packet_data = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
 
 	if (first_packet_flag) {
-	    stream->set_first_packet_params(packet_fpga_counts_per_sample, packet_nupfreq);
 	    for (int i = 0; i < nassemblers; i++)
 		assemblers[i]->start_stream(packet_fpga_counts_per_sample, packet_nupfreq);
 	    first_packet_flag = false;
