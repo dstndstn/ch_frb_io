@@ -23,7 +23,7 @@ static void  network_thread_main2(intensity_network_stream *stream, udp_packet_l
 // intensity_network_stream
 
 
-// static member function (de facto constructor)
+// Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector<shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
 {
     intensity_network_stream *ret_bare = new intensity_network_stream(assemblers, udp_port);
@@ -51,6 +51,8 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector
 intensity_network_stream::intensity_network_stream(const vector<shared_ptr<intensity_beam_assembler> > &assemblers_, int udp_port_) :
     assemblers(assemblers_), udp_port(udp_port_)
 {
+    // Argument checking
+
     int nassemblers = assemblers.size();
 
     if (nassemblers == 0)
@@ -67,6 +69,38 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
     if ((udp_port <= 0) || (udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(udp_port));
+
+    // Initialize pthread members
+
+    pthread_mutex_init(&lock, NULL);
+    pthread_cond_init(&cond_state_changed, NULL);
+}
+
+
+intensity_network_stream::~intensity_network_stream()
+{
+    pthread_cond_destroy(&cond_state_changed);
+    pthread_mutex_destroy(&lock);
+}
+
+
+void intensity_network_stream::network_thread_startup()
+{
+    pthread_mutex_lock(&this->lock);
+    this->network_thread_started = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->lock);
+}
+
+
+void intensity_network_stream::wait_for_network_thread_startup()
+{
+    pthread_mutex_lock(&this->lock);
+
+    while (!network_thread_started)
+	pthread_cond_wait(&this->cond_state_changed, &this->lock);
+
+    pthread_mutex_unlock(&this->lock);
 }
 
 
@@ -76,7 +110,7 @@ void intensity_network_stream::start_stream()
 
     if (stream_started) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::start_stream()");
+	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on running, completed, or cancelled stream");
     }
 
     this->stream_started = true;
@@ -85,21 +119,83 @@ void intensity_network_stream::start_stream()
 }
 
 
-void intensity_network_stream::wait_for_start_of_stream()
+bool intensity_network_stream::wait_for_start_stream()
 {
-    pthread_mutex_lock(&lock);
-    
+    pthread_mutex_lock(&this->lock);
+
     while (!stream_started)
 	pthread_cond_wait(&this->cond_state_changed, &this->lock);
 
-    pthread_mutex_unlock(&lock);
+    bool retval = !stream_ended;
+    pthread_mutex_unlock(&this->lock);
+    return retval;
+}
+
+
+void intensity_network_stream::set_first_packet_params(int fpga_counts_per_sample_, int nupfreq_)
+{
+    pthread_mutex_lock(&this->lock);
+
+    if (!stream_started || packets_received) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: internal error: bad call to intensity_network_stream::set_first_packet_params()");
+    }
+
+    this->fpga_counts_per_sample = fpga_counts_per_sample_;
+    this->nupfreq = nupfreq_;
+    this->packets_received = true;
+
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->lock);
+}
+
+
+bool intensity_network_stream::wait_for_first_packet_params(int &fpga_counts_per_sample_, int &nupfreq_)
+{
+    pthread_mutex_lock(&this->lock);
+    
+    while (!packets_received)
+	pthread_cond_wait(&this->cond_state_changed, &this->lock);
+
+    fpga_counts_per_sample_ = this->fpga_counts_per_sample;
+    nupfreq_ = this->nupfreq;
+
+    bool retval = !this->stream_ended;
+    pthread_mutex_unlock(&this->lock);
+    return retval;
+}
+
+
+void intensity_network_stream::end_stream(bool join_threads)
+{
+    bool call_join_after_releasing_lock = false;
+
+    pthread_mutex_lock(&this->lock);
+
+    // Set flags as if stream had run to completion.  This is convenient e.g. for waking up threads
+    // which are blocked in wait_for_packets().
+    this->stream_started = true;
+    this->packets_received = true;
+    this->stream_ended = true;
+
+    if (join_threads && !network_thread_joined) {
+	call_join_after_releasing_lock = true;
+	this->network_thread_joined = true;
+    }
+    
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->lock);
+
+    for (unsigned int i = 0; i < assemblers.size(); i++)
+	assemblers[i]->end_stream(join_threads);
+
+    if (call_join_after_releasing_lock)
+	pthread_join(network_thread, NULL);
 }
 
 
 void intensity_network_stream::wait_for_end_of_stream(bool join_threads)
 {
-    bool call_join_after_releasing_lock = false;
-
     pthread_mutex_lock(&lock);
     
     if (!stream_started) {
@@ -107,43 +203,13 @@ void intensity_network_stream::wait_for_end_of_stream(bool join_threads)
 	throw runtime_error("ch_frb_io: intensity_network_stream::wait_for_end_of_stream() was called with no prior call to start_stream()");
     }
     
-    // Wait for the network thread to set the 'stream_ended' flag
     while (!stream_ended)
 	pthread_cond_wait(&this->cond_state_changed, &this->lock);
 
-    if (join_threads && !network_thread_joined) {
-	call_join_after_releasing_lock = true;
-	this->network_thread_joined = true;
-    }
-
     pthread_mutex_unlock(&lock);
 
-    if (call_join_after_releasing_lock)
-	pthread_join(network_thread, NULL);
-
-    if (join_threads) {
-	// join assembler threads too
-	for (unsigned int i = 0; i < assemblers.size(); i++)
-	    assemblers[i]->end_assembler(true);
-    }
-}
-
-
-void intensity_network_stream::network_thread_register()
-{
-    pthread_mutex_lock(&this->lock);
-    this->network_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
-}
-
-
-void intensity_network_stream::network_thread_unregister()
-{
-    pthread_mutex_lock(&this->lock);
-    this->stream_ended = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
+    // Looks weird but does the correct thing
+    this->end_stream(join_threads);
 }
 
 
@@ -172,8 +238,7 @@ static void *network_thread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
 
-    stream->network_thread_register();
-    stream->wait_for_start_of_stream();
+    stream->network_thread_startup();
 
     try {
 	// It's convenient to allocate the udp_packet_lists before calling network_thread_main2()
@@ -193,11 +258,11 @@ static void *network_thread_main(void *opaque_arg)
 	delete[] packet_lists;
 
     } catch (...) {
-	stream->network_thread_unregister();
+	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
 
-    stream->network_thread_unregister();
+    stream->end_stream(false);   // "false" has same meaning as above
     return NULL;
 }
 
@@ -241,6 +306,15 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	throw runtime_error(string("ch_frb_io: setsockopt() failed: ") + strerror(errno));
 
     cerr << ("ch_frb_io: network thread listening for packets on port " + to_string(stream->udp_port) + "\n");
+
+    //
+    // Wait for stream to start
+    //
+
+    bool cancelled = !stream->wait_for_start_stream();
+    
+    if (cancelled)
+	return;
     
     //
     // Main packet loop!
@@ -248,6 +322,8 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
     // FIXME there is a lot of silent "swallowing" of error conditions here, needs revisiting to
     // think about what really makes sense.
     //
+
+    bool first_packet_received = false;
 
     for (;;) {
 	int packet_nbytes = read(sock_fd, (char *) packet, udp_packet_list::max_packet_size);
@@ -262,6 +338,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	    continue;  // silently drop bad packet
 	
 	int data_nbytes = *((int16_t *) (packet+4));
+	int packet_fpga_counts_per_sample = *((uint16_t *) (packet+6));
 	int packet_nbeam = *((uint16_t *) (packet+16));
 	int packet_nfreq = *((uint16_t *) (packet+18));
 	int packet_nupfreq = *((uint16_t *) (packet+20));
@@ -270,7 +347,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
 	if (_unlikely(packet_nbytes == 24))
-	    break;   // Note: this path is the only way out of the main packet loop
+	    return;   // Note: this branch is the only way out of the main packet loop
 	
 	// The following way of writing the comparisons (using uint64_t) guarantees no overflow
 	uint64_t n4 = uint64_t(packet_nbeam) * uint64_t(packet_nfreq) * uint64_t(packet_nupfreq) * uint64_t(packet_ntsamp);
@@ -286,6 +363,11 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	const uint8_t *packet_scales = packet + 24 + 2*packet_nbeam + 2*packet_nfreq;
 	const uint8_t *packet_offsets = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 4*packet_nbeam*packet_nfreq;
 	const uint8_t *packet_data = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
+
+	if (!first_packet_received) {
+	    stream->set_first_packet_params(packet_fpga_counts_per_sample, packet_nupfreq);
+	    first_packet_received = true;
+	}
 	
 	// Loop over beams in the packet, matching to beam_assembler objects.
 
@@ -330,13 +412,6 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 		assemblers[assembler_ix]->put_unassembled_packets(packet_lists[assembler_ix], false);   // "false" means nonblocking
 	}
     }
-
-    // If we get here, we're at end-of-stream, so inform assemblers
-
-    for (int i = 0; i < nassemblers; i++)
-	assemblers[i]->end_assembler(false);   // "false" = join flag 
-
-    cerr << "ch_frb_io: end of stream, network thread exiting\n";
 }
 
 

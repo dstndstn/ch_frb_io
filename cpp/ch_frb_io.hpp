@@ -260,6 +260,24 @@ struct udp_packet_list : noncopyable {
 };
 
 
+struct assembled_chunk : noncopyable {
+    // Stream parameters
+    int beam_id;
+    int fpga_counts_per_sample;
+    int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
+
+    // FPGA count of first sample in chunk
+    int64_t fpga_count;
+
+    // Arrays of shape (1024 * nupfreq, intensity_beam_assembler::time_samples_per_assembled_chunk)
+    float *intensity;
+    float *weights;
+
+    assembled_chunk(int beam_id, int nupfreq, int fpga_counts_per_sample, int64_t fpga_count);
+    ~assembled_chunk();
+};
+
+
 //
 // An intensity_beam_assembler object is always backed by an assembler thread, running in the background.
 // An "upstream" thread must supply the assembler's input, by calling intensity_beam_assembler::put_unassembled_packets().
@@ -282,31 +300,42 @@ public:
 
     // This is the de facto intensity_beam_assembler destructor.  It tells the assembler thread that no more
     // packets will arrive.  If the 'join_thread' flag is set, this call will block until the assembler thread exits.
-    void end_assembler(bool join_thread);
-
+    
+    //
+    // Called by "upstream" thread.
     // Called by "upstream" thread to add packets to the assembler.  The 'packet_list' arg is swapped for an
     // empty buffer, which the caller now owns a reference to.  This call can fail if the assembler is running
     // too slowly to keep up with the upstream thread, and an internal ring buffer becomes full.  In this case,
     // the call will block if the 'blocking' flag is set, otherwise it will print a warning and drop packets.
+    //
     void put_unassembled_packets(udp_packet_list &packet_list, bool blocking);
+    void end_stream(bool join_thread);
 
-    // Called by assembler thread.  The routine get_unassembled_packets() returns true on success, false if
-    // end_assembler() has been called.  In the latter case, the assembler should exit.  The 'packet_list' arg 
-    // should be an unused buffer, which is swapped for the buffer of new packets.
+    //
+    // Called by assembler thread.  
+    //
+    // The function get_unassembled_packets() returns true on success, false if end_assembler() has been called.  
+    // In the latter case, the assembler should exit.  The 'packet_list' arg  should be an unused buffer, which 
+    // is swapped for the buffer of new packets.
+    //
+    // The function put_assembled_chunk()
+    //
     void assembler_thread_register();
     bool get_unassembled_packets(udp_packet_list &packet_list);
+    void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &);
     void assembler_thread_unregister();
 
-    // Called by assembler thread 
-    // void put_assembled_packets();
-
+    //
     // Called by "downstream" thread
-    // void get_assembled_packets();
+    //
+    void wait_for_stream_start();
 
     ~intensity_beam_assembler();
 
 private:
     static constexpr int unassembled_ringbuf_capacity = 16;
+    static constexpr int assembled_ringbuf_capacity = 16;
+    static constexpr int time_samples_per_assembled_chunk = 1024;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.
@@ -316,18 +345,32 @@ private:
     pthread_mutex_t lock;
 
     pthread_t assembler_thread;
-    pthread_cond_t cond_assembler_state_changed;
+
+    // Assembler state model
     bool assembler_thread_registered = false;
-    bool assembler_ended = false;
+    bool stream_initialized = false;
+    bool stream_ended = false;
     bool assembler_thread_unregistered = false;
     bool assembler_thread_joined = false;
+    pthread_cond_t cond_assembler_state_changed;
+
+    // Stream parameters 
+    int fpga_counts_per_sample;
+    int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
 
     udp_packet_list unassembled_ringbuf[unassembled_ringbuf_capacity];
     int unassembled_ringbuf_pos = 0;
     int unassembled_ringbuf_size = 0;
-    
+
     pthread_cond_t cond_unassembled_packets_added;    // assembler thread waits here for packets to arrive
     pthread_cond_t cond_unassembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
+
+    std::shared_ptr<assembled_chunk> assembled_ringbuf[assembled_ringbuf_capacity];
+    int assembled_ringbuf_pos = 0;
+    int assembled_ringbuf_size = 0;
+
+    pthread_cond_t cond_assembled_packets_added;    // assembler thread waits here for packets to arrive
+    pthread_cond_t cond_assembled_packets_removed;  // blocking callers of put_unassembled_packets() wait here
 };
 
 
@@ -342,29 +385,44 @@ public:
     const std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
     const int udp_port;
 
-    // De facto constructor.
+    // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
     static std::shared_ptr<intensity_network_stream> make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
+    
+    // High level control routines.
+    //   - end_stream() can be used either to cancel a stream which never ran, or interrupt a running stream.
+    //   - wait_for_first_packet_params() return false if the stream gets cancelled before receiving packets.
 
-    // The wait_for_end_of_stream() method is the de facto destructor.
-    void start_stream();                              // sets stream_started flag
-    void wait_for_end_of_stream(bool join_threads);   // if 'join_threads' is true, assembler threads will be joined too
+    void start_stream();   // tells network thread to start reading packets
+    void wait_for_network_thread_startup();
+    bool wait_for_first_packet_params(int &fpga_counts_per_sample, int &nupfreq);
+    void wait_for_end_of_stream(bool join_threads);
+    void end_stream(bool join_threads);
 
-    // Called by network thread 
-    void network_thread_register();     // sets network_thread_started flag
-    void wait_for_start_of_stream();    // waits for stream_started flag
-    void network_thread_unregister();   // sets stream_ended flag
+    // Called by network thread.
+    // When the network thread exits (typically when end-of-stream packet is received), it calls end_stream().
+    void network_thread_startup();
+    bool wait_for_start_stream();     // returns false if stream has been cancelled
+    void set_first_packet_params(int fpga_counts_per_sample, int nupfreq);
 
-    ~intensity_network_stream() { }
+    ~intensity_network_stream();
 
 private:
+    // All state below is protected by this lock.
     pthread_mutex_t lock;
-    pthread_cond_t cond_state_changed;
+
     pthread_t network_thread;
 
-    bool network_thread_started = false;   // set by network thread shortly after creation
-    bool stream_started = false;           // set by intensity_network_stream::start_stream()
-    bool stream_ended = false;             // set by network thread when stream ends
-    bool network_thread_joined = false;    // set by intensity_network_stream::wait_for_end_of_stream() if 'join_threads' flag is set
+    bool network_thread_started = false;    // set before intensity_network_stream::make() returns
+    bool stream_started = false;               // set when intensity_network_stream::start_stream() is called
+    bool packets_received = false;             // set when first packet arrives
+    bool stream_ended = false;                 // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
+    bool network_thread_joined = false;        // set in wait_for_end_of_stream(), but only if join_threads flag is set
+    pthread_cond_t cond_state_changed;
+
+    // Stream parameters.  These fields become valid after the first packet is recevied (packets_received=true).
+    // To retrieve them, call wait_for_packets(), which blocks until packets are received (if necessary).
+    int fpga_counts_per_sample = 0;
+    int nupfreq = 0;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
