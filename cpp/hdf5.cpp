@@ -453,6 +453,15 @@ _hdf5_extendable_dataset::_hdf5_extendable_dataset(const hdf5_group &g, const st
     if (err < 0)
 	throw runtime_error(full_name + ": H5Pset_chunk() failed?!");
 
+    // Note: the h5py source code refers to a "resize glitch" in chunked HDF5 files,
+    // and includes the following line of python code after set_chunk():
+    //	    dcpl.set_fill_time(h5d.FILL_TIME_ALLOC)  # prevent resize glitch
+    //
+    // I don't know what's being referred to here, but I'm guessing it was a temporary
+    // bug in some version of libhdf5 which got fixed in later versions.  I decided not
+    // to worry about it for now, but left this comment in case the issue somehow
+    // becomes relevant later.
+
     set_bitshuffle(full_name, prop_id, bitshuffle);
 
     this->dataset_id = H5Dcreate2(g.group_id, dataset_name.c_str(), type, space_id, H5P_DEFAULT, prop_id, H5P_DEFAULT);
