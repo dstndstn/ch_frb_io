@@ -69,7 +69,7 @@ intensity_hdf5_ofile::intensity_hdf5_ofile(const string &filename_, int nfreq_, 
     vector<hsize_t> tchunk_shape = { 16384 };
     this->time_dataset = make_unique<hdf5_extendable_dataset<double> >(g_index_map, "time", tchunk_shape, 0);
 
-    vector<hsize_t> chunk_shape = { (hsize_t)nfreq, 2, (hsize_t)nt_chunk };
+    vector<hsize_t> chunk_shape = { (hsize_t)nfreq, (hsize_t)npol, (hsize_t)nt_chunk };
     this->intensity_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "intensity", chunk_shape, 2, bitshuffle);
     this->weights_dataset = make_unique<hdf5_extendable_dataset<float> > (g_root, "weight", chunk_shape, 2, bitshuffle);
 }
