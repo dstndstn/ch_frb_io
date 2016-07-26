@@ -261,19 +261,23 @@ struct udp_packet_list : noncopyable {
 
 
 struct assembled_chunk : noncopyable {
+    static constexpr int nt_per_chunk = 1024;
+
     // Stream parameters
     int beam_id;
     int fpga_counts_per_sample;
     int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
 
-    // FPGA count of first sample in chunk
-    int64_t fpga_count;
+    // Time index of first sample in chunk.
+    // The FPGA count of the first sample is chunk_t0 * fpga_counts_per_sample.
+    uint64_t chunk_t0;
 
-    // Arrays of shape (1024 * nupfreq, intensity_beam_assembler::time_samples_per_assembled_chunk)
-    float *intensity;
-    float *weights;
+    // Arrays of shape (1024 * nupfreq, nt_per_chunk)
+    // FIXME hardcoded 1024 here
+    float *intensity = nullptr;
+    float *weights = nullptr;
 
-    assembled_chunk(int beam_id, int nupfreq, int fpga_counts_per_sample, int64_t fpga_count);
+    assembled_chunk(int beam_id, int nupfreq, int fpga_counts_per_sample, uint64_t chunk_t0);
     ~assembled_chunk();
 };
 
@@ -326,7 +330,6 @@ public:
 private:
     static constexpr int unassembled_ringbuf_capacity = 16;
     static constexpr int assembled_ringbuf_capacity = 16;
-    static constexpr int time_samples_per_assembled_chunk = 1024;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.

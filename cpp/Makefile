@@ -37,7 +37,8 @@ TEST_BINARIES=test-intensity-hdf5-file test-misc
 
 LIBS = -lhdf5
 
-OFILES = hdf5.o \
+OFILES = assembled_chunk.o \
+	hdf5.o \
 	intensity_beam_assembler.o \
 	intensity_hdf5_file.o \
 	intensity_hdf5_ofile.o \
