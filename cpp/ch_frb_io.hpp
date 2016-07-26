@@ -265,8 +265,8 @@ struct assembled_chunk : noncopyable {
 
     // Stream parameters
     int beam_id;
-    int fpga_counts_per_sample;
     int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
+    int fpga_counts_per_sample;
 
     // Time index of first sample in chunk.
     // The FPGA count of the first sample is chunk_t0 * fpga_counts_per_sample.

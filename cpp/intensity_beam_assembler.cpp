@@ -294,7 +294,7 @@ inline void assemble_packet(int nfreq, const uint16_t *freq_ids, int nupfreq, in
 			    dst_intensity + freq_id * nupfreq * assembled_chunk::nt_per_chunk,
 			    dst_weights + freq_id * nupfreq * assembled_chunk::nt_per_chunk,
 			    src + ifreq * nupfreq * src_stride,
-			    src_stride, scales[ifreq], offset[ifreq]);
+			    src_stride, scales[ifreq], offsets[ifreq]);
     }
 }
 
@@ -417,16 +417,16 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 		assembler_it0 = (packet_it0 / assembled_chunk::nt_per_chunk) * assembled_chunk::nt_per_chunk;
 		initialized = true;
 
-		chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
+		chunk0 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
 		chunk0_intensity = chunk0->intensity;
 		chunk0_weights = chunk0->weights;
 
-		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
+		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;
 	    }
 
-	    if (packet_it0 + packet_nt > assembler_it0 + 2 * assembled_chunk::nt_per_chunk) {
+	    if (packet_it0 + packet_ntsamp > assembler_it0 + 2 * assembled_chunk::nt_per_chunk) {
 		//
 		// If we receive a packet whose timestamps extend past the range of our current
 		// assembly buffer, then we advance the buffer and send an assembled_chunk to the
@@ -444,7 +444,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 		chunk0_intensity = chunk1_intensity;
 		chunk0_weights = chunk1_weights;
 
-		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
+		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;		
 	    }
@@ -458,12 +458,12 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 		int dst_dt = overlap_it0 - assembler_it0;
 		int src_dt = overlap_it0 - packet_it0;
 
-		assemble_packet(nfreq, packet_freq_ids, nupfreq,
+		assemble_packet(packet_nfreq, packet_freq_ids, nupfreq,
 				(int)(overlap_it1 - overlap_it0),   // nt
 				chunk0_intensity + dst_dt,          // dst_intensity
 				chunk0_weights + dst_dt,            // dst_weights
 				packet_data + src_dt,               // src
-				packet_nt,                          // src_strides
+				packet_ntsamp,                      // src_strides
 				packet_scales, packet_offsets);
 	    }
 
@@ -475,12 +475,12 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 		int dst_dt = overlap_it0 - (assembler_it0 + assembled_chunk::nt_per_chunk);
 		int src_dt = overlap_it0 - packet_it0;
 
-		assemble_packet(nfreq, packet_freq_ids, nupfreq,
+		assemble_packet(packet_nfreq, packet_freq_ids, nupfreq,
 				(int)(overlap_it1 - overlap_it0),   // nt
 				chunk1_intensity + dst_dt,          // dst_intensity
 				chunk1_weights + dst_dt,            // dst_weights
 				packet_data + src_dt,               // src
-				packet_nt,                          // src_strides
+				packet_ntsamp,                      // src_strides
 				packet_scales, packet_offsets);
 	    }	    
 	}

@@ -11,7 +11,7 @@ namespace ch_frb_io {
 
 
 assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int fpga_counts_per_sample_, uint64_t chunk_t0_)
-    : beam_id(beam_id), nupfreq(nupfreq_), fpga_counts_per_sample(fpga_counts_per_sample_), chunk_t0(chunk_t0_)
+    : beam_id(beam_id_), nupfreq(nupfreq_), fpga_counts_per_sample(fpga_counts_per_sample_), chunk_t0(chunk_t0_)
 {
     if ((beam_id < 0) || (beam_id >= 65336))
 	throw runtime_error("assembled_chunk constructor: bad beam_id argument");
@@ -21,12 +21,12 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int fpga_counts_per
 	throw runtime_error("assembled_chunk constructor: bad fpga_counts_per_sample argument");
 
     // FIXME hardcoded 1024 here
-    this->intensity = aligned_alloc<float> (1024 * nfreq * nt_per_chunk);
-    this->weights = aligned_alloc<float> (1024 * nfreq * nt_per_chunk);
+    this->intensity = aligned_alloc<float> (1024 * nupfreq * nt_per_chunk);
+    this->weights = aligned_alloc<float> (1024 * nupfreq * nt_per_chunk);
 }
 
 
-~assembled_chunk::assembled_chunk()
+assembled_chunk::~assembled_chunk()
 {
     free(intensity);
     free(weights);
