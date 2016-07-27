@@ -223,7 +223,7 @@ void intensity_beam_assembler::put_assembled_chunk(const shared_ptr<assembled_ch
 
     if (assembled_ringbuf_size >= assembled_ringbuf_capacity) {
 	pthread_mutex_unlock(&this->lock);
-	cerr << "ch_frb_io: warning: post-assembler thread is running too slow, some packets will be dropped\n";
+	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, some packets will be dropped\n";
 	return;
     }
 
@@ -312,6 +312,7 @@ static void *assembler_thread_main(void *opaque_arg)
     if (!assembler)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembler_thread_main()");
 
+    cerr << ("ch_frb_io: assembler thread starting (beam_id=" + to_string(assembler->beam_id) + ")\n");
     assembler->assembler_thread_startup();
 
     try {
@@ -325,6 +326,8 @@ static void *assembler_thread_main(void *opaque_arg)
     }
 
     assembler->end_stream(false);  // "false" means same as above
+    cerr << ("ch_frb_io: assembler thread ending (beam_id=" + to_string(assembler->beam_id) + ")\n");    
+
     return NULL;
 }
 
@@ -358,8 +361,10 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 
     for (;;) {
 	bool alive = assembler->get_unassembled_packets(unassembled_packet_list);
-	if (!alive)
+	if (!alive) {
+	    cerr << ("ch_frb_io: assembler thread input is complete (beam_id=" + to_string(assembler_beam_id) + ")\n");
 	    return;
+	}
 
 	for (int ipacket = 0; ipacket < unassembled_packet_list.npackets; ipacket++) {
 	    const uint8_t *packet = unassembled_packet_list.data_start + unassembled_packet_list.packet_offsets[ipacket];
