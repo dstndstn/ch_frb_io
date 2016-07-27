@@ -536,6 +536,15 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     int npackets_per_chunk = (nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet);
     this->exchanger = make_shared<chunk_exchanger> (dstname, npackets_per_chunk, nbytes_per_packet);
 
+    // FIXME when code is reorganized this can go closer to the top of this function
+    stringstream ss;
+    ss << "ch_frb_io: constructing network_ostream (nbeams=" << nbeam << ",nfreq_per_chunk=" << nfreq_per_chunk
+       << ",nt_per_chunk=" << nt_per_chunk << ",nfreq_per_packet=" << nfreq_per_packet << ",nt_per_packet=" << nt_per_packet
+       << ",npackets_per_chunk=" << npackets_per_chunk << ")\n";
+
+    string s = ss.str();
+    cerr << s.c_str();
+    
     // Allocate encoding buffers
 
     int ndata = nbeam * nfreq_per_packet * nupfreq * nt_per_packet;
