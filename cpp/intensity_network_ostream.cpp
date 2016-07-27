@@ -661,7 +661,8 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 #endif
 
 	    encode_packet(nbeam, nfreq_per_packet, nupfreq, nt_per_packet,
-			  fpga_counts_per_sample, fpga_count,
+			  fpga_counts_per_sample, 
+			  fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample,
 			  packet_buf + ipacket * nbytes_per_packet,              // output buffer for encoding
 			  &ibeam[0], &ifreq_chunk[if_outer * nfreq_per_packet],  // ibeam, ifreq arrays
 			  tmp_intensity, tmp_mask);                              // input buffers for encoding
