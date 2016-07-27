@@ -382,13 +382,13 @@ inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t
     float mean = acc1/acc0;
     float var = acc2/acc0 - mean*mean;
     
-    var = min(var, float(1.0e-6*mean*mean));
+    var = max(var, float(1.0e-10*mean*mean));
 
-    float scale = 25. * sqrt(var);
+    float scale = sqrt(var) / 25.;
     float offset = -128.*scale + mean;   // 0x80 -> mean
 
     *scalep = scale;
-    *offsetp = mean;
+    *offsetp = offset;
 
     for (int i = 0; i < rowlen; i++) {
 	float t = (intensity[i] - offset) / scale;
@@ -446,6 +446,17 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 
     for (int irow = 0; irow < nrows; irow++)
 	encode_packet_row(rowlen, scale0 + irow, offset0 + irow, data0 + irow * rowlen, intensity + rowlen, mask + rowlen);
+
+#if 1  // debug
+    int mask_count = 0;
+    for (int i = 0; i < nrows*rowlen; i++) {
+	if ((data0[i] == (uint8_t)0) || (data0[i] == (uint8_t)255))
+	    mask_count++;
+    }
+
+    double mask_frac = (double)mask_count / (double)(nrows*rowlen);
+    cout << ("XXX mask_frac = " + to_string(mask_frac) + "\n");
+#endif
 }
 
 
