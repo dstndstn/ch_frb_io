@@ -203,6 +203,7 @@ static void *network_thread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
 
+    cerr << "ch_frb_io: network thread starting\n";
     stream->network_thread_startup();
 
     try {
@@ -228,6 +229,8 @@ static void *network_thread_main(void *opaque_arg)
     }
 
     stream->end_stream(false);   // "false" has same meaning as above
+
+    cerr << "ch_frb_io: network thread exiting\n";
     return NULL;
 }
 
@@ -270,7 +273,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: network thread listening for packets on port " + to_string(stream->udp_port) + "\n");
+    cerr << ("ch_frb_io: network thread: listening for packets on port " + to_string(stream->udp_port) + "\n");
 
     //
     // Wait for stream to start
@@ -311,8 +314,10 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-	if (_unlikely(packet_nbytes == 24))
+	if (_unlikely(packet_nbytes == 24)) {
+	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
 	    return;   // Note: this branch is the only way out of the main packet loop
+	}
 	
 	// The following way of writing the comparisons (using uint64_t) guarantees no overflow
 	uint64_t n4 = uint64_t(packet_nbeam) * uint64_t(packet_nfreq) * uint64_t(packet_nupfreq) * uint64_t(packet_ntsamp);
