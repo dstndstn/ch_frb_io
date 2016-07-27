@@ -1,0 +1,6 @@
+Makefile.local
+ch-show-intensity-file
+test-intensity-hdf5-file
+test-misc
+*.o
+
