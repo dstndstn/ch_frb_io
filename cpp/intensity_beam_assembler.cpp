@@ -361,8 +361,14 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 
     for (;;) {
 	bool alive = assembler->get_unassembled_packets(unassembled_packet_list);
+
 	if (!alive) {
+	    if (!initialized)
+		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
+
 	    cerr << ("ch_frb_io: assembler thread input is complete (beam_id=" + to_string(assembler_beam_id) + ")\n");
+	    assembler->put_assembled_chunk(chunk0);
+	    assembler->put_assembled_chunk(chunk1);
 	    return;
 	}
 
