@@ -279,6 +279,8 @@ static void *network_thread_main(void *opaque_arg)
 
     if (!exchanger)
 	throw runtime_error("ch_frb_io: internal error: no chunk_exchanger passed to network_thread_main()");
+
+    cerr << "ch_frb_io: network output thread starting\n";
     
     const int sockfd = exchanger->sockfd;
     const int npackets_per_chunk = exchanger->npackets_per_chunk;
@@ -311,7 +313,7 @@ static void *network_thread_main(void *opaque_arg)
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
     // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
 
-    cerr << "ch_frb_io: ending end-of-stream packets\n";
+    cerr << "ch_frb_io: network output thread sending end-of-stream packets\n";
 
     for (int ipacket = 0; ipacket < 10; ipacket++) {
 	vector<uint8_t> packet(24, uint8_t(0));
@@ -334,6 +336,7 @@ static void *network_thread_main(void *opaque_arg)
 	break;
     }
 
+    cerr << "ch_frb_io: network output thread exiting\n";
     return NULL;
 }
 

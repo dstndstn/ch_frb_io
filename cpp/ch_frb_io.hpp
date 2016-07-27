@@ -184,7 +184,10 @@ struct intensity_hdf5_ofile {
 //
 // The constructor spawns a network thread.
 //
-// FIXME implement throughput target, reordering...
+// The ostream is currently (1) synchronous, meaning that it blocks until the network thread
+// is ready to send packets, (2) greedy, meaning that it sends data as rapidly as possible.
+//
+// FIXME: modify (2) by including a "throughput" arg.
 //  
 struct intensity_network_ostream : noncopyable {
     const int nbeam;
@@ -321,8 +324,10 @@ public:
     bool get_unassembled_packets(udp_packet_list &packet_list);
     void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
 
-    // Called by "downstream" thread
+    // Called by both assembler thread and "downstream" thread
     bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
+
+    // Called by "downstream" thread
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
 
     ~intensity_beam_assembler();
@@ -365,7 +370,7 @@ private:
 
 
 //
-// An intensity_network_stream object is always backed by an assembler thread, running in the background.
+// An intensity_network_stream object is always backed by a network thread, running in the background.
 //
 // It should be easy to generalize to the case of multiple network interfaces.  In this case I think it would be
 // easiest to have one intensity_network_stream object, backed by multiple network threads.
