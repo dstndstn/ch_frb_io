@@ -15,7 +15,7 @@ namespace ch_frb_io {
 
 // Defined later in this file
 static void *network_thread_main(void *opaque_arg);
-static void  network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists);
+static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists);   // returns npackets_received
 
 
 // -------------------------------------------------------------------------------------------------
@@ -206,6 +206,8 @@ static void *network_thread_main(void *opaque_arg)
     cerr << "ch_frb_io: network thread starting\n";
     stream->network_thread_startup();
 
+    ssize_t npackets_received = 0;
+
     try {
 	// It's convenient to allocate the udp_packet_lists before calling network_thread_main2()
 	// FIXME this seems a little awkward, is there a better way?
@@ -216,7 +218,7 @@ static void *network_thread_main(void *opaque_arg)
 	for (int i = 0; i < nassemblers; i++)
 	    packet_lists[i].initialize(stream->assemblers[i]->beam_id);
 	
-	network_thread_main2(stream.get(), packet_lists);
+	npackets_received = network_thread_main2(stream.get(), packet_lists);
 
 	for (int i = 0; i < nassemblers; i++)
 	    packet_lists[i].destroy();
@@ -230,12 +232,13 @@ static void *network_thread_main(void *opaque_arg)
 
     stream->end_stream(false);   // "false" has same meaning as above
 
-    cerr << "ch_frb_io: network thread exiting\n";
+    cerr << ("ch_frb_io: network thread exiting (" + to_string(npackets_received) + " packets received)\n");
     return NULL;
 }
 
 
-static void network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists)
+// Returns number of packets received
+static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists)
 {
     // FIXME is 2MB socket_bufsize a good choice?  I would have guessed a larger value 
     // would be better, but 2MB is the max allowed on my osx laptop.
@@ -282,7 +285,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
     bool cancelled = !stream->wait_for_start_stream();
     
     if (cancelled)
-	return;
+	return 0;
     
     //
     // Main packet loop!
@@ -291,7 +294,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
     // think about what really makes sense.
     //
 
-    bool first_packet_flag = true;
+    ssize_t npackets_received = 0;
 
     for (;;) {
 	int packet_nbytes = read(sock_fd, (char *) packet, udp_packet_list::max_packet_size);
@@ -316,7 +319,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
 	if (_unlikely(packet_nbytes == 24)) {
 	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
-	    return;   // Note: this branch is the only way out of the main packet loop
+	    return npackets_received;   // Note: this branch is the only way out of the main packet loop
 	}
 	
 	// The following way of writing the comparisons (using uint64_t) guarantees no overflow
@@ -334,12 +337,13 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	const uint8_t *packet_offsets = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 4*packet_nbeam*packet_nfreq;
 	const uint8_t *packet_data = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
 
-	if (first_packet_flag) {
+	if (npackets_received == 0) {
 	    for (int i = 0; i < nassemblers; i++)
 		assemblers[i]->start_stream(packet_fpga_counts_per_sample, packet_nupfreq);
-	    first_packet_flag = false;
 	}
-	
+
+	npackets_received++;
+
 	// Loop over beams in the packet, matching to beam_assembler objects.
 
 	for (int ibeam = 0; ibeam < packet_nbeam; ibeam++) {
@@ -388,7 +392,7 @@ static void network_thread_main2(intensity_network_stream *stream, udp_packet_li
 	    if (!assembler_alive) {
 		// Is this what we should do?
 		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
-		return;
+		return npackets_received;
 	    }
 	}
     }

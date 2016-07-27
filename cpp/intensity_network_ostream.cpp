@@ -286,6 +286,7 @@ static void *network_thread_main(void *opaque_arg)
     const int npackets_per_chunk = exchanger->npackets_per_chunk;
     const int nbytes_per_packet = exchanger->nbytes_per_packet;
     const uint8_t *chunk = nullptr;
+    ssize_t npackets_sent = 0;
     
     for (;;) {
 	chunk = exchanger->consumer_get_chunk(chunk);
@@ -303,6 +304,8 @@ static void *network_thread_main(void *opaque_arg)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
 	    if (n != nbytes_per_packet)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(nbytes_per_packet) + " bytes?!");
+
+	    npackets_sent++;
 	}
     }
 
@@ -336,7 +339,7 @@ static void *network_thread_main(void *opaque_arg)
 	break;
     }
 
-    cerr << "ch_frb_io: network output thread exiting\n";
+    cerr << ("ch_frb_io: network output thread exiting (" + to_string(npackets_sent) + " packets sent)\n");
     return NULL;
 }
 
