@@ -440,14 +440,23 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
     int nrows = nbeam * nfreq;
     int rowlen = nupfreq * ntsamp;
 
+#if 0  // debug: print outputs
+    for (int i = 0; i < nrows; i++) {
+	cout << "XXX2\n";
+	for (int j = 0; j < rowlen; j++)
+	    cout << " " << intensity[i*rowlen+j];
+	cout << "\n";
+    }
+#endif
+
     float *scale0 = (float *) (out + 24 + 2*nbeam + 2*nfreq);
     float *offset0 = (float *) (out + 24 + 2*nbeam + 2*nfreq + 4*nrows);
     uint8_t *data0 = out + 24 + 2*nbeam + 2*nfreq + 8*nrows;
 
     for (int irow = 0; irow < nrows; irow++)
-	encode_packet_row(rowlen, scale0 + irow, offset0 + irow, data0 + irow * rowlen, intensity + rowlen, mask + rowlen);
+	encode_packet_row(rowlen, scale0+irow, offset0+irow, data0 + irow*rowlen, intensity + irow*rowlen, mask + irow*rowlen);
 
-#if 1  // debug
+#if 0  // debug
     int mask_count = 0;
     for (int i = 0; i < nrows*rowlen; i++) {
 	if ((data0[i] == (uint8_t)0) || (data0[i] == (uint8_t)255))
@@ -456,6 +465,15 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 
     double mask_frac = (double)mask_count / (double)(nrows*rowlen);
     cout << ("XXX mask_frac = " + to_string(mask_frac) + "\n");
+#endif
+
+#if 0  // debug: print outputs
+    for (int i = 0; i < nrows; i++) {
+	cout << "XXX3\n";
+	for (int j = 0; j < rowlen; j++)
+	    cout << " " << (int)data0[i*rowlen+j];
+	cout << "\n";
+    }
 #endif
 }
 
@@ -582,6 +600,15 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 // The 'intensity' and 'weights' arrays have shapes (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk)
 void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
 {
+#if 0  // debug
+    for (int i = 0; i < 64; i++) {
+	cout << "XXX0";
+	for (int j = 0; j < 64; j++)
+	    cout << " " << intensity[i*stride+j];
+	cout << "\n";
+    }
+#endif
+
     if (fpga_count % fpga_counts_per_sample)
 	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by fpga_counts_per_sample");
 
@@ -598,9 +625,6 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
 	    int ipacket = if_outer * nt_outer + it_outer;
 
-	    // Packet offset in 'intensity' and 'weights' arrays
-	    int isrc_outer = (if_outer * nfreq_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
-
 	    // Copy input data into the { tmp_intensity, tmp_mask } arrays,
 	    // in order to "de-stride" and apply the wt_cutoff.
 	    
@@ -608,15 +632,15 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 		for (int if_inner = 0; if_inner < nfreq_per_packet; if_inner++) {
 		    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 			// Row offset in 'tmp_intensity' and 'tmp_mask' arrays
-			int idst = ibeam*nfreq_per_packet + if_inner;
-			idst = idst*nupfreq + iupfreq;
-			idst = idst*nt_per_packet;
+			int idst = ibeam * nfreq_per_packet * nupfreq * nt_per_packet;
+			idst += if_inner * nupfreq * nt_per_packet;
+			idst += iupfreq * nt_per_packet;
 
 			// Row offset in 'intensity' and 'weights' input arrays
-			int isrc = ibeam*nfreq_per_chunk + if_inner;
-			isrc = isrc*nupfreq + iupfreq;
-			isrc = isrc*nt_per_chunk;
-			isrc = isrc + isrc_outer;
+			int isrc = ibeam * nfreq_per_chunk * nupfreq * stride;
+			isrc += (if_outer * nfreq_per_packet + if_inner) * nupfreq * stride;
+			isrc += iupfreq * stride;
+			isrc += it_outer * nt_per_packet;
 
 			// Operate on contiguous "row" of length nt_per_packet
 			for (int it_inner = 0; it_inner < nt_per_packet; it_inner++) {
@@ -626,6 +650,15 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 		    }
 		}
 	    }
+
+#if 0  // debug
+	    for (int i = 0; i < 64; i++) {
+		cout << "XXX1";
+		for (int j = 0; j < 64; j++)
+		    cout << " " << tmp_intensity[i*64+j];
+		cout << "\n";
+	    }
+#endif
 
 	    encode_packet(nbeam, nfreq_per_packet, nupfreq, nt_per_packet,
 			  fpga_counts_per_sample, fpga_count,

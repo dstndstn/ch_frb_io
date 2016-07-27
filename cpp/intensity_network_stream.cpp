@@ -344,6 +344,19 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 
 	npackets_received++;
 
+#if 0   //debug
+	int ndata = packet_nbeam * packet_nfreq * packet_nupfreq * packet_ntsamp;
+	int mask_count = 0;
+
+	for (int i = 0; i < ndata; i++) {
+	    if ((packet_data[i] == uint8_t(0)) || (packet_data[i] == uint8_t(255)))
+		mask_count++;
+	}
+	 
+	double mask_frac = (double)mask_count / (double)ndata;
+	cout << ("XXX mask_frac=" + to_string(mask_frac) + "\n");
+#endif
+
 	// Loop over beams in the packet, matching to beam_assembler objects.
 
 	for (int ibeam = 0; ibeam < packet_nbeam; ibeam++) {
