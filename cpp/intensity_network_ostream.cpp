@@ -440,41 +440,12 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
     int nrows = nbeam * nfreq;
     int rowlen = nupfreq * ntsamp;
 
-#if 0  // debug: print outputs
-    for (int i = 0; i < nrows; i++) {
-	cout << "XXX2\n";
-	for (int j = 0; j < rowlen; j++)
-	    cout << " " << intensity[i*rowlen+j];
-	cout << "\n";
-    }
-#endif
-
     float *scale0 = (float *) (out + 24 + 2*nbeam + 2*nfreq);
     float *offset0 = (float *) (out + 24 + 2*nbeam + 2*nfreq + 4*nrows);
     uint8_t *data0 = out + 24 + 2*nbeam + 2*nfreq + 8*nrows;
 
     for (int irow = 0; irow < nrows; irow++)
 	encode_packet_row(rowlen, scale0+irow, offset0+irow, data0 + irow*rowlen, intensity + irow*rowlen, mask + irow*rowlen);
-
-#if 0  // debug
-    int mask_count = 0;
-    for (int i = 0; i < nrows*rowlen; i++) {
-	if ((data0[i] == (uint8_t)0) || (data0[i] == (uint8_t)255))
-	    mask_count++;
-    }
-
-    double mask_frac = (double)mask_count / (double)(nrows*rowlen);
-    cout << ("XXX mask_frac = " + to_string(mask_frac) + "\n");
-#endif
-
-#if 0  // debug: print outputs
-    for (int i = 0; i < nrows; i++) {
-	cout << "XXX3\n";
-	for (int j = 0; j < rowlen; j++)
-	    cout << " " << (int)data0[i*rowlen+j];
-	cout << "\n";
-    }
-#endif
 }
 
 
@@ -600,15 +571,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 // The 'intensity' and 'weights' arrays have shapes (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk)
 void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
 {
-#if 0  // debug
-    for (int i = 0; i < 64; i++) {
-	cout << "XXX0";
-	for (int j = 0; j < 64; j++)
-	    cout << " " << intensity[i*stride+j];
-	cout << "\n";
-    }
-#endif
-
     if (fpga_count % fpga_counts_per_sample)
 	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by fpga_counts_per_sample");
 
@@ -650,15 +612,6 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 		    }
 		}
 	    }
-
-#if 0  // debug
-	    for (int i = 0; i < 64; i++) {
-		cout << "XXX1";
-		for (int j = 0; j < 64; j++)
-		    cout << " " << tmp_intensity[i*64+j];
-		cout << "\n";
-	    }
-#endif
 
 	    encode_packet(nbeam, nfreq_per_packet, nupfreq, nt_per_packet,
 			  fpga_counts_per_sample, 
