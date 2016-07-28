@@ -10,69 +10,159 @@ namespace ch_frb_io {
 #endif
 
 
-void udp_packet_list::initialize(int beam_id_)
-{
-    if ((beam_id_ < 0) || (beam_id_ >= 65536))
-	throw runtime_error("ch_frb_io: udp_packet_list::initialize(): invalid beam_id");
+// -------------------------------------------------------------------------------------------------
+//
+// udp_packet_list
 
-    this->beam_id = beam_id_;
-    this->npackets = 0;
-    this->nbytes = 0;
+
+udp_packet_list::udp_packet_list(int max_npackets_, int max_nbytes_) :
+    max_npackets(max_npackets_), max_nbytes(max_nbytes_)
+{
+    if (max_npackets <= 0)
+	throw runtime_error("udp_packet_list constructor: expected max_npackets > 0");
+    if (max_nbytes <= 0)
+	throw runtime_error("udp_packet_list constructor: expected max_nbytes > 0");
+
+    // Note: this->curr_npackets and this->curr_nbytes are initialized to zero automatically.
+    this->buf = unique_ptr<uint8_t[]> (new uint8_t[max_nbytes + max_packet_size]);
+    this->off_buf = unique_ptr<int[]> (new int[max_npackets + 1]);
     this->is_full = false;
-
-    this->data_start = aligned_alloc<uint8_t> (max_bytes);
+    this->data_start = buf.get();
     this->data_end = data_start;
-
-    this->packet_offsets = aligned_alloc<int> (max_packets+1);
+    this->packet_offsets = off_buf.get();
     this->packet_offsets[0] = 0;
-}
-
-
-void udp_packet_list::destroy()
-{
-    free(data_start);
-    free(packet_offsets);
-
-    this->data_start = this->data_end = nullptr;
-    this->packet_offsets = nullptr;
-}
-
-
-void udp_packet_list::swap(udp_packet_list &p)
-{
-    std::swap(this->beam_id, p.beam_id);
-    std::swap(this->npackets, p.npackets);
-    std::swap(this->nbytes, p.nbytes);
-    std::swap(this->is_full, p.is_full);
-    std::swap(this->data_start, p.data_start);
-    std::swap(this->data_end, p.data_end);
-    std::swap(this->packet_offsets, p.packet_offsets);
 }
 
 
 void udp_packet_list::add_packet(int packet_nbytes)
 {
-    // decided to pay a few cpu cycles for an extra check here...
-    bool error = is_full || (packet_nbytes <= 0) || (packet_nbytes > max_packet_size);
-    if (_unlikely(error))
-	throw runtime_error("ch_frb_io: bad call to udp_packet_list::add_packet()");
+    if ((packet_nbytes <= 0) || (packet_nbytes > max_packet_size))
+	throw runtime_error("udp_packet_list::add_packet(): bad value of 'packet_nbytes'");
+    if (is_full)
+	throw runtime_error("udp_packet_list::add_packet() called on full packet_list");
 
-    this->npackets++;
-    this->nbytes += packet_nbytes;
-    this->is_full = (npackets >= max_packets) || (nbytes + max_packet_size >= max_bytes);
-    this->data_end = data_start + nbytes;
-    this->packet_offsets[npackets] = nbytes;
+    this->curr_npackets++;
+    this->curr_nbytes += packet_nbytes;
+    this->is_full = (curr_npackets >= max_npackets) || (curr_nbytes >= max_nbytes);
+    this->data_end = data_start + curr_nbytes;
+    this->packet_offsets[curr_npackets] = curr_nbytes;
 }
 
 
-void udp_packet_list::clear()
+void udp_packet_list::reset()
 {
-    this->npackets = 0;
-    this->nbytes = 0;
+    this->curr_npackets = 0;
+    this->curr_nbytes = 0;
     this->is_full = false;
     this->data_end = data_start;
     this->packet_offsets[0] = 0;
 }
 
 
-}  // ch_frb_io
+// -------------------------------------------------------------------------------------------------
+//
+// udp_packet_ringbuf
+
+
+udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_per_list_, int max_nbytes_per_list_, const std::string &dropmsg_)
+    : ringbuf_capacity(ringbuf_capacity_), 
+      max_npackets_per_list(max_npackets_per_list_),
+      max_nbytes_per_list(max_nbytes_per_list_), 
+      dropmsg(dropmsg_)
+{
+    if (ringbuf_capacity <= 0)
+	throw runtime_error("udp_packet_ringbuf constructor: expected ringbuf_capacity > 0");
+
+    this->ringbuf.resize(ringbuf_capacity);
+
+    for (int i = 0; i < ringbuf_capacity; i++) {
+	udp_packet_list l(max_npackets_per_list, max_nbytes_per_list);
+	std::swap(this->ringbuf[i], l);
+    }
+    
+    if (pthread_mutex_init(&this->lock, NULL) != 0)
+	throw runtime_error("pthread_mutex_init() failed?!");
+    if (pthread_cond_init(&this->cond_packets_added, NULL) != 0)
+	throw runtime_error("pthread_cond_init() failed?!");
+}
+
+
+udp_packet_ringbuf::~udp_packet_ringbuf()
+{
+    pthread_mutex_destroy(&lock);
+    pthread_cond_destroy(&cond_packets_added);
+}
+
+
+bool udp_packet_ringbuf::producer_put_packet_list(udp_packet_list &packet_list)
+{    
+    pthread_mutex_lock(&this->lock);
+
+    if (stream_ended) {
+	pthread_mutex_unlock(&this->lock);
+	return false;
+    }
+
+    if (ringbuf_size >= ringbuf_capacity) {
+	pthread_mutex_unlock(&this->lock);
+	packet_list.reset();
+
+	if (dropmsg.size() > 0)
+	    cerr << dropmsg << endl;
+	
+	return true;
+    }
+	
+    int i = (ringbuf_pos + ringbuf_size) % ringbuf_capacity;
+    std::swap(this->ringbuf[i], packet_list);
+    this->ringbuf_size++;
+
+    pthread_cond_broadcast(&this->cond_packets_added);
+    pthread_mutex_unlock(&this->lock);
+    packet_list.reset();
+    return true;
+}
+
+
+bool udp_packet_ringbuf::consumer_get_packet_list(udp_packet_list &packet_list)
+{
+    packet_list.reset();
+    pthread_mutex_lock(&this->lock);
+
+    for (;;) {
+	if (ringbuf_size > 0) {
+	    int i = ringbuf_pos % ringbuf_capacity;
+	    std::swap(this->ringbuf[i], packet_list);
+	    this->ringbuf_pos++;
+	    this->ringbuf_size--;
+	    
+	    pthread_mutex_unlock(&this->lock);
+	    return true;
+	}
+
+	if (stream_ended) {
+	    pthread_mutex_unlock(&this->lock);
+	    return false;
+	}
+
+	pthread_cond_wait(&this->cond_packets_added, &this->lock);
+    }
+}
+
+
+void udp_packet_ringbuf::end_stream()
+{
+    pthread_mutex_lock(&this->lock);
+    this->stream_ended = true;
+    pthread_cond_broadcast(&this->cond_packets_added);
+    pthread_mutex_unlock(&this->lock);
+}
+
+
+udp_packet_list udp_packet_ringbuf::allocate_packet_list() const
+{
+    return udp_packet_list(this->max_npackets_per_list, this->max_nbytes_per_list);
+}
+
+
+}  // namespace ch_frb_io

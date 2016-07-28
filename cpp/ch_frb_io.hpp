@@ -238,28 +238,75 @@ struct intensity_network_ostream : noncopyable {
 // Warning: this is a "dumb" struct with no C++ constructor/destructor/copy/move ops!
 // Caller is responsible for managing ownership and making sure initialize() gets paired with destroy()
 //
-struct udp_packet_list : noncopyable {
-    static constexpr int max_packets = 512;
-    static constexpr int max_bytes = 1024 * 1024;
-    static constexpr int max_packet_size = 16384;
+struct udp_packet_list {
+    // Assumes 10Gbps ethernet with jumbo frames enabled.
+    static constexpr int max_packet_size = 9000;
 
-    int beam_id;
-    int npackets;
-    int nbytes;
-    bool is_full;
+    // Initialized at construction.
+    int max_npackets = 0;
+    int max_nbytes = 0;
+    std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
+    std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
 
-    uint8_t *data_start;    // capacity=max_bytes, size=nbytes
-    uint8_t *data_end;      // always points to (data_start + nbytes)
-    int *packet_offsets;    // capacity=(max_packets+1), size=(npackets+1), element at index 'npackets' is equal to 'nbytes'
+    // Current state of buffer.
+    int curr_npackets = 0;
+    int curr_nbytes = 0;   // total size of all packets
+    bool is_full = true;
+
+    // Bare pointers.
+    uint8_t *data_start = nullptr;    // points to &buf[0]
+    uint8_t *data_end = nullptr;      // points to &buf[nbyes]
+    int *packet_offsets = nullptr;    // points to &off_buf[0].  Note that packet_offsets[npackets] is always equal to 'nbytes'.
+
+    udp_packet_list() { }   // default constructor makes a dummy udp_packet_list with max_npackets=max_nbytes=0.
+    udp_packet_list(int max_npackets, int max_nbytes);
+
+    // To add a packet, first add data by hand at 'data_end', then call add_packet().
+    void add_packet(int packet_nbytes);
+
+    // Doesn't deallocate buffers or change the max_* fields, but sets the current packet list to zero.
+    void reset();
+};
+
+
+struct udp_packet_ringbuf : noncopyable {
+    pthread_mutex_t lock;
+    pthread_cond_t cond_packets_added;
+    bool stream_ended = false;
+
+    const int ringbuf_capacity;
+    int ringbuf_size = 0;
+    int ringbuf_pos = 0;
+    std::vector<udp_packet_list> ringbuf;
+
+    // Specified at construction, used when new udp_packet_list objects are allocated
+    const int max_npackets_per_list;
+    const int max_nbytes_per_list;
     
-    void initialize(int beam_id);
-    void destroy();
+    // This message is printed to stderr whenever packets are dropped (if empty string, no message will be printed)
+    std::string dropmsg;
 
-    void swap(udp_packet_list &x);
-    void clear();   // doesn't deallocate buffers
+    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, const std::string &dropmsg);
+    ~udp_packet_ringbuf();
+    
+    //
+    // Important note!  These routines _swap_ their udp_packet_list argument with a packet_list in the ringbuf.
+    //
+    // I.e., producer_put_packet_list() is called with a full packet list, and swaps it for an empty packet list, which the
+    // producer thread can fill with packets.  Similary, consumer_get_packet_list() is called with a "junk" packet list (which
+    // may or may not be empty), and swaps it for a full packet list.
+    //
+    // The producer_put_packet_list() routine is nonblocking; if the ring buffer is full then it prints an error message 
+    // ("dropmsg") and discards the packets.  Both routines return false if stream has ended, true otherwise.
+    // 
+    bool producer_put_packet_list(udp_packet_list &l);
+    bool consumer_get_packet_list(udp_packet_list &l);
+    
+    // Can be called by either producer or consumer thread
+    void end_stream();
 
-    // assumes caller has already appended packet data at (data_buf + nbytes), returns true if buffer is full
-    void add_packet(int nbytes);
+    // Helper function to allocate packet_list with appropriate parameters
+    udp_packet_list allocate_packet_list() const;
 };
 
 
@@ -330,10 +377,15 @@ public:
     // Called by "downstream" thread
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
 
+    // Helper functions
+    udp_packet_list allocate_unassembled_packet_list() const;
+
     ~intensity_beam_assembler();
 
 private:
     static constexpr int unassembled_ringbuf_capacity = 16;
+    static constexpr int max_unassembled_packets_per_list = 512;
+    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
     static constexpr int assembled_ringbuf_capacity = 16;
 
     // The actual constructor is private, so it can be a helper function 
@@ -356,15 +408,12 @@ private:
     int fpga_counts_per_sample = 0;
     int nupfreq = 0;
 
-    udp_packet_list unassembled_ringbuf[unassembled_ringbuf_capacity];
-    int unassembled_ringbuf_pos = 0;
-    int unassembled_ringbuf_size = 0;
+    udp_packet_ringbuf unassembled_ringbuf;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;
     int assembled_ringbuf_size = 0;
 
-    pthread_cond_t cond_unassembled_packets_added;  // assembler thread waits here for packets
     pthread_cond_t cond_assembled_chunks_added;     // downstream thread waits here for assembled chunks
 };
 

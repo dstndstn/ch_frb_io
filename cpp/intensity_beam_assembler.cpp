@@ -12,7 +12,7 @@ namespace ch_frb_io {
 
 // defined later in this file
 static void *assembler_thread_main(void *opaque_arg);
-static void  assembler_thread_main2(intensity_beam_assembler *assembler, udp_packet_list &packet_list);
+static void  assembler_thread_main2(intensity_beam_assembler *assembler);
 
 // FIXME also in other places
 inline int packet_size(int nbeam, int nfreq, int nupfreq, int ntsamp)
@@ -46,28 +46,25 @@ shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_
 }
 
 
-intensity_beam_assembler::intensity_beam_assembler(int beam_id_) : beam_id(beam_id_)
+intensity_beam_assembler::intensity_beam_assembler(int beam_id_) 
+    : beam_id(beam_id_),
+      unassembled_ringbuf(unassembled_ringbuf_capacity, 
+			  max_unassembled_packets_per_list, 
+			  max_unassembled_nbytes_per_list, 
+			  "warning: assembler thread running too slow, dropping packets")
 {
     if ((beam_id < 0) || (beam_id >= 65536))
 	throw runtime_error("intensity_beam_constructor: invalid beam_id");
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembler_state_changed, NULL);
-    pthread_cond_init(&this->cond_unassembled_packets_added, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
-
-    for (int i = 0; i < unassembled_ringbuf_capacity; i++)
-	unassembled_ringbuf[i].initialize(beam_id);
 }
 
 
 intensity_beam_assembler::~intensity_beam_assembler()
 {
-    for (int i = 0; i < unassembled_ringbuf_capacity; i++)
-	unassembled_ringbuf[i].destroy();
-
     pthread_cond_destroy(&this->cond_assembler_state_changed);
-    pthread_cond_destroy(&this->cond_unassembled_packets_added);
     pthread_cond_destroy(&this->cond_assembled_chunks_added);
     pthread_mutex_destroy(&this->lock);
 }
@@ -140,7 +137,6 @@ void intensity_beam_assembler::end_stream(bool join_thread)
 
     // Wake up all threads in sight (overkill but that's OK)
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_cond_broadcast(&this->cond_unassembled_packets_added);
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 
     if (join_thread && !this->assembler_thread_joined) {
@@ -150,70 +146,27 @@ void intensity_beam_assembler::end_stream(bool join_thread)
 
     pthread_mutex_unlock(&this->lock);
 
+    this->unassembled_ringbuf.end_stream();
+
     if (call_join_after_releasing_lock)
 	pthread_join(this->assembler_thread, NULL);
 }
 
 
-// XXX don't forget to write comment here explaining semantics of the 'packet_list' arg
+udp_packet_list intensity_beam_assembler::allocate_unassembled_packet_list() const
+{
+    return this->unassembled_ringbuf.allocate_packet_list();
+}
+
 bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
 {
-    if (_unlikely(packet_list.beam_id != this->beam_id))
-	throw runtime_error("ch_frb_io: internal error: beam_id mismatch in intensity_beam_assembler::put_unassembled_packets()");
-
-    pthread_mutex_lock(&this->lock);
-
-    if (_unlikely(!stream_started)) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::put_unassembled_packets() was called, but start_stream() was never called");
-    }
-
-    if (stream_ended) {
-	pthread_mutex_unlock(&this->lock);
-	return false;
-    }
-	
-    if (unassembled_ringbuf_size >= unassembled_ringbuf_capacity) {
-	pthread_mutex_unlock(&this->lock);
-	cerr << "ch_frb_io: warning: assembler thread is running too slow, some packets will be dropped\n";
-	packet_list.clear();
-	return true;
-    }
-	
-    int i = (unassembled_ringbuf_pos + unassembled_ringbuf_size) % unassembled_ringbuf_capacity;
-    this->unassembled_ringbuf[i].swap(packet_list);
-    this->unassembled_ringbuf_size++;
-
-    pthread_cond_broadcast(&this->cond_unassembled_packets_added);
-    pthread_mutex_unlock(&this->lock);
-    packet_list.clear();
-    return true;
+    return this->unassembled_ringbuf.producer_put_packet_list(packet_list);
 }
 
 
 bool intensity_beam_assembler::get_unassembled_packets(udp_packet_list &packet_list)
 {
-    packet_list.clear();
-    pthread_mutex_lock(&this->lock);
-
-    for (;;) {
-	if (unassembled_ringbuf_size > 0) {
-	    int i = unassembled_ringbuf_pos % unassembled_ringbuf_capacity;
-	    this->unassembled_ringbuf[i].swap(packet_list);
-	    this->unassembled_ringbuf_pos++;
-	    this->unassembled_ringbuf_size--;
-	    
-	    pthread_mutex_unlock(&this->lock);
-	    return true;
-	}
-
-	if (stream_ended) {
-	    pthread_mutex_unlock(&this->lock);
-	    return false;
-	}
-
-	pthread_cond_wait(&this->cond_unassembled_packets_added, &this->lock);
-    }
+    return this->unassembled_ringbuf.consumer_get_packet_list(packet_list);
 }
 
 
@@ -316,10 +269,7 @@ static void *assembler_thread_main(void *opaque_arg)
     assembler->assembler_thread_startup();
 
     try {
-	udp_packet_list packet_list;
-	packet_list.initialize(assembler->beam_id);
-	assembler_thread_main2(assembler.get(), packet_list);
-	packet_list.destroy();
+	assembler_thread_main2(assembler.get());
     } catch (...) {
 	assembler->end_stream(false);  // the "false" means "nonblocking" (otherwise we'd deadlock!)
 	throw;
@@ -332,9 +282,10 @@ static void *assembler_thread_main(void *opaque_arg)
 }
 
 
-static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_packet_list &unassembled_packet_list)
+static void assembler_thread_main2(intensity_beam_assembler *assembler)
 {
     int assembler_beam_id = assembler->beam_id;
+    udp_packet_list unassembled_packet_list = assembler->allocate_unassembled_packet_list();
 
     // The 'initialized' flag refers to 'assembler_it0', 'chunk0_*', and 'chunk1_*'
     bool initialized = false;
@@ -372,7 +323,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler, udp_pack
 	    return;
 	}
 
-	for (int ipacket = 0; ipacket < unassembled_packet_list.npackets; ipacket++) {
+	for (int ipacket = 0; ipacket < unassembled_packet_list.curr_npackets; ipacket++) {
 	    const uint8_t *packet = unassembled_packet_list.data_start + unassembled_packet_list.packet_offsets[ipacket];
 	    int packet_nbytes = unassembled_packet_list.packet_offsets[ipacket+1] - unassembled_packet_list.packet_offsets[ipacket];
 

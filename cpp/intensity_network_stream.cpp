@@ -15,7 +15,7 @@ namespace ch_frb_io {
 
 // Defined later in this file
 static void *network_thread_main(void *opaque_arg);
-static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists);   // returns npackets_received
+static ssize_t network_thread_main2(intensity_network_stream *stream);
 
 
 // -------------------------------------------------------------------------------------------------
@@ -209,22 +209,7 @@ static void *network_thread_main(void *opaque_arg)
     ssize_t npackets_received = 0;
 
     try {
-	// It's convenient to allocate the udp_packet_lists before calling network_thread_main2()
-	// FIXME this seems a little awkward, is there a better way?
-
-	int nassemblers = stream->assemblers.size();
-
-	udp_packet_list *packet_lists = new udp_packet_list[nassemblers];
-	for (int i = 0; i < nassemblers; i++)
-	    packet_lists[i].initialize(stream->assemblers[i]->beam_id);
-	
-	npackets_received = network_thread_main2(stream.get(), packet_lists);
-
-	for (int i = 0; i < nassemblers; i++)
-	    packet_lists[i].destroy();
-
-	delete[] packet_lists;
-
+	npackets_received = network_thread_main2(stream.get());
     } catch (...) {
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
@@ -238,7 +223,7 @@ static void *network_thread_main(void *opaque_arg)
 
 
 // Returns number of packets received
-static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet_list *packet_lists)
+static ssize_t network_thread_main2(intensity_network_stream *stream)
 {
     // FIXME is 2MB socket_bufsize a good choice?  I would have guessed a larger value 
     // would be better, but 2MB is the max allowed on my osx laptop.
@@ -247,11 +232,17 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
     int nassemblers = stream->assemblers.size();
 
     intensity_beam_assembler *assemblers[nassemblers];
-    for (int i = 0; i < nassemblers; i++)
-	assemblers[i] = stream->assemblers[i].get();
+    vector<udp_packet_list> assembler_packet_lists(nassemblers);
+    int assembler_beam_ids[nassemblers];
 
-    vector<uint8_t> packet_vec(udp_packet_list::max_packet_size);
-    uint8_t *packet = &packet_vec[0];
+    for (int i = 0; i < nassemblers; i++) {
+	assemblers[i] = stream->assemblers[i].get();
+	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
+	assembler_beam_ids[i] = assemblers[i]->beam_id;
+    }
+    
+    vector<uint8_t> packet_buf(udp_packet_list::max_packet_size);
+    uint8_t *packet = &packet_buf[0];
 
     //
     // Create socket
@@ -319,7 +310,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
 	if (_unlikely(packet_nbytes == 24)) {
 	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
-	    return npackets_received;   // Note: this branch is the only way out of the main packet loop
+	    break;   // Note: this branch is the only way out of the main packet loop
 	}
 	
 	// The following way of writing the comparisons (using uint64_t) guarantees no overflow
@@ -353,7 +344,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 
 	    int assembler_ix;
 	    for (assembler_ix = 0; assembler_ix < nassemblers; assembler_ix++) {
-		if (packet_lists[assembler_ix].beam_id == beam_id)
+		if (assembler_beam_ids[assembler_ix] == beam_id)
 		    break;   // found assembler
 	    }
 
@@ -362,7 +353,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 	    
 	    // Make subpacket
 	    
-	    uint8_t *subpacket = packet_lists[assembler_ix].data_end;
+	    uint8_t *subpacket = assembler_packet_lists[assembler_ix].data_end;
 	    uint8_t *subpacket_freq_ids = subpacket + 26;
 	    uint8_t *subpacket_scales = subpacket + 26 + 2*packet_nfreq;
 	    uint8_t *subpacket_offsets = subpacket + 26 + 6*packet_nfreq;
@@ -381,13 +372,13 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 	    memcpy(subpacket_offsets, packet_offsets + 4*ibeam*packet_nfreq, 4*packet_nfreq);
 	    memcpy(subpacket_data, packet_data + ibeam*subpacket_data_size, subpacket_data_size);
 	    
-	    packet_lists[assembler_ix].add_packet(subpacket_total_size);
+	    assembler_packet_lists[assembler_ix].add_packet(subpacket_total_size);
 
-	    if (!packet_lists[assembler_ix].is_full)
+	    if (!assembler_packet_lists[assembler_ix].is_full)
 		continue;
 
 	    // Packet list is full, so send it to the assembler thread.
-	    bool assembler_alive = assemblers[assembler_ix]->put_unassembled_packets(packet_lists[assembler_ix]);
+	    bool assembler_alive = assemblers[assembler_ix]->put_unassembled_packets(assembler_packet_lists[assembler_ix]);
 
 	    if (!assembler_alive) {
 		// Is this what we should do?
@@ -396,6 +387,12 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, udp_packet
 	    }
 	}
     }
+
+    for (int i = 0; i < nassemblers; i++)
+	if (assembler_packet_lists[i].curr_npackets > 0)
+	    assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
+
+    return npackets_received;
 }
 
 
