@@ -105,6 +105,48 @@ std::unique_ptr<T> make_unique(Args&& ...args)
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 
+inline void xpthread_mutex_init(pthread_mutex_t *lock)
+{
+    if (pthread_mutex_init(lock, NULL) != 0)
+        throw std::runtime_error("pthread_mutex_init() failed?!");    	    
+}
+
+inline void xpthread_cond_init(pthread_cond_t *cond)
+{
+    if (pthread_cond_init(cond, NULL) != 0)
+        throw std::runtime_error("pthread_cond_init() failed?!");    	    
+}
+
+template<typename T> inline void xpthread_create(pthread_t *thread, void *(*thread_main)(void *), const std::shared_ptr<T> &arg, const std::string &thread_name)
+{
+    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
+    std::shared_ptr<T> *p = new std::shared_ptr<T> (arg);
+
+    // If pthread_create() succeeds, then spawned thread is responsible for 'delete p'
+    int err = pthread_create(thread, NULL, thread_main, NULL);
+
+    if (err) {
+	delete p;
+	throw std::runtime_error("couldn't create " + thread_name + ": " + strerror(errno));
+    }
+}
+
+template<typename T> inline std::shared_ptr<T> xpthread_get_arg(void *opaque_arg, const std::string &thread_name)
+{
+    if (!opaque_arg)
+	throw std::runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to " + thread_name);
+
+    std::shared_ptr<T> *arg = (std::shared_ptr<T> *) opaque_arg;
+    std::shared_ptr<T> ret = *arg;
+    delete arg;
+
+    if (!ret)
+	throw std::runtime_error("ch_frb_io: internal error: empty pointer passed to " + thread_name);
+
+    return ret;
+}
+
+
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
 template<typename T> extern T lexical_cast(const std::string &x);
 

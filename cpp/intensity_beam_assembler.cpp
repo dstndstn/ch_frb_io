@@ -160,7 +160,8 @@ udp_packet_list intensity_beam_assembler::allocate_unassembled_packet_list() con
 
 bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
 {
-    return this->unassembled_ringbuf.producer_put_packet_list(packet_list);
+    bool is_blocking = false;
+    return this->unassembled_ringbuf.producer_put_packet_list(packet_list, is_blocking);
 }
 
 

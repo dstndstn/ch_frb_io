@@ -17,10 +17,6 @@ namespace ch_frb_io {
 
 template<typename T> struct hdf5_extendable_dataset;
 
-// helper class defined in intensity_network_ostream.cpp
-struct chunk_exchanger;
-
-
 struct noncopyable
 {
     noncopyable() { }
@@ -176,68 +172,9 @@ struct intensity_hdf5_ofile {
 
 // -------------------------------------------------------------------------------------------------
 //
-// Network ostream
+// Helper classes for network code
 
 
-//
-// The ostream writes data in "chunks", which are packetized into one or more packets.
-//
-// The constructor spawns a network thread.
-//
-// The ostream is currently (1) synchronous, meaning that it blocks until the network thread
-// is ready to send packets, (2) greedy, meaning that it sends data as rapidly as possible.
-//
-// FIXME: modify (2) by including a "throughput" arg.
-//  
-struct intensity_network_ostream : noncopyable {
-    const int nbeam;
-    const int nupfreq;
-    const int nfreq_per_chunk;
-    const int nfreq_per_packet;
-    const int nt_per_chunk;
-    const int nt_per_packet;
-    const int fpga_counts_per_sample;
-    const float wt_cutoff;
-
-    const std::vector<uint16_t> ibeam;
-    const std::vector<uint16_t> ifreq_chunk;
-
-    pthread_t network_thread;
-    bool network_thread_valid = false;
-
-    // shared data structure for communicating with network thread
-    std::shared_ptr<chunk_exchanger> exchanger;
-    
-    // buffers for packet encoding
-    std::vector<float> tmp_intensity_vec;
-    std::vector<float> tmp_mask_vec;
-    uint8_t *packet_buf = nullptr;
-    int nbytes_per_packet = 0;
-    
-    intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
-			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
-			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-			      float wt_cutoff);
-
-    ~intensity_network_ostream();
-
-    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
-    
-    void end_stream();
-};
-
-
-// -------------------------------------------------------------------------------------------------
-//
-// The packet input stream case is more complicated!
-
-
-//
-// Helper class which exchanges data between intensity_packet_stream and intensity_beam_assembler.
-//
-// Warning: this is a "dumb" struct with no C++ constructor/destructor/copy/move ops!
-// Caller is responsible for managing ownership and making sure initialize() gets paired with destroy()
-//
 struct udp_packet_list {
     // Assumes 10Gbps ethernet with jumbo frames enabled.
     static constexpr int max_packet_size = 9000;
@@ -272,6 +209,7 @@ struct udp_packet_list {
 struct udp_packet_ringbuf : noncopyable {
     pthread_mutex_t lock;
     pthread_cond_t cond_packets_added;
+    pthread_cond_t cond_packets_removed;
     bool stream_ended = false;
 
     const int ringbuf_capacity;
@@ -286,7 +224,7 @@ struct udp_packet_ringbuf : noncopyable {
     // This message is printed to stderr whenever packets are dropped (if empty string, no message will be printed)
     std::string dropmsg;
 
-    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, const std::string &dropmsg);
+    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, const std::string &dropmsg = std::string());
     ~udp_packet_ringbuf();
     
     //
@@ -299,7 +237,7 @@ struct udp_packet_ringbuf : noncopyable {
     // The producer_put_packet_list() routine is nonblocking; if the ring buffer is full then it prints an error message 
     // ("dropmsg") and discards the packets.  Both routines return false if stream has ended, true otherwise.
     // 
-    bool producer_put_packet_list(udp_packet_list &l);
+    bool producer_put_packet_list(udp_packet_list &l, bool is_blocking);
     bool consumer_get_packet_list(udp_packet_list &l);
     
     // Can be called by either producer or consumer thread
@@ -330,6 +268,94 @@ struct assembled_chunk : noncopyable {
     assembled_chunk(int beam_id, int nupfreq, int fpga_counts_per_sample, uint64_t chunk_t0);
     ~assembled_chunk();
 };
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// Network ostream
+
+
+//
+// The ostream writes data in "chunks", which are packetized into one or more packets.
+//
+// The constructor spawns a network thread.
+//
+// The ostream is currently (1) synchronous, meaning that it blocks until the network thread
+// is ready to send packets, (2) greedy, meaning that it sends data as rapidly as possible.
+//
+// FIXME: modify (2) by including a "throughput" arg.
+//  
+struct intensity_network_ostream : noncopyable {
+public:
+    // De facto constructor
+    static auto make(const std::string &dstname, const std::vector<int> &ibeam, 
+		     const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
+		     int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
+		     float wt_cutoff) 
+	-> std::shared_ptr<intensity_network_ostream>;
+
+    ~intensity_network_ostream();
+
+    // Called from 'external' context (i.e. same context that called make())
+    void wait_for_network_thread_startup();
+    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking=true);
+    
+    // Called from network thread
+    int get_sockfd() const                          { return sockfd; }
+    bool get_packet_list(udp_packet_list &l) const  { return ringbuf->consumer_get_packet_list(l); }
+    udp_packet_list allocate_packet_list() const    { return ringbuf->allocate_packet_list(); }
+    void network_thread_startup();
+
+    // Can be called from either external context or network thread
+    void end_stream(bool join_network_thread);
+    
+
+protected:
+    // FIXME a loose end here: is there a way to get the max packet size at runtime?  In addition 
+    // to being more reliable, this would check to make sure jumbo frames are enabled.
+    static constexpr int max_packet_size = 8910;   // conservative value assuming 10gbps ethernet w/jumbo frames
+    static constexpr int ringbuf_capacity = 16;
+
+    const int sockfd;
+    const int nbeam;
+    const int nupfreq;
+    const int nfreq_per_chunk;
+    const int nfreq_per_packet;
+    const int nt_per_chunk;
+    const int nt_per_packet;
+    const int fpga_counts_per_sample;
+    const float wt_cutoff;
+
+    const std::vector<uint16_t> ibeam;
+    const std::vector<uint16_t> ifreq_chunk;
+    
+    pthread_t network_thread;
+    pthread_mutex_t state_lock;
+    pthread_cond_t cond_state_changed;
+    bool network_thread_started = false;
+    bool network_thread_joined = false;
+
+    // ring buffer used to exchange packets with network thread
+    std::unique_ptr<udp_packet_ringbuf> ringbuf;
+    int npackets_per_chunk;
+    int nbytes_per_packet;
+    
+    // buffers for packet encoding
+    std::vector<float> tmp_intensity_vec;
+    std::vector<float> tmp_mask_vec;
+    udp_packet_list tmp_packet_list;
+
+    // Real constructor is protected
+    intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
+			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
+			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
+			      float wt_cutoff);
+};
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// The packet input stream case is more complicated!
 
 
 //
@@ -383,10 +409,10 @@ public:
     ~intensity_beam_assembler();
 
 private:
-    static constexpr int unassembled_ringbuf_capacity = 16;
+    static constexpr int unassembled_ringbuf_capacity = 8;
     static constexpr int max_unassembled_packets_per_list = 512;
     static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
-    static constexpr int assembled_ringbuf_capacity = 16;
+    static constexpr int assembled_ringbuf_capacity = 8;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.

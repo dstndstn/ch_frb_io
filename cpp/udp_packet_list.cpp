@@ -79,11 +79,10 @@ udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_p
 	udp_packet_list l(max_npackets_per_list, max_nbytes_per_list);
 	std::swap(this->ringbuf[i], l);
     }
-    
-    if (pthread_mutex_init(&this->lock, NULL) != 0)
-	throw runtime_error("pthread_mutex_init() failed?!");
-    if (pthread_cond_init(&this->cond_packets_added, NULL) != 0)
-	throw runtime_error("pthread_cond_init() failed?!");
+
+    xpthread_mutex_init(&this->lock);
+    xpthread_cond_init(&this->cond_packets_added);
+    xpthread_cond_init(&this->cond_packets_removed);
 }
 
 
@@ -91,36 +90,43 @@ udp_packet_ringbuf::~udp_packet_ringbuf()
 {
     pthread_mutex_destroy(&lock);
     pthread_cond_destroy(&cond_packets_added);
+    pthread_cond_destroy(&cond_packets_removed);
 }
 
 
-bool udp_packet_ringbuf::producer_put_packet_list(udp_packet_list &packet_list)
+bool udp_packet_ringbuf::producer_put_packet_list(udp_packet_list &packet_list, bool is_blocking)
 {    
     pthread_mutex_lock(&this->lock);
 
-    if (stream_ended) {
-	pthread_mutex_unlock(&this->lock);
-	return false;
-    }
+    for (;;) {
+	if (stream_ended) {
+	    pthread_mutex_unlock(&this->lock);
+	    return false;
+	}
 
-    if (ringbuf_size >= ringbuf_capacity) {
-	pthread_mutex_unlock(&this->lock);
-	packet_list.reset();
-
-	if (dropmsg.size() > 0)
-	    cerr << dropmsg << endl;
+	if (ringbuf_size < ringbuf_capacity) {
+	    int i = (ringbuf_pos + ringbuf_size) % ringbuf_capacity;
+	    std::swap(this->ringbuf[i], packet_list);
+	    this->ringbuf_size++;
 	
-	return true;
-    }
-	
-    int i = (ringbuf_pos + ringbuf_size) % ringbuf_capacity;
-    std::swap(this->ringbuf[i], packet_list);
-    this->ringbuf_size++;
+	    pthread_cond_broadcast(&this->cond_packets_added);
+	    pthread_mutex_unlock(&this->lock);
+	    packet_list.reset();
+	    return true;
+	}
 
-    pthread_cond_broadcast(&this->cond_packets_added);
-    pthread_mutex_unlock(&this->lock);
-    packet_list.reset();
-    return true;
+	if (!is_blocking) {
+	    pthread_mutex_unlock(&this->lock);
+	    packet_list.reset();
+	    
+	    if (dropmsg.size() > 0)
+		cerr << dropmsg << endl;
+	    
+	    return true;
+	}
+
+	pthread_cond_wait(&this->cond_packets_removed, &this->lock);
+    }
 }
 
 
@@ -135,7 +141,8 @@ bool udp_packet_ringbuf::consumer_get_packet_list(udp_packet_list &packet_list)
 	    std::swap(this->ringbuf[i], packet_list);
 	    this->ringbuf_pos++;
 	    this->ringbuf_size--;
-	    
+
+	    pthread_cond_broadcast(&this->cond_packets_removed);
 	    pthread_mutex_unlock(&this->lock);
 	    return true;
 	}
@@ -155,6 +162,7 @@ void udp_packet_ringbuf::end_stream()
     pthread_mutex_lock(&this->lock);
     this->stream_ended = true;
     pthread_cond_broadcast(&this->cond_packets_added);
+    pthread_cond_broadcast(&this->cond_packets_removed);
     pthread_mutex_unlock(&this->lock);
 }
 
