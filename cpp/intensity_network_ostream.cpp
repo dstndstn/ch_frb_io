@@ -270,7 +270,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 
     int capacity = intensity_network_ostream::ringbuf_capacity;
     string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
-    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_packet, dropmsg);
+    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, npackets_per_chunk * nbytes_per_packet, dropmsg);
     
     // Allocate encoding buffers
     int ndata = nbeam * nfreq_per_packet * nupfreq * nt_per_packet;
@@ -360,7 +360,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 			  tmp_packet_list.data_end,                              // output buffer for encoding
 			  &ibeam[0], &ifreq_chunk[if_outer * nfreq_per_packet],  // ibeam, ifreq arrays
 			  tmp_intensity, tmp_mask);                              // input buffers for encoding
-	    
+
 	    tmp_packet_list.add_packet(nbytes_per_packet);
 	}
     }
@@ -416,9 +416,10 @@ auto intensity_network_ostream::make(const std::string &dstname, const std::vect
 static void *network_thread_main(void *opaque_arg)
 {
     auto stream = xpthread_get_arg<intensity_network_ostream> (opaque_arg, "network write thread");
-    ssize_t npackets_sent = 0;
+    stream->network_thread_startup();
 
     cerr << "ch_frb_io: network output thread starting\n";
+    ssize_t npackets_sent = 0;
 
     try {
 	npackets_sent = network_thread_main2(stream.get());
