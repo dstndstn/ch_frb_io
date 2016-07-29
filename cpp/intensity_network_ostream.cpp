@@ -282,6 +282,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 
 intensity_network_ostream::~intensity_network_ostream()
 {
+    close(sockfd);
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
 }
