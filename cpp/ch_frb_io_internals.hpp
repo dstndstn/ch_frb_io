@@ -123,7 +123,7 @@ template<typename T> inline void xpthread_create(pthread_t *thread, void *(*thre
     std::shared_ptr<T> *p = new std::shared_ptr<T> (arg);
 
     // If pthread_create() succeeds, then spawned thread is responsible for 'delete p'
-    int err = pthread_create(thread, NULL, thread_main, NULL);
+    int err = pthread_create(thread, NULL, thread_main, p);
 
     if (err) {
 	delete p;
