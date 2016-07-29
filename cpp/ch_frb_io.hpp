@@ -434,7 +434,7 @@ private:
     int fpga_counts_per_sample = 0;
     int nupfreq = 0;
 
-    udp_packet_ringbuf unassembled_ringbuf;
+    std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;

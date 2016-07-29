@@ -47,11 +47,7 @@ shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_
 
 
 intensity_beam_assembler::intensity_beam_assembler(int beam_id_) 
-    : beam_id(beam_id_),
-      unassembled_ringbuf(unassembled_ringbuf_capacity, 
-			  max_unassembled_packets_per_list, 
-			  max_unassembled_nbytes_per_list, 
-			  "warning: assembler thread running too slow, dropping packets")
+    : beam_id(beam_id_)
 {
     if ((beam_id < 0) || (beam_id >= 65536))
 	throw runtime_error("intensity_beam_constructor: invalid beam_id");
@@ -59,6 +55,13 @@ intensity_beam_assembler::intensity_beam_assembler(int beam_id_)
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembler_state_changed, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
+
+    int capacity = intensity_beam_assembler::unassembled_ringbuf_capacity;
+    int max_npackets = intensity_beam_assembler::max_unassembled_packets_per_list;
+    int max_nbytes = intensity_beam_assembler::max_unassembled_nbytes_per_list;
+    string dropstr = "warning: assembler thread running too slow, dropping packets";
+
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr);
 }
 
 
@@ -146,7 +149,7 @@ void intensity_beam_assembler::end_stream(bool join_thread)
 
     pthread_mutex_unlock(&this->lock);
 
-    this->unassembled_ringbuf.end_stream();
+    this->unassembled_ringbuf->end_stream();
 
     if (call_join_after_releasing_lock)
 	pthread_join(this->assembler_thread, NULL);
@@ -155,19 +158,19 @@ void intensity_beam_assembler::end_stream(bool join_thread)
 
 udp_packet_list intensity_beam_assembler::allocate_unassembled_packet_list() const
 {
-    return this->unassembled_ringbuf.allocate_packet_list();
+    return this->unassembled_ringbuf->allocate_packet_list();
 }
 
 bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
 {
     bool is_blocking = false;
-    return this->unassembled_ringbuf.producer_put_packet_list(packet_list, is_blocking);
+    return this->unassembled_ringbuf->producer_put_packet_list(packet_list, is_blocking);
 }
 
 
 bool intensity_beam_assembler::get_unassembled_packets(udp_packet_list &packet_list)
 {
-    return this->unassembled_ringbuf.consumer_get_packet_list(packet_list);
+    return this->unassembled_ringbuf->consumer_get_packet_list(packet_list);
 }
 
 
