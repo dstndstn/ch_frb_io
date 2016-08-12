@@ -28,7 +28,7 @@ struct L0_L1_header {
     int16_t     data_nbytes;        // byte offset 4
 
     // This is the duration of a time sample, in FPGA counts.
-    // The duration in seconds is dt = (2.5e-6 * fpga_counts_per_sample)
+    // The duration in seconds is dt = (2.56e-6 * fpga_counts_per_sample)
     uint16_t    fpga_counts_per_sample;   // byte offset 6
 
     // This is the time index (in FPGA counts) of the first time sample in the packet.
