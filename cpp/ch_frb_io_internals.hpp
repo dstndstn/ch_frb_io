@@ -48,6 +48,14 @@ template<typename T> inline void uniform_rand(std::mt19937 &rng, T *p, int n)
 	p[i] = uniform_rand(rng);
 }
 
+template<typename T> inline void randomly_permute(std::mt19937 &rng, std::vector<T> &v)
+{
+    for (size_t i = v.size()-1; i > 0; i--) {
+	size_t j = randint(rng, 0, i+1);
+	std::swap(v[i], v[j]);
+    }
+}
+
 inline bool file_exists(const std::string &filename)
 {
     struct stat s;

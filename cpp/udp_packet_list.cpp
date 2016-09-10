@@ -10,6 +10,10 @@ namespace ch_frb_io {
 #endif
 
 
+static_assert(constants::max_input_udp_packet_size >= constants::max_output_udp_packet_size,
+	      "udp_packet_list.cpp assumes constants::max_input_udp_packet_size >= constants::max_output_udp_packet_size");
+
+
 // -------------------------------------------------------------------------------------------------
 //
 // udp_packet_list
@@ -24,7 +28,7 @@ udp_packet_list::udp_packet_list(int max_npackets_, int max_nbytes_) :
 	throw runtime_error("udp_packet_list constructor: expected max_nbytes > 0");
 
     // Note: this->curr_npackets and this->curr_nbytes are initialized to zero automatically.
-    this->buf = unique_ptr<uint8_t[]> (new uint8_t[max_nbytes + max_packet_size]);
+    this->buf = unique_ptr<uint8_t[]> (new uint8_t[max_nbytes + constants::max_input_udp_packet_size]);
     this->off_buf = unique_ptr<int[]> (new int[max_npackets + 1]);
     this->is_full = false;
     this->data_start = buf.get();
@@ -36,7 +40,7 @@ udp_packet_list::udp_packet_list(int max_npackets_, int max_nbytes_) :
 
 void udp_packet_list::add_packet(int packet_nbytes)
 {
-    if ((packet_nbytes <= 0) || (packet_nbytes > max_packet_size))
+    if ((packet_nbytes <= 0) || (packet_nbytes > constants::max_input_udp_packet_size))
 	throw runtime_error("udp_packet_list::add_packet(): bad value of 'packet_nbytes'");
     if (is_full)
 	throw runtime_error("udp_packet_list::add_packet() called on full packet_list");

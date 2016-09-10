@@ -227,10 +227,10 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     // Tons of argument checking.
     // The { nbeam, ibeam, nfreq_per_chunk, ifreq_chunk } args have already been checked in _init_ivec().
 
-    if (nupfreq <= 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nupfreq > 0");
-    if (nupfreq > 16)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nupfreq <= 16");
+    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq");
+    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample");
 
     if (nfreq_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_packet > 0");
@@ -244,11 +244,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     if (nt_per_chunk % nt_per_packet)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk to be a multiple of nt_per_packet");
 
-    if (fpga_counts_per_sample <= 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected fpga_counts_per_sample to be > 0");
-    if (fpga_counts_per_sample >= 65536)
-	throw runtime_error("chime intensity_network_ostream constructor: expected fpga_counts_per_sample to be < 2^16");
-
     if (wt_cutoff < 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be >= 0.0");
     if (target_gbps < 0.0)
@@ -257,7 +252,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     this->npackets_per_chunk = (nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet);
     this->nbytes_per_packet = packet_size(nbeam, nfreq_per_packet, nupfreq, nt_per_packet);
 
-    if (nbytes_per_packet >= max_packet_size)
+    if (nbytes_per_packet >= constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
 
     stringstream ss;
@@ -271,7 +266,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     xpthread_mutex_init(&this->state_lock);
     xpthread_cond_init(&this->cond_state_changed);
 
-    int capacity = intensity_network_ostream::ringbuf_capacity;
+    int capacity = constants::output_ringbuf_capacity;
     string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, npackets_per_chunk * nbytes_per_packet, dropmsg);
     

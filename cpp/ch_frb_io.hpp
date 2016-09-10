@@ -27,6 +27,39 @@ struct noncopyable
 
 // -------------------------------------------------------------------------------------------------
 //
+// Compile-time constants
+
+
+namespace constants {
+    // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
+    static constexpr int nfreq_coarse = 1024;
+
+    // Network parameters
+    static constexpr int default_udp_port = 10252;
+    static constexpr int max_input_udp_packet_size = 9000;
+    static constexpr int max_output_udp_packet_size = 8910;
+
+    // Parameters of ring buffer between output stream object and network output thread
+    static constexpr int output_ringbuf_capacity = 16;
+
+    // Parameters of ring buffer between network output thread and assembler threads
+    static constexpr int unassembled_ringbuf_capacity = 8;
+    static constexpr int max_unassembled_packets_per_list = 512;
+    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
+
+    // Parameters of ring buffers between assembler threads and pipeline threads.
+    static constexpr int assembled_ringbuf_capacity = 8;
+    static constexpr int nt_per_assembled_chunk = 1024;
+    
+    // These parameters don't really affect anything but appear in range-checking asserts.
+    static constexpr int max_allowed_beam_id = 65535;
+    static constexpr int max_allowed_nupfreq = 64;
+    static constexpr int max_allowed_fpga_counts_per_sample = 1024;
+};
+
+
+// -------------------------------------------------------------------------------------------------
+//
 // HDF5 file I/O
 //
 // Note that there are two classes here: one for reading (intensity_hdf5_file),
@@ -176,9 +209,6 @@ struct intensity_hdf5_ofile {
 
 
 struct udp_packet_list {
-    // Assumes 10Gbps ethernet with jumbo frames enabled.
-    static constexpr int max_packet_size = 9000;
-
     // Initialized at construction.
     int max_npackets = 0;
     int max_nbytes = 0;
@@ -249,8 +279,6 @@ struct udp_packet_ringbuf : noncopyable {
 
 
 struct assembled_chunk : noncopyable {
-    static constexpr int nt_per_chunk = 1024;
-
     // Stream parameters
     int beam_id;
     int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
@@ -324,11 +352,6 @@ public:
     
 
 protected:
-    // FIXME a loose end here: is there a way to get the max packet size at runtime?  In addition 
-    // to being more reliable, this would check to make sure jumbo frames are enabled.
-    static constexpr int max_packet_size = 8910;   // conservative value assuming 10gbps ethernet w/jumbo frames
-    static constexpr int ringbuf_capacity = 16;
-
     const int sockfd;
     const int nbeam;
     const int nupfreq;
@@ -423,11 +446,6 @@ public:
     ~intensity_beam_assembler();
 
 private:
-    static constexpr int unassembled_ringbuf_capacity = 8;
-    static constexpr int max_unassembled_packets_per_list = 512;
-    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
-    static constexpr int assembled_ringbuf_capacity = 8;
-
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.
     intensity_beam_assembler(int beam_id);
@@ -450,7 +468,7 @@ private:
 
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
-    std::shared_ptr<assembled_chunk> assembled_ringbuf[assembled_ringbuf_capacity];
+    std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;
     int assembled_ringbuf_size = 0;
 

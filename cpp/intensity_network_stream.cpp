@@ -241,7 +241,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream)
 	assembler_beam_ids[i] = assemblers[i]->beam_id;
     }
     
-    vector<uint8_t> packet_buf(udp_packet_list::max_packet_size);
+    vector<uint8_t> packet_buf(constants::max_input_udp_packet_size + 1);
     uint8_t *packet = &packet_buf[0];
 
     //
@@ -288,11 +288,11 @@ static ssize_t network_thread_main2(intensity_network_stream *stream)
     ssize_t npackets_received = 0;
 
     for (;;) {
-	int packet_nbytes = read(sock_fd, (char *) packet, udp_packet_list::max_packet_size);
+	int packet_nbytes = read(sock_fd, (char *) packet, constants::max_input_udp_packet_size + 1);
 
 	if (_unlikely(packet_nbytes < 0))
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
-	if (_unlikely(packet_nbytes >= udp_packet_list::max_packet_size))
+	if (_unlikely(packet_nbytes > constants::max_input_udp_packet_size))
 	    continue;  // silently drop bad packet
 
 	uint32_t protocol_version = *((uint32_t *) packet);

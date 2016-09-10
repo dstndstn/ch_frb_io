@@ -49,16 +49,16 @@ shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_
 intensity_beam_assembler::intensity_beam_assembler(int beam_id_) 
     : beam_id(beam_id_)
 {
-    if ((beam_id < 0) || (beam_id >= 65536))
+    if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("intensity_beam_constructor: invalid beam_id");
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembler_state_changed, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
 
-    int capacity = intensity_beam_assembler::unassembled_ringbuf_capacity;
-    int max_npackets = intensity_beam_assembler::max_unassembled_packets_per_list;
-    int max_nbytes = intensity_beam_assembler::max_unassembled_nbytes_per_list;
+    int capacity = constants::unassembled_ringbuf_capacity;
+    int max_npackets = constants::max_unassembled_packets_per_list;
+    int max_nbytes = constants::max_unassembled_nbytes_per_list;
     string dropstr = "warning: assembler thread running too slow, dropping packets";
 
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr);
@@ -178,13 +178,13 @@ void intensity_beam_assembler::put_assembled_chunk(const shared_ptr<assembled_ch
 {
     pthread_mutex_lock(&this->lock);
 
-    if (assembled_ringbuf_size >= assembled_ringbuf_capacity) {
+    if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
 	pthread_mutex_unlock(&this->lock);
 	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, some packets will be dropped\n";
 	return;
     }
 
-    int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % assembled_ringbuf_capacity;
+    int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
     this->assembled_ringbuf[i] = chunk;
     this->assembled_ringbuf_size++;
 
@@ -199,7 +199,7 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 
     for (;;) {
 	if (assembled_ringbuf_size > 0) {
-	    chunk = assembled_ringbuf[assembled_ringbuf_pos % assembled_ringbuf_capacity];
+	    chunk = assembled_ringbuf[assembled_ringbuf_pos % constants::assembled_ringbuf_capacity];
 	    this->assembled_ringbuf_pos++;
 	    this->assembled_ringbuf_size--;
 	    
@@ -226,8 +226,8 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 inline void assemble_packet_row(int nupfreq, int nt, float *dst_intensity, float *dst_weights, const uint8_t *src, int src_stride, float scale, float offset)
 {
     for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
-	float *dst2_intensity = dst_intensity + iupfreq * assembled_chunk::nt_per_chunk;
-	float *dst2_weights = dst_weights + iupfreq * assembled_chunk::nt_per_chunk;
+	float *dst2_intensity = dst_intensity + iupfreq * constants::nt_per_assembled_chunk;
+	float *dst2_weights = dst_weights + iupfreq * constants::nt_per_assembled_chunk;
 	const uint8_t *src2 = src + iupfreq * src_stride;
 
 	for (int it = 0; it < nt; it++) {
@@ -248,8 +248,8 @@ inline void assemble_packet(int nfreq, const uint16_t *freq_ids, int nupfreq, in
 	int freq_id = (int)freq_ids[ifreq];
 
 	assemble_packet_row(nupfreq, nt, 
-			    dst_intensity + freq_id * nupfreq * assembled_chunk::nt_per_chunk,
-			    dst_weights + freq_id * nupfreq * assembled_chunk::nt_per_chunk,
+			    dst_intensity + freq_id * nupfreq * constants::nt_per_assembled_chunk,
+			    dst_weights + freq_id * nupfreq * constants::nt_per_assembled_chunk,
 			    src + ifreq * nupfreq * src_stride,
 			    src_stride, scales[ifreq], offsets[ifreq]);
     }
@@ -349,7 +349,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 	    bad_packet |= (packet_nfreq <= 0);
 	    bad_packet |= (packet_nupfreq != nupfreq);
 	    bad_packet |= (packet_ntsamp <= 0);
-	    bad_packet |= (packet_ntsamp > assembled_chunk::nt_per_chunk);
+	    bad_packet |= (packet_ntsamp > constants::nt_per_assembled_chunk);
 	    bad_packet |= (data_nbytes != (packet_nfreq * packet_nupfreq * packet_ntsamp));
 	    bad_packet |= (packet_nbytes != packet_size(1,packet_nfreq,nupfreq,packet_ntsamp));
 
@@ -379,20 +379,20 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 		continue;  // FIXME skip
 
 	    if (!initialized) {
-		// round down to multiple of assembled_chunk::nt_per_chunk
-		assembler_it0 = (packet_it0 / assembled_chunk::nt_per_chunk) * assembled_chunk::nt_per_chunk;
+		// round down to multiple of constants::nt_per_assembled_chunk
+		assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
 		initialized = true;
 
 		chunk0 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
 		chunk0_intensity = chunk0->intensity;
 		chunk0_weights = chunk0->weights;
 
-		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
+		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;
 	    }
 
-	    if (packet_it0 + packet_ntsamp > assembler_it0 + 2 * assembled_chunk::nt_per_chunk) {
+	    if (packet_it0 + packet_ntsamp > assembler_it0 + 2 * constants::nt_per_assembled_chunk) {
 		//
 		// If we receive a packet whose timestamps extend past the range of our current
 		// assembly buffer, then we advance the buffer and send an assembled_chunk to the
@@ -404,20 +404,20 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 		// in the far future kills the L1 node.
 		//
 		assembler->put_assembled_chunk(chunk0);
-		assembler_it0 += assembled_chunk::nt_per_chunk;
+		assembler_it0 += constants::nt_per_assembled_chunk;
 
 		chunk0 = chunk1;
 		chunk0_intensity = chunk1_intensity;
 		chunk0_weights = chunk1_weights;
 
-		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + assembled_chunk::nt_per_chunk);
+		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;		
 	    }
 
 	    // Compute packet overlap with first assembled_chunk.
 	    uint64_t overlap_it0 = max(packet_it0, assembler_it0);
-	    uint64_t overlap_it1 = min(packet_it0 + packet_ntsamp, assembler_it0 + assembled_chunk::nt_per_chunk);
+	    uint64_t overlap_it1 = min(packet_it0 + packet_ntsamp, assembler_it0 + constants::nt_per_assembled_chunk);
 	    
 	    // If there is an overlap then assemble.
 	    if (overlap_it0 < overlap_it1) {
@@ -434,11 +434,11 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 	    }
 
 	    // Logic for the second assembled_chunk follows.
-	    overlap_it0 = max(packet_it0, assembler_it0 + assembled_chunk::nt_per_chunk);
-	    overlap_it1 = min(packet_it0 + packet_ntsamp, assembler_it0 + 2 * assembled_chunk::nt_per_chunk);
+	    overlap_it0 = max(packet_it0, assembler_it0 + constants::nt_per_assembled_chunk);
+	    overlap_it1 = min(packet_it0 + packet_ntsamp, assembler_it0 + 2 * constants::nt_per_assembled_chunk);
 	    
 	    if (overlap_it0 < overlap_it1) {
-		int dst_dt = overlap_it0 - (assembler_it0 + assembled_chunk::nt_per_chunk);
+		int dst_dt = overlap_it0 - (assembler_it0 + constants::nt_per_assembled_chunk);
 		int src_dt = overlap_it0 - packet_it0;
 
 		assemble_packet(packet_nfreq, packet_freq_ids, nupfreq,
