@@ -303,8 +303,10 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
     float *chunk1_intensity = nullptr;
     float *chunk1_weights = nullptr;
 
-    int fpga_counts_per_sample, nupfreq;
-    assembler->wait_for_stream_params(fpga_counts_per_sample, nupfreq);
+    int nupfreq = 0;
+    int fpga_counts_per_sample = 0;
+    if (!assembler->wait_for_stream_params(fpga_counts_per_sample, nupfreq))
+	return;
 
     // Sanity check stream params
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample >= 65536))
@@ -318,6 +320,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 	bool alive = assembler->get_unassembled_packets(unassembled_packet_list);
 
 	if (!alive) {
+	    // FIXME can this be improved?
 	    if (!initialized)
 		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
 
