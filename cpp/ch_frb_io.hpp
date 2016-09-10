@@ -488,7 +488,8 @@ public:
     const int udp_port;
 
     // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
-    static std::shared_ptr<intensity_network_stream> make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
+    static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
+	-> std::shared_ptr<intensity_network_stream>;
     
     // High level control routines.
     //   - end_stream() can be used either to cancel a stream which never ran, or interrupt a running stream.

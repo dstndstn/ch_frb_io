@@ -9,6 +9,7 @@
 #include <random>
 #include <cstring>
 #include <sstream>
+#include <iostream>
 #include <stdexcept>
 
 #include <errno.h>
