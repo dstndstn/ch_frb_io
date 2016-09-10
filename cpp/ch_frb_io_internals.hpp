@@ -32,28 +32,25 @@ namespace ch_frb_io {
 #endif
 
 
+inline int randint(std::mt19937 &rng, int lo, int hi)
+{
+    return std::uniform_int_distribution<>(lo,hi+1)(rng);   // note hi+1 here!
+}
+
 inline double uniform_rand(std::mt19937 &rng)
 {
     return std::uniform_real_distribution<>()(rng);
 }
 
-inline int randint(std::mt19937 &rng, int lo, int hi)
+inline double uniform_rand(std::mt19937 &rng, double lo, double hi)
 {
-    return std::uniform_int_distribution<>(lo,hi+1)(rng);   // note hi+1 here!
+    return lo + (hi-lo) * uniform_rand(rng);
 }
 
 template<typename T> inline void uniform_rand(std::mt19937 &rng, T *p, int n)
 {
     for (int i = 0; i < n; i++)
 	p[i] = uniform_rand(rng);
-}
-
-template<typename T> inline void randomly_permute(std::mt19937 &rng, std::vector<T> &v)
-{
-    for (size_t i = v.size()-1; i > 0; i--) {
-	size_t j = randint(rng, 0, i+1);
-	std::swap(v[i], v[j]);
-    }
 }
 
 inline bool file_exists(const std::string &filename)

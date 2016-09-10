@@ -29,12 +29,6 @@ endif
 ####################################################################################################
 
 
-INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
-LIBFILES=libch_frb_io.so
-INSTALLED_BINARIES=ch-show-intensity-file
-INSTALLED_SCRIPTS=ch-plot-intensity-file
-TEST_BINARIES=test-intensity-hdf5-file test-misc
-
 LIBS = -lhdf5
 
 OFILES = assembled_chunk.o \
@@ -46,6 +40,15 @@ OFILES = assembled_chunk.o \
 	intensity_network_ostream.o \
 	lexical_cast.o \
 	udp_packet_list.o
+
+INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
+LIBFILES=libch_frb_io.so
+INSTALLED_BINARIES=ch-show-intensity-file
+INSTALLED_SCRIPTS=ch-plot-intensity-file
+
+TEST_BINARIES = test-intensity-hdf5-file \
+	test-misc \
+	test-network-streams
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
 
@@ -76,5 +79,8 @@ test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
+test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
