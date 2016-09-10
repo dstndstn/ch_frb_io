@@ -2,7 +2,7 @@
 #define _CH_FRB_IO_HPP
 
 #if (__cplusplus < 201103) && !defined(__GXX_EXPERIMENTAL_CXX0X__)
-#error "This source file needs to be compiled with C++0x support (g++ -std=c++0x)"
+#error "This source file needs to be compiled with C++11 support (g++ -std=c++11)"
 #endif
 
 #include <string>
@@ -276,22 +276,24 @@ struct assembled_chunk : noncopyable {
 
 
 //
-// The ostream writes data in "chunks", which are packetized into one or more packets.
-//
-// The constructor spawns a network thread.
-//
-// The ostream is currently (1) synchronous, meaning that it blocks until the network thread
-// is ready to send packets, (2) greedy, meaning that it sends data as rapidly as possible.
-//
-// FIXME: modify (2) by including a "throughput" arg.
+// intensity_network_ostream: this class is used to packetize intensity data and send
+// it over the network.
 //  
 struct intensity_network_ostream : noncopyable {
 public:
-    // De facto constructor
+    //
+    // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
+    // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
+    // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
+    // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
+    //
+    // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
+    // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
+    //
     static auto make(const std::string &dstname, const std::vector<int> &ibeam, 
 		     const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 		     int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-		     float wt_cutoff) 
+		     float wt_cutoff, double gpbs) 
 	-> std::shared_ptr<intensity_network_ostream>;
 
     ~intensity_network_ostream();
@@ -302,6 +304,7 @@ public:
     
     // Called from network thread
     int get_sockfd() const                          { return sockfd; }
+    double get_target_gbps() const                  { return target_gbps; }
     bool get_packet_list(udp_packet_list &l) const  { return ringbuf->consumer_get_packet_list(l); }
     udp_packet_list allocate_packet_list() const    { return ringbuf->allocate_packet_list(); }
     void network_thread_startup();
@@ -325,6 +328,7 @@ protected:
     const int nt_per_packet;
     const int fpga_counts_per_sample;
     const float wt_cutoff;
+    const double target_gbps;
 
     const std::vector<uint16_t> ibeam;
     const std::vector<uint16_t> ifreq_chunk;
@@ -349,7 +353,7 @@ protected:
     intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
 			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-			      float wt_cutoff);
+			      float wt_cutoff, double gpbs);
 };
 
 

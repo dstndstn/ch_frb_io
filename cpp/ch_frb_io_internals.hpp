@@ -2,14 +2,15 @@
 #define _CH_FRB_IO_INTERNALS_HPP
 
 #if (__cplusplus < 201103) && !defined(__GXX_EXPERIMENTAL_CXX0X__)
-#error "This source file needs to be compiled with C++0x support (g++ -std=c++0x)"
+#error "This source file needs to be compiled with C++11 support (g++ -std=c++11)"
 #endif
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <string.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <cstring>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -103,6 +104,30 @@ template<typename T, typename... Args>
 std::unique_ptr<T> make_unique(Args&& ...args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+}
+
+
+inline struct timeval xgettimeofday()
+{
+    struct timeval tv;
+
+    int err = gettimeofday(&tv, NULL);
+    if (err)
+	throw std::runtime_error("gettimeofday failed");
+
+    return tv;
+}
+
+inline int64_t usec_between(struct timeval &tv1, struct timeval &tv2)
+{
+    return 1000000 * int64_t(tv2.tv_sec - tv1.tv_sec) + int64_t(tv2.tv_usec - tv1.tv_usec);
+}
+
+inline void xusleep(useconds_t usec)
+{
+    int err = usleep(usec);
+    if (err)
+	throw std::runtime_error("usleep failed");
 }
 
 inline void xpthread_mutex_init(pthread_mutex_t *lock)
