@@ -287,20 +287,30 @@ public:
     // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
     // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
     //
+    // The 'ibeam' arg is a list of all beam ids processed by this stream.
+    // The 'ifreq_chunk' arg is a list of all coarse-grained frequency channel ids processed by this stream.
+    //
     // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
     // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
     //
     static auto make(const std::string &dstname, const std::vector<int> &ibeam, 
 		     const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 		     int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-		     float wt_cutoff, double gpbs) 
+		     float wt_cutoff, double target_gpbs) 
 	-> std::shared_ptr<intensity_network_ostream>;
 
     ~intensity_network_ostream();
-
+    
+    //
     // Called from 'external' context (i.e. same context that called make())
-    void wait_for_network_thread_startup();
+    // 
+    // The 'intensity' and 'weights' arrays have logical shape
+    //   (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk).
+    //
+    // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
+    //
     void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking=true);
+    void wait_for_network_thread_startup();
     
     // Called from network thread
     int get_sockfd() const                          { return sockfd; }
