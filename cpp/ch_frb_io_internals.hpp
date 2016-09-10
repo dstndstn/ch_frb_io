@@ -5,16 +5,20 @@
 #error "This source file needs to be compiled with C++11 support (g++ -std=c++11)"
 #endif
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <errno.h>
-#include <cstring>
 #include <cmath>
+#include <random>
+#include <cstring>
 #include <sstream>
 #include <stdexcept>
+
+#include <errno.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+
 #include "ch_frb_io.hpp"
+
 
 // Branch predictor hint
 #ifndef _unlikely
@@ -28,25 +32,22 @@ namespace ch_frb_io {
 #endif
 
 
-inline double uniform_rand()
+inline double uniform_rand(std::mt19937 &rng)
 {
-    return (rand() + 0.5) / (RAND_MAX + 1.0);
+    return std::uniform_real_distribution<>()(rng);
 }
 
-inline int randint(int lo, int hi)
+inline int randint(std::mt19937 &rng, int lo, int hi)
 {
-    int ret = lo + (int)((hi-lo)*uniform_rand());
-    ret = std::max(ret, lo);    // should be redundant
-    ret = std::min(ret, hi-1);  // should be redundant
-    return ret;
+    return std::uniform_int_distribution<>(lo,hi+1)(rng);   // note hi+1 here!
 }
 
-template<typename T> inline void uniform_rand(T *p, int n)
+template<typename T> inline void uniform_rand(std::mt19937 &rng, T *p, int n)
 {
     for (int i = 0; i < n; i++)
-	p[i] = uniform_rand();
+	p[i] = uniform_rand(rng);
 }
- 
+
 inline bool file_exists(const std::string &filename)
 {
     struct stat s;

@@ -239,6 +239,9 @@ void intensity_hdf5_file::run_unit_tests() const
 {
     cerr << filename << ": starting unit test\n";
 
+    std::random_device rd;
+    std::mt19937 rng(rd());
+
     for (int it_f = 0; it_f < nt_file; it_f++) {
 	int it_l = time_index_mapping[it_f];
 	if ((it_l < 0) || (it_l >= nt_logical))
@@ -292,19 +295,19 @@ void intensity_hdf5_file::run_unit_tests() const
 	cerr << ".";
 
 	// make random (it0, nt)
-	int buf_it0 = randint(0, nt_logical-1);
-	int buf_it1 = randint(0, nt_logical-1);
+	int buf_it0 = randint(rng, 0, nt_logical-1);
+	int buf_it1 = randint(rng, 0, nt_logical-1);
 	if (buf_it0 > buf_it1) std::swap(buf_it0, buf_it1);
 	int buf_nt = buf_it1 - buf_it0 + 1;
 
 	// random stride, can be positive or negative
-	int stride = randint(buf_nt, 2*nt_logical);
-	if (uniform_rand() > 0.5) stride *= -1;
+	int stride = randint(rng, buf_nt, 2*nt_logical);
+	if (uniform_rand(rng) > 0.5) stride *= -1;
 	
 	// randomize buffer
 	for (int ifreq = 0; ifreq < nfreq; ifreq++) {
-	    uniform_rand(buf_int + ifreq*stride, buf_nt);
-	    uniform_rand(buf_wt + ifreq*stride, buf_nt);
+	    uniform_rand(rng, buf_int + ifreq*stride, buf_nt);
+	    uniform_rand(rng, buf_wt + ifreq*stride, buf_nt);
 	}
 
 	// randomized call to intensity_hdf5_file::get_unpolarized_intensity()

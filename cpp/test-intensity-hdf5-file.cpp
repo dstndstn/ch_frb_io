@@ -40,6 +40,9 @@ int main(int argc, char **argv)
     const double dt_sample = 1.0e-3;
     const double initial_time = 1.328;
 
+    std::random_device rd;
+    std::mt19937 rng(rd());
+
     vector<string> pol = { "XX", "YY" };
     unique_ptr<intensity_hdf5_ofile> f = make_unique<intensity_hdf5_ofile> (filename, nfreq, pol, freq0_MHz, freq1_MHz, dt_sample);
 
@@ -48,8 +51,8 @@ int main(int argc, char **argv)
     vector<ssize_t> chunk_nt_list;
 
     while (f->curr_nt < nt_file) {
-	ssize_t chunk_ipos = curr_file_ipos + max(0, randint(-100,100));
-	ssize_t chunk_nt = min((ssize_t)randint(1,33), nt_file - f->curr_nt);
+	ssize_t chunk_ipos = curr_file_ipos + max(0, randint(rng,-100,100));
+	ssize_t chunk_nt = min((ssize_t)randint(rng,1,33), nt_file - f->curr_nt);
 	
 	vector<float> intensity(nfreq * npol * chunk_nt);
 	vector<float> weights(nfreq * npol * chunk_nt);
