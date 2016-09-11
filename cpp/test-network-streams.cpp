@@ -40,7 +40,7 @@ struct unit_test_instance {
     int nt_per_chunk = 0;
     int nt_tot = 0;
     int fpga_counts_per_sample = 0;
-    uint64_t initial_fpga_count = 0;
+    uint64_t initial_t0 = 0;
     float wt_cutoff = 0.0;
 
     vector<int> recv_beam_ids;
@@ -52,7 +52,9 @@ struct unit_test_instance {
     pthread_t consumer_threads[maxbeams];    
     shared_ptr<ch_frb_io::intensity_network_stream> istream;
 
-    pthread_mutex_t lock;
+    pthread_mutex_t tpos_lock;
+    pthread_cond_t cond_tpos_changed;
+    uint64_t consumer_tpos[maxbeams];
 
     unit_test_instance(std::mt19937 &rng);
     ~unit_test_instance();
@@ -83,7 +85,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->nt_tot = nt_per_chunk * randint(rng,1,10);
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
-    this->initial_fpga_count = fpga_counts_per_sample * randint(rng, 0, 4097);
+    this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
     // Clunky way of generating random beam_ids
@@ -106,14 +108,18 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
 
     this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
 
-    // Will be needed shortly for synchronization
-    xpthread_mutex_init(&this->lock);
+    xpthread_mutex_init(&this->tpos_lock);
+    xpthread_cond_init(&this->cond_tpos_changed);
+    
+    for (int ithread = 0; ithread < nbeams; ithread++)
+	this->consumer_tpos[ithread] = initial_t0;
 }
 
 
 unit_test_instance::~unit_test_instance()
 {
-    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&tpos_lock);
+    pthread_cond_destroy(&cond_tpos_changed);
 }
 
 
@@ -134,13 +140,14 @@ void unit_test_instance::show() const
 struct consumer_thread_context {
     shared_ptr<ch_frb_io::intensity_beam_assembler> assembler;
     shared_ptr<unit_test_instance> tp;
+    int ithread = 0;
 
     pthread_mutex_t lock;
     pthread_cond_t cond_running;
     bool is_running = false;
 
-    consumer_thread_context(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler_, const shared_ptr<unit_test_instance> &tp_)
-	: assembler(assembler_), tp(tp_)
+    consumer_thread_context(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler_, const shared_ptr<unit_test_instance> &tp_, int ithread_)
+	: assembler(assembler_), tp(tp_), ithread(ithread_)
     {
 	xpthread_mutex_init(&lock);
 	xpthread_cond_init(&cond_running);
@@ -151,13 +158,31 @@ struct consumer_thread_context {
 static void *consumer_thread_main(void *opaque_arg)
 {
     consumer_thread_context *context = reinterpret_cast<consumer_thread_context *> (opaque_arg);
+
+    //
+    // Note: the consumer thread startup logic works like this:
+    //
+    //   - parent thread puts a context struct on its stack, in spawn_consumer_thread()
+    //   - parent thread calls pthread_create() to spawn consumer thread
+    //   - parent thread blocks waiting for consumer thread to set context->is_running
+    //   - when parent thread unblocks, spawn_consumer_thread() removes and the context struct becomes invalid
+    //
+    // Therefore, the consumer thread is only allowed to access the context struct _before_
+    // setting context->is_running to unblock the parent thread.  The first thing we do is
+    // extract all members of the context struct so we don't need to access it again.
+    //
     shared_ptr<ch_frb_io::intensity_beam_assembler> assembler = context->assembler;
     shared_ptr<unit_test_instance> tp = context->tp;
-
+    int ithread = context->ithread;
+    
+    // Now we can set context->is_running and unblock the parent thread.
     pthread_mutex_lock(&context->lock);
     context->is_running = true;
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
+    
+    uint64_t tpos = 0;
+    bool tpos_initialized = false;
 
     for (;;) {
 	shared_ptr<assembled_chunk> chunk;
@@ -166,16 +191,32 @@ static void *consumer_thread_main(void *opaque_arg)
 	if (!alive)
 	    return NULL;
 
-	// chunk processing will go here
+	assert(chunk->nupfreq == tp->nupfreq);
+	assert(chunk->fpga_counts_per_sample == tp->fpga_counts_per_sample);
+	assert(chunk->beam_id == assembler->beam_id);
+
+	if (tpos_initialized)
+	    assert(chunk->chunk_t0 == tpos);
+
+	// tpos = expected chunk_t0 in the next assembled_chunk.
+	tpos = chunk->chunk_t0 + ch_frb_io::constants::nt_per_assembled_chunk;
+	tpos_initialized = true;
+
+	pthread_mutex_lock(&tp->tpos_lock);
+	tp->consumer_tpos[ithread] = chunk->chunk_t0;
+	pthread_cond_broadcast(&tp->cond_tpos_changed);
+	pthread_mutex_unlock(&tp->tpos_lock);
+	
+	// more chunk processing will go here
     }
 }
 
 
-static void spawn_consumer_thread(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler, const shared_ptr<unit_test_instance> &tp, int ibeam)
+static void spawn_consumer_thread(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler, const shared_ptr<unit_test_instance> &tp, int ithread)
 {
-    consumer_thread_context context(assembler, tp);
+    consumer_thread_context context(assembler, tp, ithread);
 
-    int err = pthread_create(&tp->consumer_threads[ibeam], NULL, consumer_thread_main, &context);
+    int err = pthread_create(&tp->consumer_threads[ithread], NULL, consumer_thread_main, &context);
     if (err)
 	throw runtime_error(string("pthread_create() failed to create consumer thread: ") + strerror(errno));
 
@@ -190,9 +231,9 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
     vector<shared_ptr<ch_frb_io::intensity_beam_assembler> > assemblers;
 
-    for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
-	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ibeam]);
-	spawn_consumer_thread(assembler, tp, ibeam);
+    for (int ithread = 0; ithread < tp->nbeams; ithread++) {
+	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ithread]);
+	spawn_consumer_thread(assembler, tp, ithread);
 	assemblers.push_back(assembler);
     }
 
@@ -214,6 +255,10 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     const int s2 = nupfreq * stride;
     const int s3 = nfreq_coarse * s2;
 
+    // max allowed lag between producer and consumer
+    // FIXME generalize
+    const int nt_maxlag = 5 * ch_frb_io::constants::nt_per_assembled_chunk;
+
     string dstname = "127.0.0.1:" + to_string(ch_frb_io::constants::default_udp_port);
 
     // spawns network thread
@@ -226,7 +271,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     vector<float> weights(nbeams * s3, 0.0);
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
-	int it0 = ichunk * nt_chunk;   // start of chunk
+	int chunk_t0 = tp->initial_t0 + ichunk * nt_chunk;   // start of chunk
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
 	    int beam_id = tp->send_beam_ids[ibeam];
@@ -242,14 +287,22 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 		    float *w_row = &weights[row_start];
 
 		    for (int it = 0; it < nt_chunk; it++) {
-			i_row[it] = intval(beam_id, ifreq_logical, it+it0);
-			w_row[it] = wtval(beam_id, ifreq_logical, it+it0);
+			i_row[it] = intval(beam_id, ifreq_logical, chunk_t0 + it);
+			w_row[it] = wtval(beam_id, ifreq_logical, chunk_t0 + it);
 		    }
 		}
 	    }
 	}
 
-	uint64_t fpga_count = tp->initial_fpga_count + ichunk * nt_chunk * tp->fpga_counts_per_sample;
+	// Wait for consumer threads if necessary
+	pthread_mutex_lock(&tp->tpos_lock);
+	for (int i = 0; i < nbeams; i++) {
+	    while (tp->consumer_tpos[i] + nt_maxlag >= chunk_t0)
+		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
+	}
+	pthread_mutex_unlock(&tp->tpos_lock);
+	
+	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
 	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
     }
 
