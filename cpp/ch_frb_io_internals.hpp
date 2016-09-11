@@ -33,6 +33,17 @@ namespace ch_frb_io {
 #endif
 
 
+inline int header_size(int nbeams, int nfreq_coarse)
+{
+    return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+}
+
+inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
+{
+    return header_size(nbeams, nfreq_coarse) + (nbeams * nfreq_coarse * nupfreq * nt_per_packet);
+}
+
+
 inline int randint(std::mt19937 &rng, int lo, int hi)
 {
     return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!

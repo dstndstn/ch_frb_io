@@ -73,7 +73,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->nfreq_coarse_per_packet = 1 << randint(rng,0,5);
     
     // nt_max = max possible nt_per_packet (before max packet size is exceeded)
-    int header_nbytes = 24 + 2*nbeams + 2*nfreq_coarse_per_packet + 8*nbeams*nfreq_coarse_per_packet;
+    int header_nbytes = header_size(nbeams, nfreq_coarse_per_packet);
     int nbytes_per_nt = nbeams * nfreq_coarse_per_packet * nupfreq;
     int nt_max = (ch_frb_io::constants::max_output_udp_packet_size - header_nbytes) / nbytes_per_nt;
     nt_max = min(512, nt_max);
@@ -121,7 +121,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     // FIXME revisit carefully
     int nt_lag = (nt_maxlag + 2 * ch_frb_io::constants::nt_per_assembled_chunk);
     int npackets_needed = ((nt_lag + nt_per_packet - 1) / nt_per_packet) * (ch_frb_io::constants::nfreq_coarse /nfreq_coarse_per_packet);
-    int nbytes_per_packet = header_nbytes + nbytes_per_nt * nt_per_packet;
+    int nbytes_per_packet = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     int nbytes_needed = nbytes_per_packet * npackets_needed;
     int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
     int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;

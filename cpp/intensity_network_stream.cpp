@@ -183,13 +183,6 @@ void intensity_network_stream::wait_for_end_of_stream(bool join_threads)
 // Network thread
 
 
-// FIXME also in intensity_network_ostream.cpp
-inline int packet_size(int nbeam, int nfreq, int nupfreq, int ntsamp)
-{
-    return 24 + 2*nbeam + 2*nfreq + 8*nbeam*nfreq + (nbeam * nfreq * nupfreq * ntsamp);
-}
-
-
 static void *network_thread_main(void *opaque_arg)
 {
     if (!opaque_arg)

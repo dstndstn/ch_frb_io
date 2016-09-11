@@ -14,12 +14,6 @@ namespace ch_frb_io {
 static void *assembler_thread_main(void *opaque_arg);
 static void  assembler_thread_main2(intensity_beam_assembler *assembler);
 
-// FIXME also in other places
-inline int packet_size(int nbeam, int nfreq, int nupfreq, int ntsamp)
-{
-    return 24 + 2*nbeam + 2*nfreq + 8*nbeam*nfreq + (nbeam * nfreq * nupfreq * ntsamp);
-}
-
 
 // -------------------------------------------------------------------------------------------------
 //

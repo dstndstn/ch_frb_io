@@ -123,13 +123,6 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 }
 
 
-// FIXME also in intensity_network_ostream.cpp
-inline int packet_size(int nbeam, int nfreq, int nupfreq, int ntsamp)
-{
-    return 24 + 2*nbeam + 2*nfreq + 8*nbeam*nfreq + (nbeam * nfreq * nupfreq * ntsamp);
-}
-
-
 // -------------------------------------------------------------------------------------------------
 //
 // Helper functions for intensity_network_ostream constructor
