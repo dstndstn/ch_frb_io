@@ -35,7 +35,7 @@ namespace ch_frb_io {
 
 inline int randint(std::mt19937 &rng, int lo, int hi)
 {
-    return std::uniform_int_distribution<>(lo,hi+1)(rng);   // note hi+1 here!
+    return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
 }
 
 inline double uniform_rand(std::mt19937 &rng)
