@@ -152,7 +152,7 @@ static void spawn_all_receiving_threads(const shared_ptr<unit_test_instance> &tp
     }
 
     tp->istream = intensity_network_stream::make(assemblers, ch_frb_io::constants::default_udp_port);
-    tp->istream->start_stream();
+    // tp->istream->start_stream();
 }
 
 
@@ -164,15 +164,17 @@ int main(int argc, char **argv)
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    auto tp = make_shared<unit_test_instance> (rng);
-    spawn_all_receiving_threads(tp, rng);
+    for (int iouter = 0; iouter < 100; iouter++) {
+	auto tp = make_shared<unit_test_instance> (rng);
+	spawn_all_receiving_threads(tp, rng);
 
-    tp->istream->end_stream(true);  // join_threads=true
+	tp->istream->end_stream(true);  // join_threads=true
 
-    for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
-	int err = pthread_join(tp->consumer_threads[ibeam], NULL);
-	if (err)
-	    throw runtime_error("pthread_join() failed");
+	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
+	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);
+	    if (err)
+		throw runtime_error("pthread_join() failed");
+	}
     }
 
     return 0;
