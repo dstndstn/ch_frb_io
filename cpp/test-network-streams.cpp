@@ -39,7 +39,6 @@ struct unit_test_instance {
     int nt_per_packet = 0;
     int nt_per_chunk = 0;
     int nt_tot = 0;
-    int nt_maxlag = 0;
     int fpga_counts_per_sample = 0;
     uint64_t initial_t0 = 0;
     float wt_cutoff = 0.0;
@@ -66,25 +65,31 @@ struct unit_test_instance {
 
 unit_test_instance::unit_test_instance(std::mt19937 &rng)
 {
-    const int nfreq_coarse = ch_frb_io::constants::nfreq_coarse;
+    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
+    const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     this->nbeams = randint(rng, 1, maxbeams+1);
     this->nupfreq = randint(rng, 1, 17);
     this->nfreq_coarse_per_packet = 1 << randint(rng,0,5);
-    
-    // nt_max = max possible nt_per_packet (before max packet size is exceeded)
+
+    // Assign nt_per_packet.  Each packet has a max allowed size, and we also require nt_per_packet <= 512.
     int header_nbytes = header_size(nbeams, nfreq_coarse_per_packet);
-    int nbytes_per_nt = nbeams * nfreq_coarse_per_packet * nupfreq;
-    int nt_max = (ch_frb_io::constants::max_output_udp_packet_size - header_nbytes) / nbytes_per_nt;
-    nt_max = min(512, nt_max);
+    int max_data_nbytes = ch_frb_io::constants::max_output_udp_packet_size - header_nbytes;
+    int max_nt_per_packet = min(512, max_data_nbytes / (nbeams * nfreq_coarse_per_packet * nupfreq));
+    int min_nt_per_packet = max_nt_per_packet/2 + 1;
 
-    assert(nt_max >= 3);
-    this->nt_per_packet = randint(rng, nt_max/2+1, nt_max+1);
+    assert(max_nt_per_packet >= 3);
+    this->nt_per_packet = randint(rng, min_nt_per_packet, max_nt_per_packet + 1);
+    
+    // Assign nt_per_chunk.  Each chunk should be no more than 512 samples.
+    this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);
 
-    // FIXME increase nt_tot
-    this->nt_per_chunk = nt_per_packet * randint(rng,1,10);
-    this->nt_tot = nt_per_chunk * randint(rng,1,10);
-    this->nt_maxlag = 4 * ch_frb_io::constants::nt_per_assembled_chunk;
+    // Assign nt_tot.  We require <= 1024 chunks, and <= 1GB total (summed over all beams).
+    // FIXME think about increasing the 1GB limit.  (Watch out for 32-bit overflow!)
+    int packet_nbytes = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
+    int chunk_nbytes = packet_nbytes * (nfreq_coarse_tot / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet);
+    int max_nchunks = min(1024, (1<<28) / chunk_nbytes);
+    this->nt_tot = nt_per_chunk * randint(rng, 1, max_nchunks+1);
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->initial_t0 = randint(rng, 0, 4097);
@@ -103,8 +108,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     std::shuffle(send_beam_ids.begin(), send_beam_ids.end(), rng);
 
     // Randomly permute frequencies, just to strengthen the test
-    this->send_freq_ids.resize(nfreq_coarse);
-    for (int i = 0; i < nfreq_coarse; i++)
+    this->send_freq_ids.resize(nfreq_coarse_tot);
+    for (int i = 0; i < nfreq_coarse_tot; i++)
 	send_freq_ids[i] = i;
     std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
 
@@ -118,20 +123,19 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
 
     this->show();
 
-    // FIXME revisit carefully
-    int nt_lag = (nt_maxlag + 2 * ch_frb_io::constants::nt_per_assembled_chunk);
-    int npackets_needed = ((nt_lag + nt_per_packet - 1) / nt_per_packet) * (ch_frb_io::constants::nfreq_coarse /nfreq_coarse_per_packet);
-    int nbytes_per_packet = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
-    int nbytes_needed = nbytes_per_packet * npackets_needed;
+    // Worst-case storage requirements for unassembled ringbuf
+    int wc_nchunks = min(nt_assembler, nt_tot) / nt_per_chunk;
+    int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
+    int wc_nbytes = wc_npackets * packet_size(1, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
+
+    // Storage actually allocated
     int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
     int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;
 
-    if ((npackets_alloc < npackets_needed) || (nbytes_alloc < nbytes_needed)) {
-	cout << "nt_lag=" << nt_lag << endl
-	     << "npackets_needed=" << npackets_needed << endl
-	     << "nbytes_per_packet=" << nbytes_per_packet << endl
-	     << "nbytes_needed=" << nbytes_needed << endl
-	     << "npackets_alloc=" << npackets_alloc << endl
+    if ((npackets_alloc < wc_npackets) || (nbytes_alloc < wc_nbytes)) {
+	cout << "npackets_needed=" << wc_npackets << endl
+	     << "npackets_allocated=" << npackets_alloc << endl
+	     << "nbytes_needed=" << wc_nbytes << endl
 	     << "nbytes_alloc=" << nbytes_alloc << endl
 	     << "  Fatal: unassembled_packet_buf is underallocated" << endl;
 
@@ -270,14 +274,16 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 
 static void send_data(const shared_ptr<unit_test_instance> &tp)
 {
+    const int nt_assembler = ch_frb_io::constants::nt_assembler;
+    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
+
     const int nbeams = tp->nbeams;
     const int nupfreq = tp->nupfreq;
-    const int nfreq_coarse = ch_frb_io::constants::nfreq_coarse;
     const int nt_chunk = tp->nt_per_chunk;
     const int nchunks = tp->nt_tot / tp->nt_per_chunk;
     const int stride = tp->send_stride;
     const int s2 = nupfreq * stride;
-    const int s3 = nfreq_coarse * s2;
+    const int s3 = nfreq_coarse_tot * s2;
 
     string dstname = "127.0.0.1:" + to_string(ch_frb_io::constants::default_udp_port);
 
@@ -292,11 +298,12 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
 	int chunk_t0 = tp->initial_t0 + ichunk * nt_chunk;   // start of chunk
+	int chunk_t1 = chunk_t0 + nt_chunk;
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
 	    int beam_id = tp->send_beam_ids[ibeam];
 
-	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse; ifreq_coarse++) {
+	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse_tot; ifreq_coarse++) {
 		int coarse_freq_id = tp->send_freq_ids[ifreq_coarse];
 
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
@@ -317,7 +324,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	// Wait for consumer threads if necessary
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
-	    while (tp->consumer_tpos[i] + tp->nt_maxlag < chunk_t0)
+	    while (tp->consumer_tpos[i] + nt_assembler < chunk_t1)
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);

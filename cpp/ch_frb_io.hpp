@@ -51,7 +51,8 @@ namespace constants {
     // Parameters of ring buffers between assembler threads and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;
     static constexpr int nt_per_assembled_chunk = 1024;
-    
+    static constexpr int nt_assembler = 2 * nt_per_assembled_chunk;
+
     // These parameters don't really affect anything but appear in range-checking asserts.
     static constexpr int max_allowed_beam_id = 65535;
     static constexpr int max_allowed_nupfreq = 64;
