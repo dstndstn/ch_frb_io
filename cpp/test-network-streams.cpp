@@ -56,6 +56,8 @@ struct unit_test_instance {
 
     unit_test_instance(std::mt19937 &rng);
     ~unit_test_instance();
+
+    void show() const;
 };
 
 
@@ -111,6 +113,17 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
 unit_test_instance::~unit_test_instance()
 {
     pthread_mutex_destroy(&lock);
+}
+
+
+void unit_test_instance::show() const
+{
+    cout << "nbeams=" << nbeams << endl
+	 << "nupfreq=" << nupfreq << endl
+	 << "nfreq_coarse_per_packet=" << nfreq_coarse_per_packet << endl
+	 << "nt_per_packet=" << nt_per_packet << endl
+	 << "nt_per_chunk=" << nt_per_chunk << endl
+	 << "nt_tot=" << nt_tot << endl;
 }
 
 
@@ -248,9 +261,11 @@ int main(int argc, char **argv)
 
     for (int iouter = 0; iouter < 100; iouter++) {
 	auto tp = make_shared<unit_test_instance> (rng);
-	spawn_all_receive_threads(tp);
+	tp->show();
 
+	spawn_all_receive_threads(tp);
 	tp->istream->start_stream();
+
 	send_data(tp);	
 	tp->istream->end_stream(true);  // join_threads=true
 
