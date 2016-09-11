@@ -84,8 +84,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     // Assign nt_per_chunk.  Each chunk should be no more than 512 samples.
     this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);
 
-    // Assign nt_tot.  We require <= 1024 chunks, and <= 1GB total (summed over all beams).
-    // FIXME think about increasing the 1GB limit.  (Watch out for 32-bit overflow!)
+    // Assign nt_tot.  We require <= 1024 chunks, and <= 256 MB total (summed over all beams).
+    // FIXME think about increasing the 256 MB limit.  (Watch out for 32-bit overflow!)
     int packet_nbytes = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     int chunk_nbytes = packet_nbytes * (nfreq_coarse_tot / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet);
     int max_nchunks = min(1024, (1<<28) / chunk_nbytes);
@@ -94,6 +94,17 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
+
+#if 1
+    // Convenient when debugging
+    this->nbeams = 1;
+    this->nupfreq = 6;
+    this->nfreq_coarse_per_packet = 2;
+    this->nt_per_packet = 282;
+    this->nt_per_chunk = 282;
+    this->nt_tot = 36942;
+    this->initial_t0 = 329;
+#endif
 
     // Clunky way of generating random beam_ids
     this->recv_beam_ids.resize(nbeams);
@@ -124,7 +135,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->show();
 
     // Worst-case storage requirements for unassembled ringbuf
-    int wc_nchunks = min(nt_assembler, nt_tot) / nt_per_chunk;
+    int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
     int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
     int wc_nbytes = wc_npackets * packet_size(1, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
 
@@ -158,7 +169,8 @@ void unit_test_instance::show() const
 	 << "nfreq_coarse_per_packet=" << nfreq_coarse_per_packet << endl
 	 << "nt_per_packet=" << nt_per_packet << endl
 	 << "nt_per_chunk=" << nt_per_chunk << endl
-	 << "nt_tot=" << nt_tot << endl;
+	 << "nt_tot=" << nt_tot << endl
+	 << "initial_t0=" << initial_t0 << endl;
 }
 
 
@@ -231,7 +243,7 @@ static void *consumer_thread_main(void *opaque_arg)
 	tpos_initialized = true;
 
 	pthread_mutex_lock(&tp->tpos_lock);
-	tp->consumer_tpos[ithread] = chunk->chunk_t0;
+	tp->consumer_tpos[ithread] = tpos;
 	pthread_cond_broadcast(&tp->cond_tpos_changed);
 	pthread_mutex_unlock(&tp->tpos_lock);
 	
@@ -298,7 +310,6 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 
     for (int ichunk = 0; ichunk < nchunks; ichunk++) {
 	int chunk_t0 = tp->initial_t0 + ichunk * nt_chunk;   // start of chunk
-	int chunk_t1 = chunk_t0 + nt_chunk;
 
 	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
 	    int beam_id = tp->send_beam_ids[ibeam];
@@ -324,13 +335,14 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	// Wait for consumer threads if necessary
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
-	    while (tp->consumer_tpos[i] + nt_assembler < chunk_t1)
+	    while (tp->consumer_tpos[i] + nt_assembler < chunk_t0)
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);
 	
 	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
 	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
+	cout << "sent chunk " << ichunk << "/" << nchunks << endl;
     }
 
     // joins network thread
