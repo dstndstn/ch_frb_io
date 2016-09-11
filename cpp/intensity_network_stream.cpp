@@ -15,7 +15,7 @@ namespace ch_frb_io {
 
 // Defined later in this file
 static void *network_thread_main(void *opaque_arg);
-static ssize_t network_thread_main2(intensity_network_stream *stream);
+static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_fd);
 
 
 // -------------------------------------------------------------------------------------------------
@@ -206,15 +206,24 @@ static void *network_thread_main(void *opaque_arg)
     cerr << "ch_frb_io: network thread starting\n";
     stream->network_thread_startup();
 
+    int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock_fd < 0)
+	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
+
     ssize_t npackets_received = 0;
 
+    // We use a try..catch to ensure that the socket always gets closed, and end_stream()
+    // always gets called, even if an exception is thrown.
+
     try {
-	npackets_received = network_thread_main2(stream.get());
+	npackets_received = network_thread_main2(stream.get(), sock_fd);
     } catch (...) {
+	close(sock_fd);
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
 
+    close(sock_fd);
     stream->end_stream(false);   // "false" has same meaning as above
 
     cerr << ("ch_frb_io: network thread exiting (" + to_string(npackets_received) + " packets received)\n");
@@ -223,7 +232,7 @@ static void *network_thread_main(void *opaque_arg)
 
 
 // Returns number of packets received
-static ssize_t network_thread_main2(intensity_network_stream *stream)
+static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_fd)
 {
     // FIXME is 2MB socket_bufsize a good choice?  I would have guessed a larger value 
     // would be better, but 2MB is the max allowed on my osx laptop.
@@ -247,10 +256,6 @@ static ssize_t network_thread_main2(intensity_network_stream *stream)
     //
     // Create socket
     //
-
-    int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock_fd < 0)
-	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
