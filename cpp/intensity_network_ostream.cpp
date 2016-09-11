@@ -252,7 +252,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     this->npackets_per_chunk = (nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet);
     this->nbytes_per_packet = packet_size(nbeam, nfreq_per_packet, nupfreq, nt_per_packet);
 
-    if (nbytes_per_packet >= constants::max_output_udp_packet_size)
+    if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
 
     stringstream ss;
