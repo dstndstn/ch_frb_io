@@ -14,6 +14,19 @@ inline bool array_contains(const int *arr, int len, int x)
 }
 
 
+inline double intval(int beam_id, int ifreq, int it)
+{
+    return 0.823*beam_id + 1.319*ifreq + 0.2139*it;
+}
+
+
+// weights are between 0.2 and 1
+inline double wtval(int beam_id, int ifreq, int it)
+{
+    return 0.6 + 0.4 * sin(1.328*beam_id + 2.382*ifreq + 0.883*it);
+}
+
+
 // -------------------------------------------------------------------------------------------------
 
 
@@ -24,18 +37,20 @@ struct unit_test_instance {
     int nupfreq = 0;
     int nfreq_coarse_per_packet = 0;
     int nt_per_packet = 0;
+    int nt_per_chunk = 0;
     int nt_tot = 0;
     int fpga_counts_per_sample = 0;
+    uint64_t initial_fpga_count = 0;
     float wt_cutoff = 0.0;
 
-    vector<int> beam_ids;
-    vector<int> freq_ids;
+    vector<int> recv_beam_ids;
+    vector<int> send_beam_ids;
+    vector<int> send_freq_ids;
+    int send_stride;
 
     // not protected by lock
-    pthread_t consumer_threads[maxbeams];
-    
+    pthread_t consumer_threads[maxbeams];    
     shared_ptr<ch_frb_io::intensity_network_stream> istream;
-    shared_ptr<ch_frb_io::intensity_network_ostream> ostream;    
 
     pthread_mutex_t lock;
 
@@ -55,26 +70,36 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     int n3 = nbeams * nfreq_coarse_per_packet * nupfreq;
     int nt_max = min(512, (8192+n3-1)/n3);
 
+    // FIXME increase nt_tot
     this->nt_per_packet = randint(rng, nt_max/2, nt_max+1);
-    this->nt_tot = nt_per_packet * randint(rng, 5000, 10000);
+    this->nt_per_chunk = nt_per_packet * randint(rng,1,5);
+    this->nt_tot = nt_per_chunk * randint(rng,1,5);
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
+    this->initial_fpga_count = fpga_counts_per_sample * randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
     // Clunky way of generating random beam_ids
-    this->beam_ids.resize(nbeams);
+    this->recv_beam_ids.resize(nbeams);
     for (int i = 0; i < nbeams; i++) {
 	do {
-	    beam_ids[i] = randint(rng, 0, ch_frb_io::constants::max_allowed_beam_id);
-	} while (array_contains(&beam_ids[0], i, beam_ids[i]));
+	    recv_beam_ids[i] = randint(rng, 0, ch_frb_io::constants::max_allowed_beam_id);
+	} while (array_contains(&recv_beam_ids[0], i, recv_beam_ids[i]));
     }
 
-    // Randomly permute frequencies, just to strengthen the test
-    this->freq_ids.resize(nfreq_coarse);
-    for (int i = 0; i < nfreq_coarse; i++)
-	freq_ids[i] = i;
-    std::shuffle(freq_ids.begin(), freq_ids.end(), rng);
+    // To slightly strengthen the test, we permute the receiver beams relative to sender
+    this->send_beam_ids = recv_beam_ids;
+    std::shuffle(send_beam_ids.begin(), send_beam_ids.end(), rng);
 
+    // Randomly permute frequencies, just to strengthen the test
+    this->send_freq_ids.resize(nfreq_coarse);
+    for (int i = 0; i < nfreq_coarse; i++)
+	send_freq_ids[i] = i;
+    std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
+
+    this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
+
+    // Will be needed shortly for synchronization
     xpthread_mutex_init(&this->lock);
 }
 
@@ -137,22 +162,75 @@ static void spawn_consumer_thread(const shared_ptr<ch_frb_io::intensity_beam_ass
 }
 
 
-static void spawn_all_receiving_threads(const shared_ptr<unit_test_instance> &tp, std::mt19937 &rng)
+static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
-    // Permute the beams relative to sender, to slightly strengthen the test
-    vector<int> beam_ids = tp->beam_ids;
-    std::shuffle(beam_ids.begin(), beam_ids.end(), rng);
-
     vector<shared_ptr<ch_frb_io::intensity_beam_assembler> > assemblers;
 
     for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
-	auto assembler = ch_frb_io::intensity_beam_assembler::make(beam_ids[ibeam]);
+	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ibeam]);
 	spawn_consumer_thread(assembler, tp, ibeam);
 	assemblers.push_back(assembler);
     }
 
     tp->istream = intensity_network_stream::make(assemblers, ch_frb_io::constants::default_udp_port);
-    // tp->istream->start_stream();
+}
+
+
+// -------------------------------------------------------------------------------------------------
+
+
+static void send_data(const shared_ptr<unit_test_instance> &tp)
+{
+    const int nbeams = tp->nbeams;
+    const int nupfreq = tp->nupfreq;
+    const int nfreq_coarse = ch_frb_io::constants::nfreq_coarse;
+    const int nt_chunk = tp->nt_per_chunk;
+    const int nchunks = tp->nt_tot / tp->nt_per_chunk;
+    const int stride = tp->send_stride;
+    const int s2 = nupfreq * stride;
+    const int s3 = nfreq_coarse * s2;
+
+    string dstname = "127.0.0.1:" + to_string(ch_frb_io::constants::default_udp_port);
+
+    // spawns network thread
+    auto ostream = intensity_network_ostream::make(dstname, tp->send_beam_ids, tp->send_freq_ids, tp->nupfreq,
+						   tp->nt_per_chunk, tp->nfreq_coarse_per_packet, 
+						   tp->nt_per_packet, tp->fpga_counts_per_sample,
+						   tp->wt_cutoff, 0.0);
+
+    vector<float> intensity(nbeams * s3, 0.0);
+    vector<float> weights(nbeams * s3, 0.0);
+
+    for (int ichunk = 0; ichunk < nchunks; ichunk++) {
+	int it0 = ichunk * nt_chunk;   // start of chunk
+
+	for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+	    int beam_id = tp->send_beam_ids[ibeam];
+
+	    for (int ifreq_coarse = 0; ifreq_coarse < nfreq_coarse; ifreq_coarse++) {
+		int coarse_freq_id = tp->send_freq_ids[ifreq_coarse];
+
+		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
+		    int ifreq_logical = coarse_freq_id * nupfreq + iupfreq;
+		    
+		    int row_start = beam_id*s3 + ifreq_coarse*s2 + iupfreq*stride;
+		    float *i_row = &intensity[row_start];
+		    float *w_row = &weights[row_start];
+
+		    for (int it = 0; it < nt_chunk; it++) {
+			i_row[it] = intval(beam_id, ifreq_logical, it+it0);
+			w_row[it] = wtval(beam_id, ifreq_logical, it+it0);
+		    }
+		}
+	    }
+	}
+	
+	uint64_t fpga_count = tp->initial_fpga_count + ichunk * nt_chunk * tp->fpga_counts_per_sample;
+	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
+    }
+
+    // joins network thread
+    ostream->end_stream(true);
 }
 
 
@@ -164,10 +242,12 @@ int main(int argc, char **argv)
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    for (int iouter = 0; iouter < 100; iouter++) {
+    for (int iouter = 0; iouter < 1; iouter++) {
 	auto tp = make_shared<unit_test_instance> (rng);
-	spawn_all_receiving_threads(tp, rng);
+	spawn_all_receive_threads(tp);
 
+	tp->istream->start_stream();
+	send_data(tp);	
 	tp->istream->end_stream(true);  // join_threads=true
 
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
