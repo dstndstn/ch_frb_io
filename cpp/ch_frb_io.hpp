@@ -43,9 +43,10 @@ namespace constants {
     static constexpr int output_ringbuf_capacity = 16;
 
     // Parameters of ring buffer between network output thread and assembler threads
-    static constexpr int unassembled_ringbuf_capacity = 8;
-    static constexpr int max_unassembled_packets_per_list = 512;
-    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
+    // FIXME these parameters may be inflated, need to revisit
+    static constexpr int unassembled_ringbuf_capacity = 32;
+    static constexpr int max_unassembled_packets_per_list = 16384;
+    static constexpr int max_unassembled_nbytes_per_list = 2 * 1024 * 1024;
 
     // Parameters of ring buffers between assembler threads and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;

@@ -39,6 +39,7 @@ struct unit_test_instance {
     int nt_per_packet = 0;
     int nt_per_chunk = 0;
     int nt_tot = 0;
+    int nt_maxlag = 0;
     int fpga_counts_per_sample = 0;
     uint64_t initial_t0 = 0;
     float wt_cutoff = 0.0;
@@ -83,6 +84,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     // FIXME increase nt_tot
     this->nt_per_chunk = nt_per_packet * randint(rng,1,10);
     this->nt_tot = nt_per_chunk * randint(rng,1,10);
+    this->nt_maxlag = 4 * ch_frb_io::constants::nt_per_assembled_chunk;
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->initial_t0 = randint(rng, 0, 4097);
@@ -113,6 +115,28 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     
     for (int ithread = 0; ithread < nbeams; ithread++)
 	this->consumer_tpos[ithread] = initial_t0;
+
+    this->show();
+
+    // FIXME revisit carefully
+    int nt_lag = (nt_maxlag + 2 * ch_frb_io::constants::nt_per_assembled_chunk);
+    int npackets_needed = ((nt_lag + nt_per_packet - 1) / nt_per_packet) * (ch_frb_io::constants::nfreq_coarse /nfreq_coarse_per_packet);
+    int nbytes_per_packet = header_nbytes + nbytes_per_nt * nt_per_packet;
+    int nbytes_needed = nbytes_per_packet * npackets_needed;
+    int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
+    int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;
+
+    if ((npackets_alloc < npackets_needed) || (nbytes_alloc < nbytes_needed)) {
+	cout << "nt_lag=" << nt_lag << endl
+	     << "npackets_needed=" << npackets_needed << endl
+	     << "nbytes_per_packet=" << nbytes_per_packet << endl
+	     << "nbytes_needed=" << nbytes_needed << endl
+	     << "npackets_alloc=" << npackets_alloc << endl
+	     << "nbytes_alloc=" << nbytes_alloc << endl
+	     << "  Fatal: unassembled_packet_buf is underallocated" << endl;
+
+	exit(1);
+    }
 }
 
 
@@ -255,10 +279,6 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     const int s2 = nupfreq * stride;
     const int s3 = nfreq_coarse * s2;
 
-    // max allowed lag between producer and consumer
-    // FIXME generalize
-    const int nt_maxlag = 5 * ch_frb_io::constants::nt_per_assembled_chunk;
-
     string dstname = "127.0.0.1:" + to_string(ch_frb_io::constants::default_udp_port);
 
     // spawns network thread
@@ -297,7 +317,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	// Wait for consumer threads if necessary
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
-	    while (tp->consumer_tpos[i] + nt_maxlag >= chunk_t0)
+	    while (tp->consumer_tpos[i] + tp->nt_maxlag < chunk_t0)
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);
@@ -321,7 +341,6 @@ int main(int argc, char **argv)
 
     for (int iouter = 0; iouter < 100; iouter++) {
 	auto tp = make_shared<unit_test_instance> (rng);
-	tp->show();
 
 	spawn_all_receive_threads(tp);
 	tp->istream->start_stream();
