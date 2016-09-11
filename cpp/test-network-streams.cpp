@@ -217,7 +217,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 		for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 		    int ifreq_logical = coarse_freq_id * nupfreq + iupfreq;
 		    
-		    int row_start = beam_id*s3 + ifreq_coarse*s2 + iupfreq*stride;
+		    int row_start = ibeam*s3 + ifreq_coarse*s2 + iupfreq*stride;
 		    float *i_row = &intensity[row_start];
 		    float *w_row = &weights[row_start];
 
@@ -228,7 +228,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 		}
 	    }
 	}
-	
+
 	uint64_t fpga_count = tp->initial_fpga_count + ichunk * nt_chunk * tp->fpga_counts_per_sample;
 	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
     }
@@ -246,7 +246,7 @@ int main(int argc, char **argv)
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    for (int iouter = 0; iouter < 1; iouter++) {
+    for (int iouter = 0; iouter < 100; iouter++) {
 	auto tp = make_shared<unit_test_instance> (rng);
 	spawn_all_receive_threads(tp);
 
