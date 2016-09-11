@@ -66,12 +66,16 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->nbeams = randint(rng, 1, maxbeams+1);
     this->nupfreq = randint(rng, 1, 17);
     this->nfreq_coarse_per_packet = 1 << randint(rng,0,5);
+    
+    // nt_max = max possible nt_per_packet (before max packet size is exceeded)
+    int header_nbytes = 24 + 2*nbeams + 2*nfreq_coarse_per_packet + 8*nbeams*nfreq_coarse_per_packet;
+    int nbytes_per_nt = nbeams * nfreq_coarse_per_packet * nupfreq;
+    int nt_max = (ch_frb_io::constants::max_output_udp_packet_size - header_nbytes) / nbytes_per_nt;
 
-    int n3 = nbeams * nfreq_coarse_per_packet * nupfreq;
-    int nt_max = min(512, (8192+n3-1)/n3);
+    assert(nt_max >= 3);
+    this->nt_per_packet = randint(rng, nt_max/2+1, nt_max+1);
 
     // FIXME increase nt_tot
-    this->nt_per_packet = randint(rng, nt_max/2, nt_max+1);
     this->nt_per_chunk = nt_per_packet * randint(rng,1,5);
     this->nt_tot = nt_per_chunk * randint(rng,1,5);
 
