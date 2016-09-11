@@ -79,8 +79,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->nt_per_packet = randint(rng, nt_max/2+1, nt_max+1);
 
     // FIXME increase nt_tot
-    this->nt_per_chunk = nt_per_packet * randint(rng,1,5);
-    this->nt_tot = nt_per_chunk * randint(rng,1,5);
+    this->nt_per_chunk = nt_per_packet * randint(rng,1,10);
+    this->nt_tot = nt_per_chunk * randint(rng,1,10);
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->initial_fpga_count = fpga_counts_per_sample * randint(rng, 0, 4097);
@@ -159,9 +159,15 @@ static void *consumer_thread_main(void *opaque_arg)
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
 
-    // actual logic of the consumer thread goes here
-    cerr << "consumer_thread: artificially exiting\n";
-    return NULL;
+    for (;;) {
+	shared_ptr<assembled_chunk> chunk;
+	bool alive = assembler->get_assembled_chunk(chunk);
+
+	if (!alive)
+	    return NULL;
+
+	// chunk processing will go here
+    }
 }
 
 
