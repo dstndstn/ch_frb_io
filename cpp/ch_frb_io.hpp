@@ -250,6 +250,7 @@ struct udp_packet_ringbuf : noncopyable {
     pthread_cond_t cond_packets_added;
     pthread_cond_t cond_packets_removed;
     bool stream_ended = false;
+    bool drops_allowed = true;
 
     const int ringbuf_capacity;
     int ringbuf_size = 0;
@@ -257,13 +258,17 @@ struct udp_packet_ringbuf : noncopyable {
     std::vector<udp_packet_list> ringbuf;
 
     // Specified at construction, used when new udp_packet_list objects are allocated
-    const int max_npackets_per_list;
-    const int max_nbytes_per_list;
+    const int max_npackets_per_list = 0;
+    const int max_nbytes_per_list = 0;
     
     // This message is printed to stderr whenever packets are dropped (if empty string, no message will be printed)
     std::string dropmsg;
 
-    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, const std::string &dropmsg = std::string());
+    // If 'drops_allowed' is false, the process will crash if the ring buffer overfills.
+    // This sometimes makes sense during testing but probably not otherwise.
+    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, 
+		       const std::string &dropmsg = std::string(), bool drops_allowed = true);
+
     ~udp_packet_ringbuf();
     
     //
@@ -417,12 +422,18 @@ protected:
 //
 class intensity_beam_assembler : noncopyable {
 public:
-    const int beam_id;
+    const int beam_id = -1;
+    const bool drops_allowed = true;
 
+    //
     // The function intensity_beam_assembler::make() is the de facto intensity_beam_assembler constructor.
     // Thus intensity_beam_assemblers are always used through shared_ptrs.  The reason we do this is that
     // the assembler thread is always running in the background and needs to keep a reference via a shared_ptr.
-    static std::shared_ptr<intensity_beam_assembler> make(int beam_id);
+    //
+    // If 'drops_allowed' is false, the process will crash if the ring buffer overfills.
+    // This sometimes makes sense during testing but probably not otherwise.
+    //
+    static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
     // Helper function called by intensity_beam_assembler::make()
     void wait_for_assembler_thread_startup();
@@ -457,7 +468,7 @@ public:
 private:
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.
-    intensity_beam_assembler(int beam_id);
+    intensity_beam_assembler(int beam_id, bool drops_allowed);
 
     // All state below is protected by a single lock (FIXME could be made more granular)
     pthread_mutex_t lock;

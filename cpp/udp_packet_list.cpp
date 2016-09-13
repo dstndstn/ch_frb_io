@@ -68,8 +68,9 @@ void udp_packet_list::reset()
 // udp_packet_ringbuf
 
 
-udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_per_list_, int max_nbytes_per_list_, const std::string &dropmsg_)
-    : ringbuf_capacity(ringbuf_capacity_), 
+udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_per_list_, int max_nbytes_per_list_, const std::string &dropmsg_, bool drops_allowed_)
+    : drops_allowed(drops_allowed_),
+      ringbuf_capacity(ringbuf_capacity_), 
       max_npackets_per_list(max_npackets_per_list_),
       max_nbytes_per_list(max_nbytes_per_list_), 
       dropmsg(dropmsg_)
@@ -125,6 +126,11 @@ bool udp_packet_ringbuf::producer_put_packet_list(udp_packet_list &packet_list, 
 	    
 	    if (dropmsg.size() > 0)
 		cerr << dropmsg << endl;
+
+	    if (!drops_allowed) {
+		cerr << "ring buffer overfilled, and 'drops_allowed' flag was set to false, this will be treated as an error!\n";
+		exit(1);
+	    }
 	    
 	    return true;
 	}

@@ -21,9 +21,9 @@ static void  assembler_thread_main2(intensity_beam_assembler *assembler);
 
 
 // static member function used as de facto constructor
-shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_)
+shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_, bool drops_allowed_)
 {
-    intensity_beam_assembler *ret_bare = new intensity_beam_assembler(beam_id_);
+    intensity_beam_assembler *ret_bare = new intensity_beam_assembler(beam_id_, drops_allowed_);
     shared_ptr<intensity_beam_assembler> ret(ret_bare);
 
     // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
@@ -40,8 +40,8 @@ shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_
 }
 
 
-intensity_beam_assembler::intensity_beam_assembler(int beam_id_) 
-    : beam_id(beam_id_)
+intensity_beam_assembler::intensity_beam_assembler(int beam_id_, bool drops_allowed_) 
+    : beam_id(beam_id_), drops_allowed(drops_allowed_)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("intensity_beam_constructor: invalid beam_id");
@@ -55,7 +55,7 @@ intensity_beam_assembler::intensity_beam_assembler(int beam_id_)
     int max_nbytes = constants::max_unassembled_nbytes_per_list;
     string dropstr = "warning: assembler thread running too slow, dropping packets";
 
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, drops_allowed);
 }
 
 
@@ -175,6 +175,12 @@ void intensity_beam_assembler::put_assembled_chunk(const shared_ptr<assembled_ch
     if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
 	pthread_mutex_unlock(&this->lock);
 	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, some packets will be dropped\n";
+	
+	if (!drops_allowed) {
+	    cerr << "ch_frb_io: assembler's 'drops_allowed' flag was set to false, this will be treated as an error\n";
+	    exit(1);
+	}
+
 	return;
     }
 

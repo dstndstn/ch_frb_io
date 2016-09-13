@@ -272,7 +272,7 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
     vector<shared_ptr<ch_frb_io::intensity_beam_assembler> > assemblers;
 
     for (int ithread = 0; ithread < tp->nbeams; ithread++) {
-	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ithread]);
+	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ithread], false);   // drops_allowed = false
 	spawn_consumer_thread(assembler, tp, ithread);
 	assemblers.push_back(assembler);
     }
