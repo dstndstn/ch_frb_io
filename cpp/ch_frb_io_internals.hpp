@@ -136,7 +136,7 @@ inline struct timeval xgettimeofday()
     return tv;
 }
 
-inline int64_t usec_between(struct timeval &tv1, struct timeval &tv2)
+inline int64_t usec_between(const struct timeval &tv1, const struct timeval &tv2)
 {
     return 1000000 * int64_t(tv2.tv_sec - tv1.tv_sec) + int64_t(tv2.tv_usec - tv1.tv_usec);
 }

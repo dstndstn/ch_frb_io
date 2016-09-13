@@ -227,28 +227,20 @@ static void *network_thread_main(void *opaque_arg)
 // Returns number of packets received
 static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_fd)
 {
-    // FIXME is 2MB socket_bufsize a good choice?  I would have guessed a larger value 
-    // would be better, but 2MB is the max allowed on my osx laptop.
-    static const int socket_bufsize = 2 << 21; 
-
     int nassemblers = stream->assemblers.size();
 
-    intensity_beam_assembler *assemblers[nassemblers];
-    vector<udp_packet_list> assembler_packet_lists(nassemblers);
-    int assembler_beam_ids[nassemblers];
+    // We unpack the assemblers into an array of bare pointers, and unpack the beam_ids
+    // into an array of ints, for speed, although it probably doesn't matter!
+
+    vector<intensity_beam_assembler *> assemblers(nassemblers, NULL);
+    vector<int> assembler_beam_ids(nassemblers);
 
     for (int i = 0; i < nassemblers; i++) {
 	assemblers[i] = stream->assemblers[i].get();
-	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
-	assembler_beam_ids[i] = assemblers[i]->beam_id;
+	assembler_beam_ids[i] = stream->assemblers[i]->beam_id;
     }
-    
-    vector<uint8_t> packet_buf(constants::max_input_udp_packet_size + 1);
-    uint8_t *packet = &packet_buf[0];
 
-    //
-    // Create socket
-    //
+    // Socket setup: bind(), bufsize, timeout
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
@@ -261,20 +253,35 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
+    int socket_bufsize = constants::recv_socket_bufsize;
     err = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
     if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt() failed: ") + strerror(errno));
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
+
+    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+    err = setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
 
     cerr << ("ch_frb_io: network thread: listening for packets on port " + to_string(stream->udp_port) + "\n");
 
-    //
     // Wait for stream to start
-    //
 
     bool cancelled = !stream->wait_for_start_stream();
     
     if (cancelled)
 	return 0;
+
+    vector<udp_packet_list> assembler_packet_lists(nassemblers);
+    for (int i = 0; i < nassemblers; i++)
+	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
+
+    struct timeval tv_ini = xgettimeofday();
+    vector<int64_t> assembler_timestamps(nassemblers, 0);   // microseconds relative to tv_ini
+
+    vector<uint8_t> packet_buf(constants::max_input_udp_packet_size + 1);
+    uint8_t *packet = &packet_buf[0];
+    ssize_t npackets_received = 0;
     
     //
     // Main packet loop!
@@ -283,13 +290,34 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     // think about what really makes sense.
     //
 
-    ssize_t npackets_received = 0;
-
     for (;;) {
+	int64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
+	int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
+
+	// Check whether any assembled_packet_lists have timed out.
+	for (int i = 0; i < nassemblers; i++) {
+	    if (assembler_timestamps[i] > threshold_timestamp)
+		continue;
+	    if (assembler_packet_lists[i].curr_npackets == 0)
+		continue;
+
+	    bool assembler_alive = assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
+		
+	    if (!assembler_alive) {
+		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
+		return npackets_received;
+	    }
+	}
+
+	// Read new packet from socket (note that read() can time out)
 	int packet_nbytes = read(sock_fd, (char *) packet, constants::max_input_udp_packet_size + 1);
 
-	if (_unlikely(packet_nbytes < 0))
+	if (packet_nbytes < 0) {
+	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
+		continue;  // timed out
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
+	}
+
 	if (_unlikely(packet_nbytes > constants::max_input_udp_packet_size))
 	    continue;  // silently drop bad packet
 
@@ -369,7 +397,11 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
 	    memcpy(subpacket_scales, packet_scales + 4*ibeam*packet_nfreq, 4*packet_nfreq);
 	    memcpy(subpacket_offsets, packet_offsets + 4*ibeam*packet_nfreq, 4*packet_nfreq);
 	    memcpy(subpacket_data, packet_data + ibeam*subpacket_data_size, subpacket_data_size);
-	    
+
+	    // assembler_timestamp gets set when first packet is added
+	    if (assembler_packet_lists[assembler_ix].curr_npackets == 0)
+		assembler_timestamps[assembler_ix] = curr_timestamp;
+
 	    assembler_packet_lists[assembler_ix].add_packet(subpacket_total_size);
 
 	    if (!assembler_packet_lists[assembler_ix].is_full)

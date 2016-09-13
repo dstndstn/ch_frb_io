@@ -84,19 +84,19 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     // Assign nt_per_chunk.  Each chunk should be no more than 512 samples.
     this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);
 
-    // Assign nt_tot.  We require <= 1024 chunks, and <= 256 MB total (summed over all beams).
-    // FIXME think about increasing the 256 MB limit.  (Watch out for 32-bit overflow!)
+    // Assign nt_tot.  We require <= 1024 chunks, and <= 1 GB total (summed over all beams).
+    // FIXME think about increasing the 1 GB limit.  (Watch out for 32-bit overflow!)
     int packet_nbytes = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     int chunk_nbytes = packet_nbytes * (nfreq_coarse_tot / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet);
-    int max_nchunks = min(1024, (1<<28) / chunk_nbytes);
+    int max_nchunks = min(1024, (1<<30) / chunk_nbytes);
     this->nt_tot = nt_per_chunk * randint(rng, 1, max_nchunks+1);
 
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
-#if 1
-    // Convenient when debugging
+#if 0
+    // Sometimes it's convenient to debug a specific test case...
     this->nbeams = 1;
     this->nupfreq = 6;
     this->nfreq_coarse_per_packet = 2;

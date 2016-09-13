@@ -34,19 +34,26 @@ namespace constants {
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse = 1024;
 
-    // Network parameters
+    // Network parameters.
+    // The socket timeout is so we can periodically check for RPC's, flush data to assembler
+    // threads, and notice if intensity_network_ostream::end_stream() is called.
     static constexpr int default_udp_port = 10252;
     static constexpr int max_input_udp_packet_size = 9000;
     static constexpr int max_output_udp_packet_size = 8910;
+    static constexpr int recv_socket_bufsize = (1 << 21);   // 4 MB
+    static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
 
-    // Parameters of ring buffer between network output thread and assembler threads
-    // FIXME these parameters may be inflated, need to revisit
-    static constexpr int unassembled_ringbuf_capacity = 32;
-    static constexpr int max_unassembled_packets_per_list = 16384;
-    static constexpr int max_unassembled_nbytes_per_list = 2 * 1024 * 1024;
+    //
+    // Parameters of ring buffer between network output thread and assembler threads.
+    // In full CHIME, each unsassembled ring buffer receives ~15000 packets/sec and ~15 MB/sec.  
+    //
+    static constexpr int unassembled_ringbuf_capacity = 64;
+    static constexpr int max_unassembled_packets_per_list = 16384;   // large value is convenient for unit tests.
+    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
+    static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
 
     // Parameters of ring buffers between assembler threads and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;
