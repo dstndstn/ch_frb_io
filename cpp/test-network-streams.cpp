@@ -229,7 +229,7 @@ static void *consumer_thread_main(void *opaque_arg)
 	bool alive = assembler->get_assembled_chunk(chunk);
 
 	if (!alive)
-	    return NULL;
+	    break;
 
 	assert(chunk->nupfreq == tp->nupfreq);
 	assert(chunk->fpga_counts_per_sample == tp->fpga_counts_per_sample);
@@ -237,6 +237,8 @@ static void *consumer_thread_main(void *opaque_arg)
 
 	if (tpos_initialized)
 	    assert(chunk->chunk_t0 == tpos);
+	else
+	    assert(chunk->chunk_t0 <= tp->initial_t0);
 
 	// tpos = expected chunk_t0 in the next assembled_chunk.
 	tpos = chunk->chunk_t0 + ch_frb_io::constants::nt_per_assembled_chunk;
@@ -249,6 +251,11 @@ static void *consumer_thread_main(void *opaque_arg)
 	
 	// more chunk processing will go here
     }
+
+    assert(tpos_initialized);
+    assert(tpos >= tp->initial_t0 + tp->nt_tot);
+
+    return NULL;
 }
 
 
