@@ -133,8 +133,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
 	this->consumer_tpos[ithread] = initial_t0;
 
     this->show();
-
-    // Worst-case storage requirements for unassembled ringbuf
+    
+    // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
     int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
     int wc_nbytes = wc_npackets * packet_size(1, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
@@ -332,7 +332,8 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	    }
 	}
 
-	// Wait for consumer threads if necessary
+	// Wait for consumer threads if necessary.
+	// Note that for some choices of unit_test_instance parameters, this can test the timeout logic.
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
 	    while (tp->consumer_tpos[i] + nt_assembler < chunk_t0)
