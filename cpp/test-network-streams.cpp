@@ -95,15 +95,15 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
-#if 0
+#if 1
     // Sometimes it's convenient to debug a specific test case...
-    this->nbeams = 1;
-    this->nupfreq = 6;
-    this->nfreq_coarse_per_packet = 2;
-    this->nt_per_packet = 282;
-    this->nt_per_chunk = 282;
-    this->nt_tot = 36942;
-    this->initial_t0 = 329;
+    this->nbeams = 7;
+    this->nupfreq = 14;
+    this->nfreq_coarse_per_packet = 1;
+    this->nt_per_packet = 61;
+    this->nt_per_chunk = 305;
+    this->nt_tot = 4575;
+    this->initial_t0 = 1015;
 #endif
 
     // Clunky way of generating random beam_ids
