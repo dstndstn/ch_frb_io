@@ -93,7 +93,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
-#if 1
+#if 0
     // Sometimes it's convenient to debug a specific test case...
     this->nbeams = 7;
     this->nupfreq = 14;
