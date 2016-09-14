@@ -10,7 +10,7 @@ namespace ch_frb_io {
 #endif
 
 
-// defined later in this file
+// Defined later in this file
 static void *assembler_thread_main(void *opaque_arg);
 static void  assembler_thread_main2(intensity_beam_assembler *assembler);
 
@@ -232,11 +232,18 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 
     for (;;) {
 	if (assembled_ringbuf_size > 0) {
-	    chunk = assembled_ringbuf[assembled_ringbuf_pos % constants::assembled_ringbuf_capacity];
+	    int i = assembled_ringbuf_pos % constants::assembled_ringbuf_capacity;
+	    chunk = assembled_ringbuf[i];
+
+	    assembled_ringbuf[i] = shared_ptr<assembled_chunk> ();
 	    this->assembled_ringbuf_pos++;
-	    this->assembled_ringbuf_size--;
-	    
+	    this->assembled_ringbuf_size--;	    
+
 	    pthread_mutex_unlock(&this->lock);
+
+	    if (!chunk)
+		throw runtime_error("ch_frb_io: internal error: unexpected empty pointer in get_assembled_chunk()");
+
 	    return true;
 	}
 
