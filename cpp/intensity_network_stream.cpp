@@ -132,35 +132,27 @@ bool intensity_network_stream::wait_for_start_stream()
 }
 
 
-void intensity_network_stream::end_stream(bool join_threads)
+void intensity_network_stream::end_stream()
 {
-    bool call_join_after_releasing_lock = false;
-
     pthread_mutex_lock(&this->lock);
 
     // Set flags as if stream had run to completion.  This is convenient e.g. for waking up threads
     // which are blocked in wait_for_packets().
     this->stream_started = true;
     this->stream_ended = true;
-
-    if (join_threads && !network_thread_joined) {
-	call_join_after_releasing_lock = true;
-	this->network_thread_joined = true;
-    }
     
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->lock);
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->end_stream(join_threads);
-
-    if (call_join_after_releasing_lock)
-	pthread_join(network_thread, NULL);
+	assemblers[i]->end_stream();
 }
 
 
-void intensity_network_stream::wait_for_end_of_stream(bool join_threads)
+void intensity_network_stream::join_all_threads()
 {
+    bool call_join_after_releasing_lock = false;
+
     pthread_mutex_lock(&lock);
     
     if (!stream_started) {
@@ -171,10 +163,18 @@ void intensity_network_stream::wait_for_end_of_stream(bool join_threads)
     while (!stream_ended)
 	pthread_cond_wait(&this->cond_state_changed, &this->lock);
 
+    if (!network_thread_joined) {
+	call_join_after_releasing_lock = true;
+	this->network_thread_joined = true;
+    }
+
     pthread_mutex_unlock(&lock);
 
-    // Looks weird but does the correct thing
-    this->end_stream(join_threads);
+    if (call_join_after_releasing_lock)
+	pthread_join(network_thread, NULL);
+
+    for (unsigned int i = 0; i < assemblers.size(); i++)
+	assemblers[i]->join_assembler_thread();
 }
 
 
@@ -212,12 +212,12 @@ static void *network_thread_main(void *opaque_arg)
 	npackets_received = network_thread_main2(stream.get(), sock_fd);
     } catch (...) {
 	close(sock_fd);
-	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
+	stream->end_stream();
 	throw;
     }
 
     close(sock_fd);
-    stream->end_stream(false);   // "false" has same meaning as above
+    stream->end_stream();
 
     cerr << ("ch_frb_io: network thread exiting (" + to_string(npackets_received) + " packets received)\n");
     return NULL;
@@ -290,11 +290,11 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     // think about what really makes sense.
     //
 
-    for (;;) {
+    while (stream->is_alive()) {
+	// Check whether any assembled_packet_lists have timed out.
 	int64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
 	int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
 
-	// Check whether any assembled_packet_lists have timed out.
 	for (int i = 0; i < nassemblers; i++) {
 	    if (assembler_timestamps[i] > threshold_timestamp)
 		continue;
@@ -336,7 +336,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
 	if (_unlikely(packet_nbytes == 24)) {
 	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
-	    break;   // Note: this branch is the only way out of the main packet loop
+	    break;
 	}
 	
 	// The following way of writing the comparisons (using uint64_t) guarantees no overflow

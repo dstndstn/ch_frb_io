@@ -347,7 +347,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);
-	
+
 	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
 	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
 	cout << "sent chunk " << ichunk << "/" << nchunks << endl;
@@ -373,7 +373,7 @@ int main(int argc, char **argv)
 	tp->istream->start_stream();
 
 	send_data(tp);	
-	tp->istream->end_stream(true);  // join_threads=true
+	tp->istream->join_all_threads();
 
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
 	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);

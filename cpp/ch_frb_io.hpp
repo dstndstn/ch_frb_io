@@ -435,13 +435,14 @@ public:
     //
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
-    // Helper function called by intensity_beam_assembler::make()
     void wait_for_assembler_thread_startup();
+    bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
+    void join_assembler_thread();
 
     // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
     void start_stream(int fpga_counts_per_sample, int nupfreq);
     bool put_unassembled_packets(udp_packet_list &packet_list);
-    void end_stream(bool join_thread);   // can also be called by assembler thread, if it exits unexpectedly
+    void end_stream();
 
     //
     // Called by assembler thread.  
@@ -453,9 +454,7 @@ public:
     void assembler_thread_startup();
     bool get_unassembled_packets(udp_packet_list &packet_list);
     void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
-
-    // Called by both assembler thread and "downstream" thread
-    bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
+    void assembler_thread_end();
 
     // Called by "downstream" thread
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
@@ -474,11 +473,18 @@ private:
     pthread_mutex_t lock;
 
     pthread_t assembler_thread;
-
+    
+    //
     // Assembler state model
+    //   assembler_thread_started: set by assembler thread, before intensity_beam_assembler::make() returns
+    //   stream_started: set by "upstream" thread, when it calls intensity_beam_assembler::start_stream()
+    //   stream_ended: set by "upstream" thread, when it calls intensity_beam_assembler::end_stream()
+    //   assembler_thread_ended: set by assembler thread, on exit
+    //
     bool assembler_thread_started = false;
     bool stream_started = false;
     bool stream_ended = false;
+    bool assembler_thread_ended = false;
     bool assembler_thread_joined = false;
     pthread_cond_t cond_assembler_state_changed;
 
@@ -510,20 +516,27 @@ public:
     // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
     static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
 	-> std::shared_ptr<intensity_network_stream>;
-    
-    // High level control routines.
-    //   - end_stream() can be used either to cancel a stream which never ran, or interrupt a running stream.
-    //   - wait_for_first_packet_params() return false if the stream gets cancelled before receiving packets.
 
-    void start_stream();   // tells network thread to start reading packets
+    // Called in make()
     void wait_for_network_thread_startup();
-    void wait_for_end_of_stream(bool join_threads);
-    void end_stream(bool join_threads);
+    bool wait_for_start_stream();     // returns false if stream has been cancelled
+
+    // High level control routines.
+    void start_stream();   // tells network thread to start reading packets
+    void end_stream();
+    void join_all_threads();  // waits for end of stream, and joins all threads, including assembler threads.
 
     // Called by network thread.
     // When the network thread exits (typically when end-of-stream packet is received), it calls end_stream().
     void network_thread_startup();
-    bool wait_for_start_stream();     // returns false if stream has been cancelled
+
+    inline bool is_alive()
+    {
+	pthread_mutex_lock(&this->lock);
+	bool alive = !this->stream_ended;
+	pthread_mutex_unlock(&this->lock);
+	return alive;
+    }
 
     ~intensity_network_stream();
 

@@ -67,6 +67,7 @@ intensity_beam_assembler::~intensity_beam_assembler()
 }
 
 
+// Called by assembler thread, to let the world know it started.
 void intensity_beam_assembler::assembler_thread_startup()
 {
     pthread_mutex_lock(&this->lock);
@@ -74,7 +75,6 @@ void intensity_beam_assembler::assembler_thread_startup()
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_mutex_unlock(&this->lock);
 }
-
 
 void intensity_beam_assembler::wait_for_assembler_thread_startup()
 {
@@ -86,11 +86,17 @@ void intensity_beam_assembler::wait_for_assembler_thread_startup()
     pthread_mutex_unlock(&this->lock);
 }
 
-
+// Called by network thread, upon receipt of first packet.
+// Advances assembler state from 'assembler_thread_started' to 'stream_started'
 void intensity_beam_assembler::start_stream(int fpga_counts_per_sample_, int nupfreq_)
 {
     pthread_mutex_lock(&this->lock);
-    
+
+    if (!assembler_thread_started) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::start_stream() was called, but no assembler thread");
+    }
+
     if (stream_started) {
 	pthread_mutex_unlock(&this->lock);
 	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::start_stream()");
@@ -120,11 +126,9 @@ bool intensity_beam_assembler::wait_for_stream_params(int &fpga_counts_per_sampl
     return retval;
 }
 
-
-void intensity_beam_assembler::end_stream(bool join_thread)
+// advances state: stream_started -> stream_ended
+void intensity_beam_assembler::end_stream()
 {
-    bool call_join_after_releasing_lock = false;
-
     pthread_mutex_lock(&this->lock);
 
     // We set both flags to imitate a stream which has been started and stopped.
@@ -132,19 +136,48 @@ void intensity_beam_assembler::end_stream(bool join_thread)
     this->stream_started = true;
     this->stream_ended = true;
 
-    // Wake up all threads in sight (overkill but that's OK)
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_mutex_unlock(&this->lock);
+
+    this->unassembled_ringbuf->end_stream();
+}
+
+
+// advances state: stream_ended -> assembler_ended
+void intensity_beam_assembler::assembler_thread_end()
+{
+    pthread_mutex_lock(&this->lock);
+
+    // We set the whole chain of flags, to avoid confusion.
+    this->stream_started = true;
+    this->stream_ended = true;
+    this->assembler_thread_ended = true;
+
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
+    pthread_mutex_unlock(&this->lock);
 
-    if (join_thread && !this->assembler_thread_joined) {
+    // Probably redundant but playing it safe...
+    this->unassembled_ringbuf->end_stream();
+}
+
+
+void intensity_beam_assembler::join_assembler_thread()
+{
+    bool call_join_after_releasing_lock = false;
+
+    pthread_mutex_lock(&this->lock);
+
+    while (!this->assembler_thread_ended)
+	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
+
+    if (!this->assembler_thread_joined) {
 	this->assembler_thread_joined = true;
 	call_join_after_releasing_lock = true;
     }
 
     pthread_mutex_unlock(&this->lock);
-
-    this->unassembled_ringbuf->end_stream();
-
+	
     if (call_join_after_releasing_lock)
 	pthread_join(this->assembler_thread, NULL);
 }
@@ -207,7 +240,7 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 	    return true;
 	}
 
-	if (stream_ended) {
+	if (assembler_thread_ended) {
 	    pthread_mutex_unlock(&this->lock);
 	    return false;
 	}
@@ -275,12 +308,11 @@ static void *assembler_thread_main(void *opaque_arg)
     try {
 	assembler_thread_main2(assembler.get());
     } catch (...) {
-	assembler->end_stream(false);  // the "false" means "nonblocking" (otherwise we'd deadlock!)
+	assembler->assembler_thread_end();
 	throw;
     }
 
-    assembler->end_stream(false);  // "false" means same as above
-    cerr << ("ch_frb_io: assembler thread ending (beam_id=" + to_string(assembler->beam_id) + ")\n");    
+    assembler->assembler_thread_end();
 
     return NULL;
 }
@@ -324,7 +356,6 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 	    if (!initialized)
 		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
 
-	    cerr << ("ch_frb_io: assembler thread input is complete (beam_id=" + to_string(assembler_beam_id) + ")\n");
 	    assembler->put_assembled_chunk(chunk0);
 	    assembler->put_assembled_chunk(chunk1);
 	    return;
