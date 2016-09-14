@@ -35,13 +35,14 @@ namespace constants {
     static constexpr int nfreq_coarse = 1024;
 
     // Network parameters.
-    // The socket timeout is so we can periodically check for RPC's, flush data to assembler
+    // The recv_socket_timeout is so we can periodically check for RPC's, flush data to assembler
     // threads, and notice if intensity_network_ostream::end_stream() is called.
     static constexpr int default_udp_port = 10252;
     static constexpr int max_input_udp_packet_size = 9000;
     static constexpr int max_output_udp_packet_size = 8910;
-    static constexpr int recv_socket_bufsize = (1 << 21);   // 4 MB
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
+    static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
+    static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;

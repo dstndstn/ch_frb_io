@@ -163,6 +163,11 @@ static int make_socket_from_dstname(const string &dstname)
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: couldn't create udp socket: ") + strerror(errno));
+
+    int socket_bufsize = constants::send_socket_bufsize;
+    err = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
     
     // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
 
