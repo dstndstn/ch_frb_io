@@ -271,13 +271,16 @@ class StreamReader(object):
         filenames = glob.glob(path.join(datadir, ("[0-9]" * 8 + '.h5')))
         filenames.sort()
         self._filenames = filenames
-        self._files = [h5py.File(f, mode='r') for f in filenames]
-        first_file = self._files[0]
+        first_file = h5py.File(filenames[0], mode='r')
         self._attrs = first_file.attrs
         self._freq = first_file['index_map/freq'][:]
         self._pol = first_file['index_map/pol'][:]
 
-        time_arrs = [f['index_map/time'][:] for f in self._files]
+        time_arrs = []
+        for fname in filenames:
+            f = h5py.File(fname, mode='r')
+            time_arrs.append(f['index_map/time'][:])
+            f.close()
         self._ntimes = [len(t) for t in time_arrs]
         self._time = np.concatenate(time_arrs)
 
@@ -296,6 +299,8 @@ class StreamReader(object):
         #        raise ValueError("Files don't have integer number of chunks.")
 
         self._h5_cache_start_ind = None
+
+        first_file.close()
 
 
     @property
@@ -327,7 +332,8 @@ class StreamReader(object):
         """Target read size."""
 
     def finalize(self):
-        [f.close() for f in self._files]
+        pass
+        #[f.close() for f in self._files]
 
     def __del__(self):
         self.finalize()
@@ -390,10 +396,13 @@ class StreamReader(object):
             return
         self._h5_cache_start_ind = h5_cache_start_ind
 
+        f = h5py.File(self._filenames[which_file], mode='r')
+
         self._h5_cache = {}
         for dataset_name in self._datasets.keys():
-            dataset = self._files[which_file][dataset_name]
+            dataset = f[dataset_name]
             self._h5_cache[dataset_name] = dataset[...,
                     file_time_ind:file_time_ind + self._time_chunk]
+        f.close()
 
 
