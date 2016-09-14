@@ -219,7 +219,7 @@ static void *consumer_thread_main(void *opaque_arg)
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
 
-    double w0 = tp->wt_cutoff;
+    double wt_cutoff = tp->wt_cutoff;
     int test_t0 = tp->initial_t0;
     int test_t1 = tp->initial_t0 + tp->nt_tot;
     int beam_id = assembler->beam_id;
@@ -255,25 +255,33 @@ static void *consumer_thread_main(void *opaque_arg)
 	int chunk_t0 = chunk->chunk_t0;
 
 	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse * tp->nupfreq; ifreq++) {
-	    // const float *int_row = chunk->intensity + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
+	    const float *int_row = chunk->intensity + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
 	    const float *wt_row = chunk->weights + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
 
 	    for (int it = 0; it < ch_frb_io::constants::nt_per_assembled_chunk; it++) {
+		// Out of range
 		if ((it+chunk_t0 < test_t0) || (it+chunk_t0 >= test_t1)) {
 		    assert(wt_row[it] == 0.0);
 		    continue;
 		}
 
-		double w = wtval(beam_id, ifreq, it+chunk_t0);
+		double ival = intval(beam_id, ifreq, it+chunk_t0);
+		double wval = wtval(beam_id, ifreq, it+chunk_t0);
 
-		if ((wt_row[it] == 0.0) && (w <= 1.00001 * w0))
+		// Check intensity
+		if ((wt_row[it] > 0.0) && fabs(int_row[it] - ival) > 0.021)
+		    throw runtime_error("oops");
+
+		// Check weights
+		if ((wt_row[it] == 0.0) && (wval <= 1.00001 * wt_cutoff))
 		    continue;
-		if ((wt_row[it] == 1.0) && (w >= 0.99999 * w0))
+		if ((wt_row[it] == 1.0) && (wval >= 0.99999 * wt_cutoff))
 		    continue;
 
+		// If we get here, the weights check failed
 		stringstream ss;
 		ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
-		   << "   wtval(...)=" << w << ", wt_cutoff=" << w0 << ", wt_chunk=" << wt_row[it] << "\n";
+		   << "   wtval(...)=" << wval << ", wt_cutoff=" << wt_cutoff << ", wt_chunk=" << wt_row[it] << "\n";
 
 		cerr << ss.str();
 		exit(1);
