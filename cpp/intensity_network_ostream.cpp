@@ -36,9 +36,9 @@ static void network_thread_main2(intensity_network_ostream *stream);
 // 
 inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t *datap, const float *intensity, const float *mask)
 {
-    float acc0 = 0.0;
-    float acc1 = 0.0;
-    float acc2 = 0.0;
+    double acc0 = 0.0;
+    double acc1 = 0.0;
+    double acc2 = 0.0;
 
     for (int i = 0; i < rowlen; i++) {
 	acc0 += mask[i];
@@ -53,13 +53,13 @@ inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t
 	return;
     }
 
-    float mean = acc1/acc0;
-    float var = acc2/acc0 - mean*mean;
+    double mean = acc1/acc0;
+    double var = acc2/acc0 - mean*mean;
     
-    var = max(var, float(1.0e-10*mean*mean));
+    var = max(var, double(1.0e-10*mean*mean));
 
-    float scale = sqrt(var) / 25.;
-    float offset = -128.*scale + mean;   // 0x80 -> mean
+    double scale = sqrt(var) / 25.;
+    double offset = -128.*scale + mean;   // 0x80 -> mean
 
     *scalep = scale;
     *offsetp = offset;
@@ -72,7 +72,6 @@ inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t
 	datap[i] = int(t+0.5);  // round to nearest integer
     }
 }
-
 
 //
 // Note: encode_packet() doesn't do much argument checking.
@@ -111,6 +110,7 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 
     static_assert(sizeof(float)==4, "the logic below assumes sizeof(float)==4");
 
+    // In this routine, a "row" is a (beam, freq_coarse) pair.
     int nrows = nbeam * nfreq;
     int rowlen = nupfreq * ntsamp;
 
