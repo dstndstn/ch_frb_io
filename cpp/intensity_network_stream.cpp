@@ -322,7 +322,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
 	uint32_t protocol_version = *((uint32_t *) packet);
 	if (_unlikely(protocol_version != 1))
 	    continue;  // silently drop bad packet
-	
+
 	int data_nbytes = *((int16_t *) (packet+4));
 	int packet_fpga_counts_per_sample = *((uint16_t *) (packet+6));
 	int packet_nbeam = *((uint16_t *) (packet+16));

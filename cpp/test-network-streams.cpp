@@ -16,7 +16,7 @@ inline bool array_contains(const int *arr, int len, int x)
 
 inline double intval(int beam_id, int ifreq, int it)
 {
-    return 0.823*beam_id + 1.319*ifreq + 0.2139*it;
+    return sin(0.823*beam_id + 1.319*ifreq + 1.023*it);
 }
 
 
@@ -95,9 +95,9 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 
 #if 0
     // Sometimes it's convenient to debug a specific test case...
-    this->nbeams = 7;
+    this->nbeams = 1;
     this->nupfreq = 14;
-    this->nfreq_coarse_per_packet = 1;
+    this->nfreq_coarse_per_packet = 4;
     this->nt_per_packet = 61;
     this->nt_per_chunk = 305;
     this->nt_tot = 4575;
@@ -138,7 +138,9 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    nt_per_packet=" << nt_per_packet << endl
 	 << "    nt_per_chunk=" << nt_per_chunk << endl
 	 << "    nt_tot=" << nt_tot << endl
-	 << "    initial_t0=" << initial_t0 << endl;
+	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
+	 << "    initial_t0=" << initial_t0 << endl
+	 << "    wt_cutoff=" << wt_cutoff << endl;
     
     // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
@@ -339,7 +341,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     auto ostream = intensity_network_ostream::make(dstname, tp->send_beam_ids, tp->send_freq_ids, tp->nupfreq,
 						   tp->nt_per_chunk, tp->nfreq_coarse_per_packet, 
 						   tp->nt_per_packet, tp->fpga_counts_per_sample,
-						   tp->wt_cutoff, 0.0);
+						   tp->wt_cutoff, 3.0);
 
     vector<float> intensity(nbeams * s3, 0.0);
     vector<float> weights(nbeams * s3, 0.0);
@@ -394,8 +396,13 @@ int main(int argc, char **argv)
 {
     const int nrun = 100;
 
+#if 1
     std::random_device rd;
     std::mt19937 rng(rd());
+#else
+    // Sometimes it's convenient to use the same seed every time, for debugging.
+    std::mt19937 rng;
+#endif
 
     for (int irun = 0; irun < nrun; irun++) {
 	auto tp = make_shared<unit_test_instance> (rng, irun, nrun);
