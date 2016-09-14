@@ -56,14 +56,12 @@ struct unit_test_instance {
     pthread_cond_t cond_tpos_changed;
     uint64_t consumer_tpos[maxbeams];
 
-    unit_test_instance(std::mt19937 &rng);
+    unit_test_instance(std::mt19937 &rng, int irun, int nrun);
     ~unit_test_instance();
-
-    void show() const;
 };
 
 
-unit_test_instance::unit_test_instance(std::mt19937 &rng)
+unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
@@ -132,7 +130,15 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     for (int ithread = 0; ithread < nbeams; ithread++)
 	this->consumer_tpos[ithread] = initial_t0;
 
-    this->show();
+    cout << "\nStarting test run " << irun << "/" << nrun << endl;
+
+    cout << "    nbeams=" << nbeams << endl
+	 << "    nupfreq=" << nupfreq << endl
+	 << "    nfreq_coarse_per_packet=" << nfreq_coarse_per_packet << endl
+	 << "    nt_per_packet=" << nt_per_packet << endl
+	 << "    nt_per_chunk=" << nt_per_chunk << endl
+	 << "    nt_tot=" << nt_tot << endl
+	 << "    initial_t0=" << initial_t0 << endl;
     
     // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
@@ -144,14 +150,16 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng)
     int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;
 
     if ((npackets_alloc < wc_npackets) || (nbytes_alloc < wc_nbytes)) {
-	cout << "npackets_needed=" << wc_npackets << endl
-	     << "npackets_allocated=" << npackets_alloc << endl
-	     << "nbytes_needed=" << wc_nbytes << endl
-	     << "nbytes_alloc=" << nbytes_alloc << endl
-	     << "  Fatal: unassembled_packet_buf is underallocated" << endl;
+	cout << "    npackets_needed=" << wc_npackets << endl
+	     << "    npackets_allocated=" << npackets_alloc << endl
+	     << "    nbytes_needed=" << wc_nbytes << endl
+	     << "    nbytes_alloc=" << nbytes_alloc << endl
+	     << "Fatal: unassembled_packet_buf is underallocated" << endl;
 
 	exit(1);
     }
+
+    cout << endl;
 }
 
 
@@ -159,18 +167,6 @@ unit_test_instance::~unit_test_instance()
 {
     pthread_mutex_destroy(&tpos_lock);
     pthread_cond_destroy(&cond_tpos_changed);
-}
-
-
-void unit_test_instance::show() const
-{
-    cout << "nbeams=" << nbeams << endl
-	 << "nupfreq=" << nupfreq << endl
-	 << "nfreq_coarse_per_packet=" << nfreq_coarse_per_packet << endl
-	 << "nt_per_packet=" << nt_per_packet << endl
-	 << "nt_per_chunk=" << nt_per_chunk << endl
-	 << "nt_tot=" << nt_tot << endl
-	 << "initial_t0=" << initial_t0 << endl;
 }
 
 
@@ -363,11 +359,13 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 
 int main(int argc, char **argv)
 {
+    const int nrun = 100;
+
     std::random_device rd;
     std::mt19937 rng(rd());
 
-    for (int iouter = 0; iouter < 100; iouter++) {
-	auto tp = make_shared<unit_test_instance> (rng);
+    for (int irun = 0; irun < nrun; irun++) {
+	auto tp = make_shared<unit_test_instance> (rng, irun, nrun);
 
 	spawn_all_receive_threads(tp);
 	tp->istream->start_stream();

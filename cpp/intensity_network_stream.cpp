@@ -196,7 +196,6 @@ static void *network_thread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
 
-    cerr << "ch_frb_io: network thread starting\n";
     stream->network_thread_startup();
 
     int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -219,7 +218,6 @@ static void *network_thread_main(void *opaque_arg)
     close(sock_fd);
     stream->end_stream();
 
-    cerr << ("ch_frb_io: network thread exiting (" + to_string(npackets_received) + " packets received)\n");
     return NULL;
 }
 

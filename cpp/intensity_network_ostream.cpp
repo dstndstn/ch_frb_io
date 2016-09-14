@@ -248,14 +248,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
 
-    stringstream ss;
-    ss << "ch_frb_io: constructing network_ostream (nbeams=" << nbeam << ",nfreq_per_chunk=" << nfreq_per_chunk
-       << ",nt_per_chunk=" << nt_per_chunk << ",nfreq_per_packet=" << nfreq_per_packet << ",nt_per_packet=" << nt_per_packet
-       << ",npackets_per_chunk=" << npackets_per_chunk << ",target_gbps=" << target_gbps << ")\n";
-
-    string s = ss.str();
-    cerr << s.c_str();
-
     xpthread_mutex_init(&this->state_lock);
     xpthread_cond_init(&this->cond_state_changed);
 
@@ -408,8 +400,6 @@ static void *network_thread_main(void *opaque_arg)
 {
     auto stream = xpthread_get_arg<intensity_network_ostream> (opaque_arg, "network write thread");
     stream->network_thread_startup();
-
-    cerr << "ch_frb_io: network output thread starting\n";
 
     try {
 	network_thread_main2(stream.get());

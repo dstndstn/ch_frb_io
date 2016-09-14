@@ -302,7 +302,6 @@ static void *assembler_thread_main(void *opaque_arg)
     if (!assembler)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembler_thread_main()");
 
-    cerr << ("ch_frb_io: assembler thread starting (beam_id=" + to_string(assembler->beam_id) + ")\n");
     assembler->assembler_thread_startup();
 
     try {
