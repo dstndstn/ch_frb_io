@@ -281,7 +281,7 @@ static void *consumer_thread_main(void *opaque_arg)
 		// If we get here, the weights check failed
 		stringstream ss;
 		ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
-		   << "   wtval(...)=" << wval << ", wt_cutoff=" << wt_cutoff << ", wt_chunk=" << wt_row[it] << "\n";
+		   << "   wtval(...)=" << wval << ", wt_cutoff=" << wt_cutoff << ", wt_received=" << wt_row[it] << "\n";
 
 		cerr << ss.str();
 		exit(1);
@@ -349,7 +349,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     auto ostream = intensity_network_ostream::make(dstname, tp->send_beam_ids, tp->send_freq_ids, tp->nupfreq,
 						   tp->nt_per_chunk, tp->nfreq_coarse_per_packet, 
 						   tp->nt_per_packet, tp->fpga_counts_per_sample,
-						   tp->wt_cutoff, 3.0);
+						   tp->wt_cutoff, 0.25);
 
     vector<float> intensity(nbeams * s3, 0.0);
     vector<float> weights(nbeams * s3, 0.0);
@@ -427,6 +427,8 @@ int main(int argc, char **argv)
 		throw runtime_error("pthread_join() failed");
 	}
     }
+
+    cout << "\n    ****  network test passed!! ****\n\n";
 
     return 0;
 }
