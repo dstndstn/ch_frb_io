@@ -216,7 +216,12 @@ static void *consumer_thread_main(void *opaque_arg)
     context->is_running = true;
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
-    
+
+    double w0 = tp->wt_cutoff;
+    int test_t0 = tp->initial_t0;
+    int test_t1 = tp->initial_t0 + tp->nt_tot;
+    int beam_id = assembler->beam_id;
+
     uint64_t tpos = 0;
     bool tpos_initialized = false;
 
@@ -244,7 +249,35 @@ static void *consumer_thread_main(void *opaque_arg)
 	tp->consumer_tpos[ithread] = tpos;
 	pthread_cond_broadcast(&tp->cond_tpos_changed);
 	pthread_mutex_unlock(&tp->tpos_lock);
-	
+
+	int chunk_t0 = chunk->chunk_t0;
+
+	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse * tp->nupfreq; ifreq++) {
+	    // const float *int_row = chunk->intensity + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
+	    const float *wt_row = chunk->weights + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
+
+	    for (int it = 0; it < ch_frb_io::constants::nt_per_assembled_chunk; it++) {
+		if ((it+chunk_t0 < test_t0) || (it+chunk_t0 >= test_t1)) {
+		    assert(wt_row[it] == 0.0);
+		    continue;
+		}
+
+		double w = wtval(beam_id, ifreq, it+chunk_t0);
+
+		if ((wt_row[it] == 0.0) && (w <= 1.00001 * w0))
+		    continue;
+		if ((wt_row[it] == 1.0) && (w >= 0.99999 * w0))
+		    continue;
+
+		stringstream ss;
+		ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
+		   << "   wtval(...)=" << w << ", wt_cutoff=" << w0 << ", wt_chunk=" << wt_row[it] << "\n";
+
+		cerr << ss.str();
+		exit(1);
+	    }
+	}
+
 	// more chunk processing will go here
     }
 
