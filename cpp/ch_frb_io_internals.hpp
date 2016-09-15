@@ -190,12 +190,6 @@ template<typename T> inline std::shared_ptr<T> xpthread_get_arg(void *opaque_arg
 }
 
 
-// Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
-template<typename T> extern T lexical_cast(const std::string &x);
-
-// Unit test
-extern void test_lexical_cast();
-
 }  // namespace ch_frb_io
 
 #endif // _CH_FRB_IO_INTERNALS_HPP

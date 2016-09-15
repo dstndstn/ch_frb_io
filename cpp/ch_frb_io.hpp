@@ -709,6 +709,13 @@ struct hdf5_extendable_dataset {
 };
 
 
+// Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
+template<typename T> extern T lexical_cast(const std::string &x);
+
+// Unit test
+extern void test_lexical_cast();
+
+
 }  // namespace ch_frb_io
 
 #endif // _CH_FRB_IO_HPP
