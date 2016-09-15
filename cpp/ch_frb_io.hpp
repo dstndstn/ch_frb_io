@@ -55,7 +55,7 @@ namespace constants {
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
     static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
-    static constexpr double max_gpbs_for_testing = 0.1;
+    static constexpr double max_gbps_for_testing = 0.1;
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
@@ -367,7 +367,7 @@ public:
     static auto make(const std::string &dstname, const std::vector<int> &ibeam, 
 		     const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 		     int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-		     float wt_cutoff, double target_gpbs) 
+		     float wt_cutoff, double target_gbps) 
 	-> std::shared_ptr<intensity_network_ostream>;
 
     ~intensity_network_ostream();
@@ -415,7 +415,7 @@ protected:
     intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
 			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-			      float wt_cutoff, double gpbs);
+			      float wt_cutoff, double gbps);
 };
 
 
