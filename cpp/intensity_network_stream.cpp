@@ -2,7 +2,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <iostream>
-#include "ch_frb_io.hpp"
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -15,7 +14,7 @@ namespace ch_frb_io {
 
 // Defined later in this file
 static void *network_thread_main(void *opaque_arg);
-static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_fd);
+static void network_thread_main2(intensity_network_stream *stream, int sock_fd);
 
 
 // -------------------------------------------------------------------------------------------------
@@ -202,13 +201,11 @@ static void *network_thread_main(void *opaque_arg)
     if (sock_fd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
-    ssize_t npackets_received = 0;
-
     // We use a try..catch to ensure that the socket always gets closed, and end_stream()
     // always gets called, even if an exception is thrown.
 
     try {
-	npackets_received = network_thread_main2(stream.get(), sock_fd);
+	network_thread_main2(stream.get(), sock_fd);
     } catch (...) {
 	close(sock_fd);
 	stream->end_stream();
@@ -222,8 +219,7 @@ static void *network_thread_main(void *opaque_arg)
 }
 
 
-// Returns number of packets received
-static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_fd)
+static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
 {
     int nassemblers = stream->assemblers.size();
 
@@ -268,7 +264,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     bool cancelled = !stream->wait_for_start_stream();
     
     if (cancelled)
-	return 0;
+	return;
 
     vector<udp_packet_list> assembler_packet_lists(nassemblers);
     for (int i = 0; i < nassemblers; i++)
@@ -280,7 +276,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     vector<uint8_t> packet_buf(constants::max_input_udp_packet_size + 1);
     uint8_t *packet = &packet_buf[0];
     ssize_t npackets_received = 0;
-    
+
     //
     // Main packet loop!
     // 
@@ -288,7 +284,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     // think about what really makes sense.
     //
 
-    while (stream->is_alive()) {
+    for (;;) {
 	// Check whether any assembled_packet_lists have timed out.
 	int64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
 	int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
@@ -303,7 +299,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
 		
 	    if (!assembler_alive) {
 		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
-		return npackets_received;
+		return;
 	    }
 	}
 
@@ -411,7 +407,7 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
 	    if (!assembler_alive) {
 		// Is this what we should do?
 		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
-		return npackets_received;
+		return;
 	    }
 	}
     }
@@ -419,8 +415,6 @@ static ssize_t network_thread_main2(intensity_network_stream *stream, int sock_f
     for (int i = 0; i < nassemblers; i++)
 	if (assembler_packet_lists[i].curr_npackets > 0)
 	    assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
-
-    return npackets_received;
 }
 
 
