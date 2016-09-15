@@ -2,7 +2,6 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <iostream>
-#include "ch_frb_io.hpp"
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
