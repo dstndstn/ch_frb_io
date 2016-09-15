@@ -359,7 +359,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     auto ostream = intensity_network_ostream::make(dstname, tp->send_beam_ids, tp->send_freq_ids, tp->nupfreq,
 						   tp->nt_per_chunk, tp->nfreq_coarse_per_packet, 
 						   tp->nt_per_packet, tp->fpga_counts_per_sample,
-						   tp->wt_cutoff, 0.25);
+						   tp->wt_cutoff, ch_frb_io::constants::max_gpbs_for_testing);
 
     vector<float> intensity(nbeams * s3, 0.0);
     vector<float> weights(nbeams * s3, 0.0);

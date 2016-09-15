@@ -34,15 +34,28 @@ namespace constants {
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse = 1024;
 
+    //
     // Network parameters.
+    //
     // The recv_socket_timeout is so we can periodically check for RPC's, flush data to assembler
     // threads, and notice if intensity_network_ostream::end_stream() is called.
+    //
+    // max_output_udp_packet_size: largest packet the output stream will produce
+    // max_input_udp_packet_size: largest packet the input stream will accept (should be larger of the two)
+    // We choose values around ~9KB, as appropriate for 1 Gbps ethernet with jumbo frames and no fragmentation.
+    //
+    // max_gbps_for_testing: This is a very small value (0.1 Gbps) but seems to be necessary if we want to 
+    // avoid dropping packets in the unit test.  This means that the unit tests take about an hour to run,
+    // which isn't really a problem, but is it indicative of deeper performance problems?  It would be nice
+    // to understand where the bottleneck is.  (FIXME?)
+    //
     static constexpr int default_udp_port = 10252;
     static constexpr int max_input_udp_packet_size = 9000;
     static constexpr int max_output_udp_packet_size = 8910;
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
     static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
+    static constexpr double max_gpbs_for_testing = 0.1;
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
