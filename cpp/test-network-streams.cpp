@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
