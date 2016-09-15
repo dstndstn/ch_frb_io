@@ -208,7 +208,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 						     const std::vector<int> &ifreq_chunk_, int nupfreq_, int nt_per_chunk_,
 						     int nfreq_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
 						     float wt_cutoff_, double target_gbps_) :
-    sockfd(make_socket_from_dstname(dstname)),
     nbeam(ibeam_.size()),
     nupfreq(nupfreq_),
     nfreq_per_chunk(ifreq_chunk_.size()),
@@ -218,8 +217,12 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     fpga_counts_per_sample(fpga_counts_per_sample_),
     wt_cutoff(wt_cutoff_),
     target_gbps(target_gbps_),
+    nbytes_per_packet(packet_size(nbeam, nfreq_per_packet, nupfreq, nt_per_packet)),
+    npackets_per_chunk((nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet)),
+    nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
     ibeam(_init_ivec(ibeam_,"beam")),
-    ifreq_chunk(_init_ivec(ifreq_chunk_,"freq"))
+    ifreq_chunk(_init_ivec(ifreq_chunk_,"freq")),
+    sockfd(make_socket_from_dstname(dstname))
 {
     // Tons of argument checking.
     // The { nbeam, ibeam, nfreq_per_chunk, ifreq_chunk } args have already been checked in _init_ivec().
@@ -245,9 +248,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be >= 0.0");
     if (target_gbps < 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected target_gbps to be >= 0.0");
-
-    this->npackets_per_chunk = (nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet);
-    this->nbytes_per_packet = packet_size(nbeam, nfreq_per_packet, nupfreq, nt_per_packet);
 
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");

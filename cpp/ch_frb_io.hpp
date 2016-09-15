@@ -337,6 +337,21 @@ struct assembled_chunk : noncopyable {
 //  
 struct intensity_network_ostream : noncopyable {
 public:
+    const int nbeam;
+    const int nupfreq;
+    const int nfreq_per_chunk;
+    const int nfreq_per_packet;
+    const int nt_per_chunk;
+    const int nt_per_packet;
+    const int fpga_counts_per_sample;
+    const float wt_cutoff;
+    const double target_gbps;
+    const int nbytes_per_packet;
+    const int npackets_per_chunk;
+    const int nbytes_per_chunk;
+    const std::vector<uint16_t> ibeam;
+    const std::vector<uint16_t> ifreq_chunk;
+
     //
     // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
     // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
@@ -356,7 +371,7 @@ public:
 	-> std::shared_ptr<intensity_network_ostream>;
 
     ~intensity_network_ostream();
-    
+
     //
     // Called from 'external' context (i.e. same context that called make())
     // 
@@ -381,19 +396,7 @@ public:
 
 protected:
     const int sockfd;
-    const int nbeam;
-    const int nupfreq;
-    const int nfreq_per_chunk;
-    const int nfreq_per_packet;
-    const int nt_per_chunk;
-    const int nt_per_packet;
-    const int fpga_counts_per_sample;
-    const float wt_cutoff;
-    const double target_gbps;
 
-    const std::vector<uint16_t> ibeam;
-    const std::vector<uint16_t> ifreq_chunk;
-    
     pthread_t network_thread;
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;
@@ -402,8 +405,6 @@ protected:
 
     // ring buffer used to exchange packets with network thread
     std::unique_ptr<udp_packet_ringbuf> ringbuf;
-    int npackets_per_chunk;
-    int nbytes_per_packet;
     
     // buffers for packet encoding
     std::vector<float> tmp_intensity_vec;
