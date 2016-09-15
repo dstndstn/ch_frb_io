@@ -69,3 +69,19 @@ INSTALLATION (PYTHON)
 
   - To build and install, do: `python setup.py install --user`
     (If you have root privs and want to install "system-wide", omit the --user flag)
+
+
+### LOOSE ENDS IN NETWORKING CODE
+
+  - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
+    to avoid dropping packets.  This means that the unit tests take about an hour to run,
+    which isn't really a problem, but is indicative of deeper performance problems?  It
+    would be nice to understand where the bottleneck is.
+
+  - We don't have thread-safe logging, so diagnostic messages from the various threads
+    sometimes interleave each other and are unreadable.  (Implementing thread-safe
+    logging is a general todo item for the whole project, not just libch_frb_io!)
+
+  - Cleanup: it would be great to switch from pthreads to C++11 threads.  (The C++11 API
+    is much nicer but I'm not sure that code written using pthreads and C++11 threads can
+    interoperate.  If not, then we have to make the switch in many libraries at once!)
