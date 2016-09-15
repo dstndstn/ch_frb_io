@@ -14,7 +14,7 @@ namespace ch_frb_io {
 
 // Defined later in this file
 static void *network_thread_main(void *opaque_arg);
-static void network_thread_main2(intensity_network_stream *stream, int sock_fd);
+static void network_thread_main2(intensity_network_stream *stream);
 
 
 // -------------------------------------------------------------------------------------------------
@@ -48,47 +48,73 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector
 
 
 intensity_network_stream::intensity_network_stream(const vector<shared_ptr<intensity_beam_assembler> > &assemblers_, int udp_port_) :
-    assemblers(assemblers_), udp_port(udp_port_)
+    nassemblers(assemblers_.size()),
+    udp_port(udp_port_),
+    assembler_refs(assemblers_)
 {
     // Argument checking
-
-    int nassemblers = assemblers.size();
 
     if (nassemblers == 0)
 	throw runtime_error("ch_frb_io: empty assembler list passed to intensity_network_stream constructor");
 
     for (int i = 0; i < nassemblers; i++) {
-	if (!assemblers[i])
+	if (!assemblers_[i])
 	    throw runtime_error("ch_frb_io: empty assembler pointer passed to intensity_network_stream constructor");
 
 	for (int j = 0; j < i; j++)
-	    if (assemblers[i]->beam_id == assemblers[j]->beam_id)
+	    if (assemblers_[i]->beam_id == assemblers_[j]->beam_id)
 		throw runtime_error("ch_frb_io: assembler list passed to intensity_network_stream constructor contains duplicate beam_ids");
     }
 
     if ((udp_port <= 0) || (udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(udp_port));
 
-    // Initialize pthread members
+    // All initializations except the socket
+
+    this->assemblers = new intensity_beam_assembler *[nassemblers];
+    this->assembler_beam_ids = new int[nassemblers];
+
+    for (int i = 0; i < nassemblers; i++) {
+	assemblers[i] = assemblers_[i].get();
+	assembler_beam_ids[i] = assemblers_[i]->beam_id;
+    }
 
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
+
+    // Socket initialization
+
+    this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sockfd < 0)
+	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
+
+    int socket_bufsize = constants::recv_socket_bufsize;
+    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
+
+    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
 }
 
 
 intensity_network_stream::~intensity_network_stream()
 {
+    delete[] assemblers;
+    delete[] assembler_beam_ids;
+
+    this->assemblers = NULL;
+    this->assembler_beam_ids = NULL;
+
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&lock);
-}
 
-
-void intensity_network_stream::network_thread_startup()
-{
-    pthread_mutex_lock(&this->lock);
-    this->network_thread_started = true;
-    pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
+    if (sockfd >= 0) {
+	close(sockfd);
+	sockfd = -1;
+    }
 }
 
 
@@ -182,7 +208,8 @@ void intensity_network_stream::join_all_threads()
 // Network thread
 
 
-static void *network_thread_main(void *opaque_arg)
+// static member function
+void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 {
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_thread_main()");
@@ -195,76 +222,45 @@ static void *network_thread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
 
-    stream->network_thread_startup();
-
-    int sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock_fd < 0)
-	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
-
-    // We use a try..catch to ensure that the socket always gets closed, and end_stream()
-    // always gets called, even if an exception is thrown.
-
+    // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     try {
-	network_thread_main2(stream.get(), sock_fd);
+	stream->network_thread_main();
     } catch (...) {
-	close(sock_fd);
-	stream->end_stream();
+	stream->_network_thread_exit();
 	throw;
     }
 
-    close(sock_fd);
-    stream->end_stream();
-
+    stream->_network_thread_exit();
     return NULL;
 }
 
 
-static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
+void intensity_network_stream::network_thread_main()
 {
-    int nassemblers = stream->assemblers.size();
+    pthread_mutex_lock(&this->lock);
+    this->network_thread_started = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->lock);
 
-    // We unpack the assemblers into an array of bare pointers, and unpack the beam_ids
-    // into an array of ints, for speed, although it probably doesn't matter!
+    // Wait for start_stream() to get called.
+    if (!this->wait_for_start_stream())
+	return;   // cancelled!
 
-    vector<intensity_beam_assembler *> assemblers(nassemblers, NULL);
-    vector<int> assembler_beam_ids(nassemblers);
-
-    for (int i = 0; i < nassemblers; i++) {
-	assemblers[i] = stream->assemblers[i].get();
-	assembler_beam_ids[i] = stream->assemblers[i]->beam_id;
-    }
-
-    // Socket setup: bind(), bufsize, timeout
+    // Start listening on socket 
 
     struct sockaddr_in server_address;
     memset(&server_address, 0, sizeof(server_address));
 	
     server_address.sin_family = AF_INET;
     inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
-    server_address.sin_port = htons(stream->udp_port);
-    
-    int err = ::bind(sock_fd, (struct sockaddr *) &server_address, sizeof(server_address));
+    server_address.sin_port = htons(udp_port);
+
+    int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    int socket_bufsize = constants::recv_socket_bufsize;
-    err = setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
+    cerr << ("ch_frb_io: listening for packets on port " + to_string(udp_port) + "\n");
 
-    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
-    err = setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
-
-    cerr << ("ch_frb_io: network thread: listening for packets on port " + to_string(stream->udp_port) + "\n");
-
-    // Wait for stream to start
-
-    bool cancelled = !stream->wait_for_start_stream();
-    
-    if (cancelled)
-	return;
 
     vector<udp_packet_list> assembler_packet_lists(nassemblers);
     for (int i = 0; i < nassemblers; i++)
@@ -273,8 +269,10 @@ static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
     struct timeval tv_ini = xgettimeofday();
     vector<int64_t> assembler_timestamps(nassemblers, 0);   // microseconds relative to tv_ini
 
-    vector<uint8_t> packet_buf(constants::max_input_udp_packet_size + 1);
-    uint8_t *packet = &packet_buf[0];
+    vector<char> packet_vec(constants::max_input_udp_packet_size + 1, 0);
+    char *packet_buf = &packet_vec[0];
+
+    intensity_packet packet;
     ssize_t npackets_received = 0;
 
     //
@@ -285,6 +283,30 @@ static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
     //
 
     for (;;) {
+	// Read new packet from socket (note that read() can time out)
+	int packet_nbytes = read(sock_fd, packet_buf, constants::max_input_udp_packet_size + 1);
+	int ngood = 0;
+	int nbad = 0;
+
+	// Helper function with 
+
+	if (packet_nbytes < 0) {
+	    if ((errno != EAGAIN) && (errno != ETIMEDOUT))
+		throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
+	}
+	else {
+	    
+
+	if (packet_nbytes >= 0) {
+	    // call helper function which processes packet?
+	}
+
+	pthread_mutex_lock();
+
+	// add ngood, nbad
+	// check running
+
+	pthread_mutex_unlock();
 	// Check whether any assembled_packet_lists have timed out.
 	int64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
 	int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
@@ -302,29 +324,6 @@ static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
 		return;
 	    }
 	}
-
-	// Read new packet from socket (note that read() can time out)
-	int packet_nbytes = read(sock_fd, (char *) packet, constants::max_input_udp_packet_size + 1);
-
-	if (packet_nbytes < 0) {
-	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
-		continue;  // timed out
-	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
-	}
-
-	if (_unlikely(packet_nbytes > constants::max_input_udp_packet_size))
-	    continue;  // silently drop bad packet
-
-	uint32_t protocol_version = *((uint32_t *) packet);
-	if (_unlikely(protocol_version != 1))
-	    continue;  // silently drop bad packet
-
-	int data_nbytes = *((int16_t *) (packet+4));
-	int packet_fpga_counts_per_sample = *((uint16_t *) (packet+6));
-	int packet_nbeam = *((uint16_t *) (packet+16));
-	int packet_nfreq = *((uint16_t *) (packet+18));
-	int packet_nupfreq = *((uint16_t *) (packet+20));
-	int packet_ntsamp = *((uint16_t *) (packet+22));
 	
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
@@ -332,21 +331,6 @@ static void network_thread_main2(intensity_network_stream *stream, int sock_fd)
 	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
 	    break;
 	}
-	
-	// The following way of writing the comparisons (using uint64_t) guarantees no overflow
-	uint64_t n4 = uint64_t(packet_nbeam) * uint64_t(packet_nfreq) * uint64_t(packet_nupfreq) * uint64_t(packet_ntsamp);
-	if (_unlikely(!n4 || (n4 > 10000)))
-	    continue;    // silently drop bad packets
-	if (_unlikely(data_nbytes != int(n4)))
-	    continue;    // silently drop bad packets
-	if (_unlikely(packet_nbytes != packet_size(packet_nbeam, packet_nfreq, packet_nupfreq, packet_ntsamp)))
-	    continue;    // silently drop bad packets
-	
-	const uint16_t *packet_beam_ids = (const uint16_t *) (packet + 24);
-	const uint8_t *packet_freq_ids = packet + 24 + 2*packet_nbeam;
-	const uint8_t *packet_scales = packet + 24 + 2*packet_nbeam + 2*packet_nfreq;
-	const uint8_t *packet_offsets = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 4*packet_nbeam*packet_nfreq;
-	const uint8_t *packet_data = packet + 24 + 2*packet_nbeam + 2*packet_nfreq + 8*packet_nbeam*packet_nfreq;
 
 	if (npackets_received == 0) {
 	    for (int i = 0; i < nassemblers; i++)

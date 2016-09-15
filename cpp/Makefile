@@ -38,6 +38,7 @@ OFILES = assembled_chunk.o \
 	intensity_hdf5_ofile.o \
 	intensity_network_stream.o \
 	intensity_network_ostream.o \
+	intensity_packet.o \
 	lexical_cast.o \
 	udp_packet_list.o
 

@@ -85,3 +85,6 @@ INSTALLATION (PYTHON)
   - Cleanup: it would be great to switch from pthreads to C++11 threads.  (The C++11 API
     is much nicer but I'm not sure that code written using pthreads and C++11 threads can
     interoperate.  If not, then we have to make the switch in many libraries at once!)
+
+  - There is a proposal to bitshuffle-compress the packets, which may reduce bandwidth
+    by ~20%, but this is currently unimplemented.

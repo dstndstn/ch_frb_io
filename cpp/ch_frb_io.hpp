@@ -525,9 +525,6 @@ private:
 //
 struct intensity_network_stream : noncopyable {
 public:
-    const std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
-    const int udp_port;
-
     // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
     static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
 	-> std::shared_ptr<intensity_network_stream>;
@@ -541,10 +538,7 @@ public:
     void end_stream();
     void join_all_threads();  // waits for end of stream, and joins all threads, including assembler threads.
 
-    // Called by network thread.
-    // When the network thread exits (typically when end-of-stream packet is received), it calls end_stream().
-    void network_thread_startup();
-
+    // FIXME I think we can get rid of this now?
     inline bool is_alive()
     {
 	pthread_mutex_lock(&this->lock);
@@ -556,20 +550,35 @@ public:
     ~intensity_network_stream();
 
 private:
-    // All state below is protected by this lock.
-    pthread_mutex_t lock;
+    // The actual constructor is private, so it can be a helper function 
+    // for intensity_network_stream::make(), but can't be called otherwise.
+    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
+
+    static void *network_pthread_main(void *);
+    void *network_thread_main();
+    void network_thread_exit();
+    
+    int sockfd = -1;
+    int nassemblers = 0;
+    int udp_port = 0;
+
+    // Bare pointers for fast access
+    intensity_beam_assembler **assemblers;
+    int *assembler_beam_ids;
+
+    // Hold references
+    std::vector<std::shared_ptr<intensity_beam_assembler> > assembler_refs;
 
     pthread_t network_thread;
+
+    // All state below is protected by this lock.
+    pthread_mutex_t lock;
 
     bool network_thread_started = false;    // set before intensity_network_stream::make() returns
     bool stream_started = false;            // set when intensity_network_stream::start_stream() is called
     bool stream_ended = false;              // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
     bool network_thread_joined = false;     // set in wait_for_end_of_stream(), but only if join_threads flag is set
     pthread_cond_t cond_state_changed;
-
-    // The actual constructor is private, so it can be a helper function 
-    // for intensity_network_stream::make(), but can't be called otherwise.
-    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
 };
 
 
@@ -712,8 +721,9 @@ struct hdf5_extendable_dataset {
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
 template<typename T> extern T lexical_cast(const std::string &x);
 
-// Unit test
+// Unit tests
 extern void test_lexical_cast();
+extern void test_packet_encoding();
 
 
 }  // namespace ch_frb_io
