@@ -128,24 +128,23 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 // Helper functions for intensity_network_ostream constructor
 
 
-static int make_socket_from_dstname(const string &dstname)
+static int make_socket_from_dstname(string dstname)
 {
-    // Parse dstname: expect string of the form HOSTNAME:PORT
+    // Parse dstname: expect string of the form HOSTNAME[:PORT]
 
     size_t i = dstname.find(":");
+    uint16_t port = constants::default_udp_port;
 
-    if (i == std::string::npos)
-	throw runtime_error("ch_frb_io: expected dstname='" + dstname + "' to be a colon-separated HOSTNAME:PORT string");
-	
-    string hostname = dstname.substr(0,i);
-    string portstr = dstname.substr(i+1);
-    uint16_t port = 0;
+    if (i != std::string::npos) {
+	string portstr = dstname.substr(i+1);
+	try {
+	    port = lexical_cast<uint16_t> (portstr);	    
+	} catch (...) {
+	    throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
+	}
 
-    try {
-	port = lexical_cast<uint16_t> (portstr);
-    }
-    catch (...) {
-	throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
+	// remove port number
+	dstname = dstname.substr(0,i);
     }
 
     struct sockaddr_in saddr;
@@ -154,11 +153,11 @@ static int make_socket_from_dstname(const string &dstname)
     saddr.sin_port = htons(port);
     
     // FIXME need getaddrinfo() here
-    int err = inet_pton(AF_INET, hostname.c_str(), &saddr.sin_addr);
+    int err = inet_pton(AF_INET, dstname.c_str(), &saddr.sin_addr);
     if (err == 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: general parse error");
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + dstname + "' to an IP address: general parse error");
     if (err < 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: " + strerror(errno) + "general parse error");
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + dstname + "' to an IP address: " + strerror(errno) + "general parse error");
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
