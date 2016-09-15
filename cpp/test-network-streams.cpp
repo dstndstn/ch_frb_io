@@ -269,8 +269,14 @@ static void *consumer_thread_main(void *opaque_arg)
 		double wval = wtval(beam_id, ifreq, it+chunk_t0);
 
 		// Check intensity
-		if ((wt_row[it] > 0.0) && fabs(int_row[it] - ival) > 0.021)
-		    throw runtime_error("oops");
+		if ((wt_row[it] > 0.0) && fabs(int_row[it] - ival) > 0.021) {
+		    stringstream ss;
+		    ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
+		       << "   intval(...)=" << ival << ", intensity_received=" << int_row[it] << "\n";
+
+		    cerr << ss.str();
+		    exit(1);
+		}
 
 		// Check weights
 		if ((wt_row[it] == 0.0) && (wval <= 1.00001 * wt_cutoff))
@@ -282,6 +288,10 @@ static void *consumer_thread_main(void *opaque_arg)
 		stringstream ss;
 		ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
 		   << "   wtval(...)=" << wval << ", wt_cutoff=" << wt_cutoff << ", wt_received=" << wt_row[it] << "\n";
+
+		if ((wt_row[it] == 0.0) && (wval > wt_cutoff))
+		    ss << "A probable reason for this failure is that the receive threads can't keep up with the sender.\n"
+		       << "Try increasing ch_frb_io::constants::max_gbps_for_testing (in ch_frb_io.hpp), recompiling and trying again.\n";
 
 		cerr << ss.str();
 		exit(1);
@@ -411,6 +421,16 @@ int main(int argc, char **argv)
     // Sometimes it's convenient to use the same seed every time, for debugging.
     std::mt19937 rng;
 #endif
+
+    cout << "Warning: this cpu-intensive, multithreaded test will take over your machine for about an hour!\n"
+	 << "If this is OK press return.  If not, press control-C!\n"
+	 << "I AM WAITING, HUMAN: "
+	 << flush;
+
+    string dummy;
+    getline(cin, dummy);
+
+    cout << "\nNote: ch_frb_io::constants::max_gbps_for_testing = " << ch_frb_io::constants::max_gpbs_for_testing << "\n";
 
     for (int irun = 0; irun < nrun; irun++) {
 	auto tp = make_shared<unit_test_instance> (rng, irun, nrun);
