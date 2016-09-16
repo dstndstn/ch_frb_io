@@ -373,8 +373,6 @@ public:
 		     float wt_cutoff, double target_gbps) 
 	-> std::shared_ptr<intensity_network_ostream>;
 
-    ~intensity_network_ostream();
-
     //
     // Called from 'external' context (i.e. same context that called make())
     // 
@@ -387,6 +385,8 @@ public:
     
     // Can be called from either external context or network thread
     void end_stream(bool join_network_thread);
+
+    ~intensity_network_ostream();
     
 
 protected:

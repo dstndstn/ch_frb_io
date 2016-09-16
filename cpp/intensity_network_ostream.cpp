@@ -332,21 +332,20 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 
 void intensity_network_ostream::end_stream(bool join_network_thread)
 {
-    bool join_thread_after_releasing_lock = false;
+    ringbuf->end_stream();
+
+    if (!join_network_thread)
+	return;
 
     pthread_mutex_lock(&this->state_lock);
 
-    if (join_network_thread && !network_thread_joined) {
-	network_thread_joined = true;
-	join_thread_after_releasing_lock = true;
+    if (network_thread_joined) {
+	pthread_mutex_unlock(&this->state_lock);
+	throw runtime_error("ch_frb_io: attempt to join ostream output thread twice");
     }
-
-    pthread_mutex_unlock(&this->state_lock);
-
-    this->ringbuf->end_stream();
     
-    if (join_thread_after_releasing_lock)
-	pthread_join(network_thread, NULL);
+    pthread_mutex_unlock(&this->state_lock);
+    pthread_join(network_thread, NULL);
 }
 
 
