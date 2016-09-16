@@ -12,11 +12,6 @@ namespace ch_frb_io {
 #endif
 
 
-// Defined later in this file
-static void *network_thread_main(void *opaque_arg);
-static void network_thread_main2(intensity_network_stream *stream);
-
-
 // -------------------------------------------------------------------------------------------------
 //
 // intensity_network_stream
@@ -25,24 +20,19 @@ static void network_thread_main2(intensity_network_stream *stream);
 // Static member function (de facto constructor)
 shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector<shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
 {
-    intensity_network_stream *ret_bare = new intensity_network_stream(assemblers, udp_port);
-    shared_ptr<intensity_network_stream> ret(ret_bare);
-    
-    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
-    shared_ptr<intensity_network_stream> *arg = new shared_ptr<intensity_network_stream> (ret);
-    int err = pthread_create(&ret->network_thread, NULL, network_thread_main, arg);
+    intensity_network_stream *retp = new intensity_network_stream(assemblers, udp_port);
+    shared_ptr<intensity_network_stream> ret(retp);
 
-    if (err) {
-        delete arg;   // note: if pthread_create() succeeds, then assembler thread will delete this pointer
+    int err = pthread_create(&ret->network_thread, NULL, network_pthread_main, (void *) &ret);
+    if (err)
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
-    }
     
     // wait for network thread to start
     pthread_mutex_lock(&ret->lock);
     while (!ret->network_thread_started)
 	pthread_cond_wait(&ret->cond_state_changed, &ret->lock);
-
     pthread_mutex_unlock(&ret->lock);    
+
     return ret;
 }
 
@@ -50,7 +40,7 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector
 intensity_network_stream::intensity_network_stream(const vector<shared_ptr<intensity_beam_assembler> > &assemblers_, int udp_port_) :
     nassemblers(assemblers_.size()),
     udp_port(udp_port_),
-    assembler_refs(assemblers_)
+    assemblers(assemblers_)
 {
     // Argument checking
 
@@ -71,12 +61,13 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
     // All initializations except the socket
 
-    this->assemblers = new intensity_beam_assembler *[nassemblers];
-    this->assembler_beam_ids = new int[nassemblers];
+    this->assembler_packet_lists.resize(nassemblers);
+    this->assembler_timestamps.resize(nassemblers, 0);
+    this->assembler_beam_ids.resize(nassemblers, -1);
 
     for (int i = 0; i < nassemblers; i++) {
-	assemblers[i] = assemblers_[i].get();
-	assembler_beam_ids[i] = assemblers_[i]->beam_id;
+	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
+	assembler_beam_ids[i] = assemblers[i]->beam_id;
     }
 
     pthread_mutex_init(&lock, NULL);
@@ -84,16 +75,17 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
     // Socket initialization
 
+    int socket_bufsize = constants::recv_socket_bufsize;
+    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+
     this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sockfd < 0)
 	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
 
-    int socket_bufsize = constants::recv_socket_bufsize;
-    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
 
-    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
     err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
@@ -102,12 +94,6 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
 intensity_network_stream::~intensity_network_stream()
 {
-    delete[] assemblers;
-    delete[] assembler_beam_ids;
-
-    this->assemblers = NULL;
-    this->assembler_beam_ids = NULL;
-
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&lock);
 
@@ -115,17 +101,6 @@ intensity_network_stream::~intensity_network_stream()
 	close(sockfd);
 	sockfd = -1;
     }
-}
-
-
-void intensity_network_stream::wait_for_network_thread_startup()
-{
-    pthread_mutex_lock(&this->lock);
-
-    while (!network_thread_started)
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
-
-    pthread_mutex_unlock(&this->lock);
 }
 
 
@@ -144,25 +119,10 @@ void intensity_network_stream::start_stream()
 }
 
 
-bool intensity_network_stream::wait_for_start_stream()
-{
-    pthread_mutex_lock(&this->lock);
-
-    while (!stream_started)
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
-
-    bool retval = !stream_ended;
-    pthread_mutex_unlock(&this->lock);
-    return retval;
-}
-
-
 void intensity_network_stream::end_stream()
 {
     pthread_mutex_lock(&this->lock);
 
-    // Set flags as if stream had run to completion.  This is convenient e.g. for waking up threads
-    // which are blocked in wait_for_packets().
     this->stream_started = true;
     this->stream_ended = true;
     
@@ -176,30 +136,37 @@ void intensity_network_stream::end_stream()
 
 void intensity_network_stream::join_all_threads()
 {
-    bool call_join_after_releasing_lock = false;
-
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&this->lock);
     
     if (!stream_started) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::wait_for_end_of_stream() was called with no prior call to start_stream()");
-    }
-    
-    while (!stream_ended)
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
-
-    if (!network_thread_joined) {
-	call_join_after_releasing_lock = true;
-	this->network_thread_joined = true;
+	throw runtime_error("ch_frb_io: intensity_network_stream::join_all_threads() was called with no prior call to start_stream()");
     }
 
-    pthread_mutex_unlock(&lock);
+    if (join_called) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_all_threads()");
+    }
 
-    if (call_join_after_releasing_lock)
-	pthread_join(network_thread, NULL);
+    this->join_called = true;
+    pthread_mutex_unlock(&this->lock);
+
+    pthread_join(network_thread, NULL);
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
 	assemblers[i]->join_assembler_thread();
+}
+
+
+void intensity_network_stream::get_event_counts(ssize_t &num_bad_packets_, ssize_t &num_good_packets_, ssize_t &num_beam_id_mismatches_) const
+{
+    pthread_mutex_lock(&this->lock);
+
+    num_bad_packets_ = this->num_bad_packets;
+    num_good_packets_ = this->num_good_packets;
+    num_beam_id_mismatches_ = this->num_beam_id_mismatches;
+
+    pthread_mutex_unlock(&this->lock);
 }
 
 
@@ -214,10 +181,8 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_thread_main()");
 
-    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
     shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
     shared_ptr<intensity_network_stream> stream = *arg;
-    delete arg;
 
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
@@ -237,14 +202,25 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 
 void intensity_network_stream::network_thread_main()
 {
+    // Advance stream state to "network_thread_started" state,
+    // and wait for another thread to advance it to "stream_started" state.
+
     pthread_mutex_lock(&this->lock);
+
     this->network_thread_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
 
-    // Wait for start_stream() to get called.
-    if (!this->wait_for_start_stream())
-	return;   // cancelled!
+    for (;;) {
+	if (this->stream_ended) {
+	    pthread_mutex_unlock(&this->lock);
+	    return;
+	}
+	if (this->stream_started) {
+	    pthread_mutex_unlock(&this->lock);
+	    break;
+	}
+	pthread_cond_wait(&this->cond_state_changed, &this->lock);
+    }
 
     // Start listening on socket 
 
@@ -261,145 +237,200 @@ void intensity_network_stream::network_thread_main()
 
     cerr << ("ch_frb_io: listening for packets on port " + to_string(udp_port) + "\n");
 
+    // Main packet loop
 
-    vector<udp_packet_list> assembler_packet_lists(nassemblers);
-    for (int i = 0; i < nassemblers; i++)
-	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
-
+    vector<uint8_t> packet(constants::max_input_udp_packet_size + 1, 0);
     struct timeval tv_ini = xgettimeofday();
-    vector<int64_t> assembler_timestamps(nassemblers, 0);   // microseconds relative to tv_ini
-
-    vector<char> packet_vec(constants::max_input_udp_packet_size + 1, 0);
-    char *packet_buf = &packet_vec[0];
-
-    intensity_packet packet;
-    ssize_t npackets_received = 0;
-
-    //
-    // Main packet loop!
-    // 
-    // FIXME there is a lot of silent "swallowing" of error conditions here, needs revisiting to
-    // think about what really makes sense.
-    //
 
     for (;;) {
-	// Read new packet from socket (note that read() can time out)
-	int packet_nbytes = read(sock_fd, packet_buf, constants::max_input_udp_packet_size + 1);
-	int ngood = 0;
-	int nbad = 0;
+	this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
 
-	// Helper function with 
+	// Read new packet from socket (note that socket has a timeout, so this call can time out)
+	int packet_nbytes = read(sockfd, &packet[0], constants::max_input_udp_packet_size + 1);
 
-	if (packet_nbytes < 0) {
-	    if ((errno != EAGAIN) && (errno != ETIMEDOUT))
-		throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
-	}
-	else {
-	    
+	// _process_packet() returns 'false' if the stream should end.  (This happens if a special
+	// type of packet is received.)  In addition, process_packet() sets some temporary variables
+	// _bad_packet, _good_packet, _beam_id_mismatch (see below).
+	//
+	// Note that if read() fails or times out, then 'packet_nbytes' will be negative, but
+	// _process_packet() correctly handles this case.  Because things are organized this way,
+	// the call to _process_packet() should immediately follow the read() system call.
 
-	if (packet_nbytes >= 0) {
-	    // call helper function which processes packet?
-	}
+	bool alive = this->_process_packet(&packet[0], packet_nbytes);
 
-	pthread_mutex_lock();
+	if (!alive)
+	    break;
 
-	// add ngood, nbad
-	// check running
+	// The purpose of the assembler timeouts is to make sure that data gets flushed to the
+	// assembler threads regularly, even if the packet stream stalls.
+	this->_check_assembler_timeouts();
 
-	pthread_mutex_unlock();
-	// Check whether any assembled_packet_lists have timed out.
-	int64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
-	int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
-
-	for (int i = 0; i < nassemblers; i++) {
-	    if (assembler_timestamps[i] > threshold_timestamp)
-		continue;
-	    if (assembler_packet_lists[i].curr_npackets == 0)
-		continue;
-
-	    bool assembler_alive = assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
-		
-	    if (!assembler_alive) {
-		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
-		return;
-	    }
-	}
+	// All operations requiring the lock are postponed to the bottom of this routine.
+	// In particular, note that the event counts (bad packets, good packets, etc.) are
+	// stored in temporary variables (_bad_packet, etc.) and accumulated into the "master"
+	// counts (num_bad_packets, etc.) at the end, with the lock held.  We organize things
+	// this way so that the lock is acquired only once per iteration of the loop, and held
+	// for as little time as possible.
 	
-	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
-	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-	if (_unlikely(packet_nbytes == 24)) {
-	    cerr << "ch_frb_io: network thread received end-of-stream packets\n";
+	pthread_mutex_lock(&this->lock);
+
+	this->num_bad_packets += this->_bad_packet;
+	this->num_good_packets += this->_good_packet;
+	this->num_beam_id_mismatches += this->_beam_id_mismatch;
+
+	if (this->stream_ended) {
+	    // This can happen if another thread calls end_stream().
+	    pthread_mutex_unlock(&this->lock);
 	    break;
 	}
 
-	if (npackets_received == 0) {
-	    for (int i = 0; i < nassemblers; i++)
-		assemblers[i]->start_stream(packet_fpga_counts_per_sample, packet_nupfreq);
-	}
-
-	npackets_received++;
-
-	// Loop over beams in the packet, matching to beam_assembler objects.
-
-	for (int ibeam = 0; ibeam < packet_nbeam; ibeam++) {
-
-	    // Find assembler matching beam ID	    
-	    int beam_id = packet_beam_ids[ibeam];
-
-	    int assembler_ix;
-	    for (assembler_ix = 0; assembler_ix < nassemblers; assembler_ix++) {
-		if (assembler_beam_ids[assembler_ix] == beam_id)
-		    break;   // found assembler
-	    }
-
-	    if (assembler_ix >= nassemblers)
-		continue;   // no assembler found, proceed to next beam_id
-	    
-	    // Make subpacket
-	    
-	    uint8_t *subpacket = assembler_packet_lists[assembler_ix].data_end;
-	    uint8_t *subpacket_freq_ids = subpacket + 26;
-	    uint8_t *subpacket_scales = subpacket + 26 + 2*packet_nfreq;
-	    uint8_t *subpacket_offsets = subpacket + 26 + 6*packet_nfreq;
-	    uint8_t *subpacket_data = subpacket + 26 + 10*packet_nfreq;
-	    
-	    int subpacket_data_size = packet_nfreq * packet_nupfreq * packet_ntsamp;
-	    int subpacket_total_size = subpacket_data_size + 26 + 10*packet_nfreq;
-	    
-	    memcpy(subpacket, packet, 24);                            // copy header and overwrite a few fields...
-	    *((int16_t *) (subpacket+4)) = subpacket_data_size;       // overwrite 'data_nbytes' field
-	    *((uint16_t *) (subpacket+16)) = uint16_t(1);             // overwrite 'nbeams' field
-	    *((uint16_t *) (subpacket+24)) = packet_beam_ids[ibeam];  // beam_id field
-	    
-	    memcpy(subpacket_freq_ids, packet_freq_ids, 2*packet_nfreq);
-	    memcpy(subpacket_scales, packet_scales + 4*ibeam*packet_nfreq, 4*packet_nfreq);
-	    memcpy(subpacket_offsets, packet_offsets + 4*ibeam*packet_nfreq, 4*packet_nfreq);
-	    memcpy(subpacket_data, packet_data + ibeam*subpacket_data_size, subpacket_data_size);
-
-	    // assembler_timestamp gets set when first packet is added
-	    if (assembler_packet_lists[assembler_ix].curr_npackets == 0)
-		assembler_timestamps[assembler_ix] = curr_timestamp;
-
-	    assembler_packet_lists[assembler_ix].add_packet(subpacket_total_size);
-
-	    if (!assembler_packet_lists[assembler_ix].is_full)
-		continue;
-
-	    // Packet list is full, so send it to the assembler thread.
-	    bool assembler_alive = assemblers[assembler_ix]->put_unassembled_packets(assembler_packet_lists[assembler_ix]);
-
-	    if (!assembler_alive) {
-		// Is this what we should do?
-		cerr << "ch_frb_io:  assembler thread died unexpectedly!  network thread will die too...\n";
-		return;
-	    }
-	}
+	pthread_mutex_unlock(&this->lock);
     }
+
+    // If we get here, the stream is terminating, either because a special 'end of stream' packet
+    // was received, or because another thread called end_stream().  We just flush all data to
+    // the assemblers end exit.  (Note: I think it makes most sense to ignore the return value
+    // from put_unassembled_packets() here.)
 
     for (int i = 0; i < nassemblers; i++)
 	if (assembler_packet_lists[i].curr_npackets > 0)
 	    assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
 }
 
+
+// This helper routine is called by network_thread_main() to process a new packet.
+// It returns 'false' if the network thread should exit (this happens if a special
+// "short packet" is received).  It also sets the event counts _packet_bad,
+// _packet_good, and _beam_id_mismatch.
+// 
+// Note: 'packet_nbytes' can be negative, if the read() call failed or 
+
+bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int packet_nbytes)
+{
+    intensity_packet packet;
+
+    this->_bad_packet = 0;
+    this->_good_packet = 0;
+    this->_beam_id_mismatch = 0;
+
+    if (packet_nbytes < 0) {
+	if ((errno == EAGAIN) || (errno == ETIMEDOUT))
+	    return true;   // read() timed out
+	throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
+    }
+
+    if (!packet.read(packet_data, packet_nbytes)) {
+	this->_bad_packet = 1;
+	return true;
+    }
+
+    // If we receive a special "short" packet (length 24), it indicates end-of-stream.
+    // FIXME is this a temporary kludge or something which should be documented in the packet protocol?
+    if (packet.data_nbytes == 0)
+	return false;
+
+    this->_good_packet = 1;
+
+    if (!this->assemblers_started) {
+	for (int i = 0; i < nassemblers; i++)
+	    assemblers[i]->start_stream(packet.fpga_counts_per_sample, packet.nupfreq);
+	this->assemblers_started = true;
+    }
+
+    int nbeams = packet.nbeams;
+    int nfreq_coarse = packet.nfreq_coarse;
+    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
+    int *assembler_ids = &assembler_beam_ids[0];  // bare pointer for speed
+
+    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
+    // length fields.  The new packet corresponds to a subset of the original packet containing
+    // only beam index zero.
+
+    packet.data_nbytes = new_data_nbytes;
+    packet.nbeams = 1;
+    
+    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+	// Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
+	// original packet containing only beam index 'ibeam'.
+
+	// Loop over assembler ids, to find a match for the packet_id.
+	int packet_id = packet.beam_ids[0];
+	int assembler_ix = 0;
+
+	for (;;) {
+	    if (assembler_ids[assembler_ix] == packet_id) {
+		// Match found
+		this->_send_packet_to_assembler(assembler_ix, packet);
+		break;
+	    }
+
+	    assembler_ix++;
+
+	    if (assembler_ix >= nassemblers) {
+		// No match found
+		this->_beam_id_mismatch++;
+		break;
+	    }
+	}
+
+	// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
+	// corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
+
+	packet.beam_ids += 1;
+	packet.scales += nfreq_coarse;
+	packet.offsets += nfreq_coarse;
+	packet.data += new_data_nbytes;
+    }
+
+    return true;
+}
+
+
+void intensity_network_stream::_send_packet_to_assembler(int assembler_ix, const intensity_packet &packet)
+{
+    udp_packet_list &packet_list = this->assembler_packet_lists[assembler_ix];
+
+    // assembler_timestamp gets set when first packet is added
+    if (packet_list.curr_npackets == 0)
+	this->assembler_timestamps[assembler_ix] = curr_timestamp;
+
+    // Reminder: to add a packet to a udp_packet_list, we append the data 
+    // to its 'data_end' pointer, then call add_packet().
+    int packet_nbytes = packet.write(packet_list.data_end);
+    packet_list.add_packet(packet_nbytes);
+
+    if (packet_list.is_full)
+	this->_send_packet_list_to_assembler(assembler_ix);
+}
+
+
+void intensity_network_stream::_send_packet_list_to_assembler(int assembler_ix)
+{
+    bool alive = assemblers[assembler_ix]->put_unassembled_packets(assembler_packet_lists[assembler_ix]);
+    if (!alive)
+	throw runtime_error("ch_frb_io: assembler thread died unexpectedly?!");
+}
+
+
+void intensity_network_stream::_check_assembler_timeouts()
+{
+    int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
+
+    for (int i = 0; i < nassemblers; i++)
+	if ((assembler_timestamps[i] <= threshold_timestamp) && (assembler_packet_lists[i].curr_npackets > 0))
+	    this->_send_packet_list_to_assembler(i);
+}
+
+
+// cleanups 
+void intensity_network_stream::_network_thread_exit()
+{
+    if (sockfd >= 0) {
+	close(sockfd);
+	sockfd = -1;
+    }
+
+    this->end_stream();
+}
 
 }  // namespace ch_frb_io

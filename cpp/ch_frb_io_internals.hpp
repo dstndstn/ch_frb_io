@@ -33,6 +33,35 @@ namespace ch_frb_io {
 #endif
 
 
+// -------------------------------------------------------------------------------------------------
+
+
+struct intensity_packet {
+    // Don't add headers before this!
+    uint32_t  protocol_version;
+    int16_t   data_nbytes;
+    uint16_t  fpga_counts_per_sample;
+    uint64_t  fpga_count;
+    uint16_t  nbeams;
+    uint16_t  nfreq_coarse;
+    uint16_t  nupfreq;
+    uint16_t  ntsamp;
+
+    uint16_t  *beam_ids;   // 1D array of length nbeams
+    uint16_t  *freq_ids;   // 1D array of length nfreq_coarse
+    float     *scales;     // 2D array of shape (nbeam, nfreq_coarse)
+    float     *offsets;    // 2D array of shape (nbeam, nfreq_coarse)
+    uint8_t   *data;       // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
+
+    // Returns true if packet is good, false if bad
+    // Note: no checking of freq_ids is performed!
+    bool read(const uint8_t *src, int src_nbytes);
+
+    // Returns number of bytes
+    int write(uint8_t *dst) const;
+};
+
+
 inline int header_size(int nbeams, int nfreq_coarse)
 {
     return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
@@ -42,6 +71,9 @@ inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_pac
 {
     return header_size(nbeams, nfreq_coarse) + (nbeams * nfreq_coarse * nupfreq * nt_per_packet);
 }
+
+
+// -------------------------------------------------------------------------------------------------
 
 
 inline int randint(std::mt19937 &rng, int lo, int hi)

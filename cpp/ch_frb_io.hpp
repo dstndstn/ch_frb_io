@@ -24,6 +24,9 @@ struct noncopyable
     noncopyable& operator=(const noncopyable &) = delete;
 };
 
+// Defined in ch_frb_io_internals.hpp
+struct intensity_packet;
+
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -529,56 +532,63 @@ public:
     static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
 	-> std::shared_ptr<intensity_network_stream>;
 
-    // Called in make()
-    void wait_for_network_thread_startup();
-    bool wait_for_start_stream();     // returns false if stream has been cancelled
-
-    // High level control routines.
-    void start_stream();   // tells network thread to start reading packets
-    void end_stream();
+    // High level control.
+    void start_stream();      // tells network thread to start reading packets
+    void end_stream();        // stops stream
     void join_all_threads();  // waits for end of stream, and joins all threads, including assembler threads.
 
-    // FIXME I think we can get rid of this now?
-    inline bool is_alive()
-    {
-	pthread_mutex_lock(&this->lock);
-	bool alive = !this->stream_ended;
-	pthread_mutex_unlock(&this->lock);
-	return alive;
-    }
+    // Can be called any time
+    void get_event_counts(ssize_t &num_bad_packets, ssize_t &num_good_packets, ssize_t &num_beam_id_mismatches) const;
 
     ~intensity_network_stream();
 
 private:
-    // The actual constructor is private, so it can be a helper function 
-    // for intensity_network_stream::make(), but can't be called otherwise.
-    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
-
-    static void *network_pthread_main(void *);
-    void *network_thread_main();
-    void network_thread_exit();
-    
+    // Note: most of this data is not protected by a lock, since only the network thread uses it.
     int sockfd = -1;
     int nassemblers = 0;
     int udp_port = 0;
 
-    // Bare pointers for fast access
-    intensity_beam_assembler **assemblers;
-    int *assembler_beam_ids;
+    std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
+    std::vector<udp_packet_list> assembler_packet_lists;
+    std::vector<int64_t> assembler_timestamps;
+    std::vector<int> assembler_beam_ids;
+    bool assemblers_started = false;
 
-    // Hold references
-    std::vector<std::shared_ptr<intensity_beam_assembler> > assembler_refs;
+    // All timestamps are in microseconds, relative to the time when we started listening on the socket.
+    int64_t curr_timestamp = 0;
 
+    int _bad_packet = 0;
+    int _good_packet = 0;
+    int _beam_id_mismatch = 0;
+
+    mutable pthread_mutex_t lock;
     pthread_t network_thread;
 
-    // All state below is protected by this lock.
-    pthread_mutex_t lock;
+    // All state below is protected by the lock.
 
-    bool network_thread_started = false;    // set before intensity_network_stream::make() returns
-    bool stream_started = false;            // set when intensity_network_stream::start_stream() is called
-    bool stream_ended = false;              // set when "end-of-stream" packet arrives, or network thread unexpectedly exits
-    bool network_thread_joined = false;     // set in wait_for_end_of_stream(), but only if join_threads flag is set
+    bool network_thread_started = false;
+    bool stream_started = false;
+    bool stream_ended = false;
+    bool join_called = false;
     pthread_cond_t cond_state_changed;
+
+    ssize_t num_bad_packets = 0;
+    ssize_t num_good_packets = 0;
+    ssize_t num_beam_id_mismatches = 0;
+
+    // The actual constructor is private, so it can be a helper function 
+    // for intensity_network_stream::make(), but can't be called otherwise.
+    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
+
+    // Private methods called by the network thread.
+    static void *network_pthread_main(void *);
+    void network_thread_main();
+
+    bool _process_packet(const uint8_t *data, int nbytes);
+    void _send_packet_to_assembler(int assembler_ix, const intensity_packet &packet);
+    void _send_packet_list_to_assembler(int assembler_ix);
+    void _check_assembler_timeouts();
+    void _network_thread_exit();
 };
 
 
