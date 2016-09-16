@@ -385,12 +385,6 @@ public:
     //
     void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking=true);
     
-    // Called from network thread
-    int get_sockfd() const                          { return sockfd; }
-    double get_target_gbps() const                  { return target_gbps; }
-    bool get_packet_list(udp_packet_list &l) const  { return ringbuf->consumer_get_packet_list(l); }
-    udp_packet_list allocate_packet_list() const    { return ringbuf->allocate_packet_list(); }
-
     // Can be called from either external context or network thread
     void end_stream(bool join_network_thread);
     

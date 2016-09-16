@@ -412,9 +412,7 @@ void intensity_network_ostream::network_thread_main()
     pthread_cond_broadcast(&cond_state_changed);
     pthread_mutex_unlock(&state_lock);
 
-    int sockfd = this->get_sockfd();
-    double target_gbps = this->get_target_gbps();
-    udp_packet_list packet_list = this->allocate_packet_list();
+    udp_packet_list packet_list = ringbuf->allocate_packet_list();
 
     // Used for throttling and displaying summary info at the end.
     struct timeval initial_time;
@@ -424,7 +422,7 @@ void intensity_network_ostream::network_thread_main()
     int64_t nbytes_sent = 0;
     
     for (;;) {
-	if (!this->get_packet_list(packet_list))
+	if (!ringbuf->consumer_get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
 	
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
@@ -447,7 +445,7 @@ void intensity_network_ostream::network_thread_main()
 	    }
 
 	    // FIXME: sendmmsg() may improve performance here
-	    ssize_t n = send(sockfd, packet, packet_nbytes, 0);
+	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
 	    
 	    if (n < 0)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
@@ -474,7 +472,7 @@ void intensity_network_ostream::network_thread_main()
 	vector<uint8_t> packet(24, uint8_t(0));
 	*((uint32_t *) &packet[0]) = uint32_t(1);  // protocol number
 
-	ssize_t n = send(sockfd, &packet[0], packet.size(), 0);
+	ssize_t n = send(this->sockfd, &packet[0], packet.size(), 0);
 
 	if (n == (ssize_t)packet.size()) {
 	    usleep(100000);  // 10^5 microseconds
