@@ -11,6 +11,15 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
+using event_counts = intensity_network_stream::event_counts;
+
+event_counts &event_counts::operator+=(const event_counts &x)
+{
+    this->num_bad_packets += x.num_bad_packets;
+    this->num_good_packets += x.num_good_packets;
+    this->num_beam_id_mismatches += x.num_beam_id_mismatches;
+    return *this;
+}
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -158,15 +167,13 @@ void intensity_network_stream::join_all_threads()
 }
 
 
-void intensity_network_stream::get_event_counts(ssize_t &num_bad_packets_, ssize_t &num_good_packets_, ssize_t &num_beam_id_mismatches_) const
+intensity_network_stream::event_counts intensity_network_stream::get_event_counts() const
 {
     pthread_mutex_lock(&this->lock);
-
-    num_bad_packets_ = this->num_bad_packets;
-    num_good_packets_ = this->num_good_packets;
-    num_beam_id_mismatches_ = this->num_beam_id_mismatches;
-
+    event_counts ret = this->curr_counts;
     pthread_mutex_unlock(&this->lock);
+    
+    return ret;
 }
 
 
@@ -249,8 +256,7 @@ void intensity_network_stream::network_thread_main()
 	int packet_nbytes = read(sockfd, &packet[0], constants::max_input_udp_packet_size + 1);
 
 	// _process_packet() returns 'false' if the stream should end.  (This happens if a special
-	// type of packet is received.)  In addition, process_packet() sets some temporary variables
-	// _bad_packet, _good_packet, _beam_id_mismatch (see below).
+	// "short packet" is received.)  It also sets _tmp_counts (see below).
 	//
 	// Note that if read() fails or times out, then 'packet_nbytes' will be negative, but
 	// _process_packet() correctly handles this case.  Because things are organized this way,
@@ -266,17 +272,14 @@ void intensity_network_stream::network_thread_main()
 	this->_check_assembler_timeouts();
 
 	// All operations requiring the lock are postponed to the bottom of this routine.
-	// In particular, note that the event counts (bad packets, good packets, etc.) are
-	// stored in temporary variables (_bad_packet, etc.) and accumulated into the "master"
-	// counts (num_bad_packets, etc.) at the end, with the lock held.  We organize things
-	// this way so that the lock is acquired only once per iteration of the loop, and held
+	// In particular, all event count updates have been temporarily buffered in _tmp_counts,
+	// and are accumulated into curr_counts here, with the lock held.  We have organized
+	// things this way so that the lock is acquired only once per loop iteration, and held
 	// for as little time as possible.
 	
 	pthread_mutex_lock(&this->lock);
 
-	this->num_bad_packets += this->_bad_packet;
-	this->num_good_packets += this->_good_packet;
-	this->num_beam_id_mismatches += this->_beam_id_mismatch;
+	this->curr_counts += _tmp_counts;
 
 	if (this->stream_ended) {
 	    // This can happen if another thread calls end_stream().
@@ -300,18 +303,16 @@ void intensity_network_stream::network_thread_main()
 
 // This helper routine is called by network_thread_main() to process a new packet.
 // It returns 'false' if the network thread should exit (this happens if a special
-// "short packet" is received).  It also sets the event counts _packet_bad,
-// _packet_good, and _beam_id_mismatch.
+// "short packet" is received).  It also sets _tmp_counts.
 // 
-// Note: 'packet_nbytes' can be negative, if the read() call failed or 
+// Note: 'packet_nbytes' can be negative, if the read() call failed or timed out.
 
 bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int packet_nbytes)
 {
     intensity_packet packet;
 
-    this->_bad_packet = 0;
-    this->_good_packet = 0;
-    this->_beam_id_mismatch = 0;
+    // Sets _tmp_counts to zero
+    this->_tmp_counts = event_counts();
 
     if (packet_nbytes < 0) {
 	if ((errno == EAGAIN) || (errno == ETIMEDOUT))
@@ -320,7 +321,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
     }
 
     if (!packet.read(packet_data, packet_nbytes)) {
-	this->_bad_packet = 1;
+	this->_tmp_counts.num_bad_packets = 1;
 	return true;
     }
 
@@ -329,7 +330,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
     if (packet.data_nbytes == 0)
 	return false;
 
-    this->_good_packet = 1;
+    this->_tmp_counts.num_good_packets = 1;
 
     if (!this->assemblers_started) {
 	for (int i = 0; i < nassemblers; i++)
@@ -368,7 +369,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 
 	    if (assembler_ix >= nassemblers) {
 		// No match found
-		this->_beam_id_mismatch++;
+		this->_tmp_counts.num_beam_id_mismatches++;
 		break;
 	    }
 	}
@@ -422,9 +423,21 @@ void intensity_network_stream::_check_assembler_timeouts()
 }
 
 
-// cleanups 
+// This gets called when the network thread exits, either 
+// because the stream ended or an exception was thrown.
 void intensity_network_stream::_network_thread_exit()
 {
+    event_counts counts = this->get_event_counts();
+
+    stringstream ss;
+    ss << "ch_frb_io: network input thread exiting:"
+       << " good_packets=" << counts.num_good_packets 
+       << ", bad_packets=" << counts.num_bad_packets 
+       << ", beam_id_mismatches=" << counts.num_beam_id_mismatches 
+       << "\n";
+
+    cerr << ss.str().c_str();
+
     if (sockfd >= 0) {
 	close(sockfd);
 	sockfd = -1;

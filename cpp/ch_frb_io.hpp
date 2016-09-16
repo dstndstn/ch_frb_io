@@ -534,11 +534,19 @@ public:
 
     // High level control.
     void start_stream();      // tells network thread to start reading packets
-    void end_stream();        // stops stream
-    void join_all_threads();  // waits for end of stream, and joins all threads, including assembler threads.
+    void end_stream();        // asynchronously stops stream
+    void join_all_threads();  // should only be called once, does not end stream
 
-    // Can be called any time
-    void get_event_counts(ssize_t &num_bad_packets, ssize_t &num_good_packets, ssize_t &num_beam_id_mismatches) const;
+    // Note: get_event_counts() can be called at any time.
+
+    struct event_counts {
+	ssize_t num_bad_packets = 0;
+	ssize_t num_good_packets = 0;
+	ssize_t num_beam_id_mismatches = 0;
+	event_counts &operator+=(const event_counts &x);
+    };
+
+    event_counts get_event_counts() const;
 
     ~intensity_network_stream();
 
@@ -557,9 +565,8 @@ private:
     // All timestamps are in microseconds, relative to the time when we started listening on the socket.
     int64_t curr_timestamp = 0;
 
-    int _bad_packet = 0;
-    int _good_packet = 0;
-    int _beam_id_mismatch = 0;
+    // Used internally to accumulate counts temporarily without holding a lock (see comments in intensity_network_stream.cpp)
+    event_counts _tmp_counts;
 
     mutable pthread_mutex_t lock;
     pthread_t network_thread;
@@ -572,9 +579,7 @@ private:
     bool join_called = false;
     pthread_cond_t cond_state_changed;
 
-    ssize_t num_bad_packets = 0;
-    ssize_t num_good_packets = 0;
-    ssize_t num_beam_id_mismatches = 0;
+    event_counts curr_counts;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
