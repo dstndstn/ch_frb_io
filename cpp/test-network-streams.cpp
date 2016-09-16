@@ -443,8 +443,13 @@ int main(int argc, char **argv)
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
 	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);
 	    if (err)
-		throw runtime_error("pthread_join() failed");
+		throw runtime_error("pthread_join() failed");	    
 	}
+
+	intensity_network_stream::event_counts counts = tp->istream->get_event_counts();
+
+	assert(counts.num_bad_packets == 0);
+	assert(counts.num_beam_id_mismatches == 0);
     }
 
     cout << "\n    ****  network test passed!! ****\n\n";
