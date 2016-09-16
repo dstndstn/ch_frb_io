@@ -12,12 +12,6 @@ namespace ch_frb_io {
 #endif
 
 
-// Defined later in this file
-static void *network_thread_main(void *opaque_arg);
-static void network_thread_main2(intensity_network_ostream *stream);
-
-
-
 // -------------------------------------------------------------------------------------------------
 //
 // Helper functions for encoding L0_L1 packets.
@@ -387,7 +381,7 @@ auto intensity_network_ostream::make(const std::string &dstname, const std::vect
 					   fpga_counts_per_sample_, wt_cutoff_, gbps_);
     
     shared_ptr<intensity_network_ostream> ret(p);
-    xpthread_create(&ret->network_thread, network_thread_main, ret, "network write thread");
+    xpthread_create(&ret->network_thread, intensity_network_ostream::network_pthread_main, ret, "network write thread");
     ret->wait_for_network_thread_startup();
 
     return ret;
@@ -399,29 +393,29 @@ auto intensity_network_ostream::make(const std::string &dstname, const std::vect
 // Network write thread
 
 
-static void *network_thread_main(void *opaque_arg)
+// static member function
+void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 {
     auto stream = xpthread_get_arg<intensity_network_ostream> (opaque_arg, "network write thread");
     stream->network_thread_startup();
 
     try {
-	network_thread_main2(stream.get());
+	stream->network_thread_main();
     } catch (...) {
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
     }
 
     stream->end_stream(false);   // "false" has same meaning as above
-
     return NULL;
 }
 
 
-static void network_thread_main2(intensity_network_ostream *stream)
+void intensity_network_ostream::network_thread_main()
 {
-    int sockfd = stream->get_sockfd();
-    double target_gbps = stream->get_target_gbps();
-    udp_packet_list packet_list = stream->allocate_packet_list();
+    int sockfd = this->get_sockfd();
+    double target_gbps = this->get_target_gbps();
+    udp_packet_list packet_list = this->allocate_packet_list();
 
     // Used for throttling and displaying summary info at the end.
     struct timeval initial_time;
@@ -431,7 +425,7 @@ static void network_thread_main2(intensity_network_ostream *stream)
     int64_t nbytes_sent = 0;
     
     for (;;) {
-	if (!stream->get_packet_list(packet_list))
+	if (!this->get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
 	
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {

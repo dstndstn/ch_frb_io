@@ -419,6 +419,9 @@ protected:
 			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
 			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
 			      float wt_cutoff, double gbps);
+
+    static void *network_pthread_main(void *opaque_args);
+    void network_thread_main();
 };
 
 
