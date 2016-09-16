@@ -268,26 +268,6 @@ intensity_network_ostream::~intensity_network_ostream()
 }
 
 
-void intensity_network_ostream::network_thread_startup()
-{
-    pthread_mutex_lock(&state_lock);
-    network_thread_started = true;
-    pthread_cond_broadcast(&cond_state_changed);
-    pthread_mutex_unlock(&state_lock);
-}
-
-
-void intensity_network_ostream::wait_for_network_thread_startup()
-{
-    pthread_mutex_lock(&state_lock);
-    
-    while (!network_thread_started)
-	pthread_cond_wait(&cond_state_changed, &state_lock);
-
-    pthread_mutex_unlock(&state_lock);
-}
-
-
 // The 'intensity' and 'weights' arrays have shapes (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk)
 void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count,  bool is_blocking)
 {
@@ -374,15 +354,23 @@ void intensity_network_ostream::end_stream(bool join_network_thread)
 auto intensity_network_ostream::make(const std::string &dstname, const std::vector<int> &ibeam_, 
 				     const std::vector<int> &ifreq_chunk_, int nupfreq_, int nt_per_chunk_,
 				     int nfreq_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
-				     float wt_cutoff_, double gbps_) -> std::shared_ptr<intensity_network_ostream>
+				     float wt_cutoff_, double target_gbps_) 
+    -> std::shared_ptr<intensity_network_ostream>
 {
     auto p = new intensity_network_ostream(dstname, ibeam_, ifreq_chunk_, nupfreq_, 
 					   nt_per_chunk_, nfreq_per_packet_, nt_per_packet_, 
-					   fpga_counts_per_sample_, wt_cutoff_, gbps_);
+					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
     
     shared_ptr<intensity_network_ostream> ret(p);
-    xpthread_create(&ret->network_thread, intensity_network_ostream::network_pthread_main, ret, "network write thread");
-    ret->wait_for_network_thread_startup();
+
+    int err = pthread_create(&ret->network_thread, NULL, intensity_network_ostream::network_pthread_main, (void *) &ret);
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_ostream constructor: ") + strerror(errno));
+
+    pthread_mutex_lock(&ret->state_lock);
+    while (!ret->network_thread_started)
+	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
+    pthread_mutex_unlock(&ret->state_lock);
 
     return ret;
 }
@@ -396,8 +384,14 @@ auto intensity_network_ostream::make(const std::string &dstname, const std::vect
 // static member function
 void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 {
-    auto stream = xpthread_get_arg<intensity_network_ostream> (opaque_arg, "network write thread");
-    stream->network_thread_startup();
+    if (!opaque_arg)
+	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_pthread_main()");
+
+    shared_ptr<intensity_network_ostream> *arg = (shared_ptr<intensity_network_ostream> *) opaque_arg;
+    shared_ptr<intensity_network_ostream> stream = *arg;
+
+    if (!stream)
+	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
 
     try {
 	stream->network_thread_main();
@@ -413,6 +407,11 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 
 void intensity_network_ostream::network_thread_main()
 {
+    pthread_mutex_lock(&state_lock);
+    network_thread_started = true;
+    pthread_cond_broadcast(&cond_state_changed);
+    pthread_mutex_unlock(&state_lock);
+
     int sockfd = this->get_sockfd();
     double target_gbps = this->get_target_gbps();
     udp_packet_list packet_list = this->allocate_packet_list();

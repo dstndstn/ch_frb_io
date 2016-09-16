@@ -192,35 +192,6 @@ inline void xpthread_cond_init(pthread_cond_t *cond)
         throw std::runtime_error("pthread_cond_init() failed?!");    	    
 }
 
-template<typename T> inline void xpthread_create(pthread_t *thread, void *(*thread_main)(void *), const std::shared_ptr<T> &arg, const std::string &thread_name)
-{
-    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
-    std::shared_ptr<T> *p = new std::shared_ptr<T> (arg);
-
-    // If pthread_create() succeeds, then spawned thread is responsible for 'delete p'
-    int err = pthread_create(thread, NULL, thread_main, p);
-
-    if (err) {
-	delete p;
-	throw std::runtime_error("couldn't create " + thread_name + ": " + strerror(errno));
-    }
-}
-
-template<typename T> inline std::shared_ptr<T> xpthread_get_arg(void *opaque_arg, const std::string &thread_name)
-{
-    if (!opaque_arg)
-	throw std::runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to " + thread_name);
-
-    std::shared_ptr<T> *arg = (std::shared_ptr<T> *) opaque_arg;
-    std::shared_ptr<T> ret = *arg;
-    delete arg;
-
-    if (!ret)
-	throw std::runtime_error("ch_frb_io: internal error: empty pointer passed to " + thread_name);
-
-    return ret;
-}
-
 
 }  // namespace ch_frb_io
 
