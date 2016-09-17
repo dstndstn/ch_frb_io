@@ -355,7 +355,7 @@ public:
     const double target_gbps = 0.0;
 
     const std::vector<int> beam_ids;         // length nbeaams
-    const std::vector<int> coarse_freq_ids;  // length 
+    const std::vector<int> coarse_freq_ids;  // length nfreq_coarse_per_chunk
 
     //
     // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
@@ -460,7 +460,6 @@ public:
     //
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
-    void wait_for_assembler_thread_startup();
     bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
     void join_assembler_thread();
 
@@ -476,7 +475,6 @@ public:
     // In the latter case, the assembler should exit.  The 'packet_list' arg  should be an unused buffer, which 
     // is swapped for the buffer of new packets.
     //
-    void assembler_thread_startup();
     bool get_unassembled_packets(udp_packet_list &packet_list);
     void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
     void assembler_thread_end();
@@ -524,6 +522,9 @@ private:
     int assembled_ringbuf_size = 0;
 
     pthread_cond_t cond_assembled_chunks_added;     // downstream thread waits here for assembled chunks
+
+    static void *assembler_pthread_main(void *opaque_arg);
+    void assembler_thread_main();
 };
 
 

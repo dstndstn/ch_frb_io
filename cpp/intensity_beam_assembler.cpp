@@ -9,11 +9,6 @@ namespace ch_frb_io {
 #endif
 
 
-// Defined later in this file
-static void *assembler_thread_main(void *opaque_arg);
-static void  assembler_thread_main2(intensity_beam_assembler *assembler);
-
-
 // -------------------------------------------------------------------------------------------------
 //
 // class intensity_beam_assembler
@@ -25,16 +20,15 @@ shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_
     intensity_beam_assembler *ret_bare = new intensity_beam_assembler(beam_id_, drops_allowed_);
     shared_ptr<intensity_beam_assembler> ret(ret_bare);
 
-    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
-    shared_ptr<intensity_beam_assembler> *arg = new shared_ptr<intensity_beam_assembler> (ret);
-    int err = pthread_create(&ret->assembler_thread, NULL, assembler_thread_main, arg);
-
-    if (err) {
-        delete arg;   // note: if pthread_create() succeeds, then assembler thread will delete this pointer
+    int err = pthread_create(&ret->assembler_thread, NULL, intensity_beam_assembler::assembler_pthread_main, &ret);
+    if (err)
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_beam_assembler constructor: ") + strerror(errno));
-    }
 
-    ret->wait_for_assembler_thread_startup();
+    pthread_mutex_lock(&ret->lock);
+    while (!ret->assembler_thread_started)
+	pthread_cond_wait(&ret->cond_assembler_state_changed, &ret->lock);
+    pthread_mutex_unlock(&ret->lock);
+
     return ret;
 }
 
@@ -65,25 +59,6 @@ intensity_beam_assembler::~intensity_beam_assembler()
     pthread_mutex_destroy(&this->lock);
 }
 
-
-// Called by assembler thread, to let the world know it started.
-void intensity_beam_assembler::assembler_thread_startup()
-{
-    pthread_mutex_lock(&this->lock);
-    this->assembler_thread_started = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_mutex_unlock(&this->lock);
-}
-
-void intensity_beam_assembler::wait_for_assembler_thread_startup()
-{
-    pthread_mutex_lock(&this->lock);
-
-    while (!assembler_thread_started)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
-
-    pthread_mutex_unlock(&this->lock);
-}
 
 // Called by network thread, upon receipt of first packet.
 // Advances assembler state from 'assembler_thread_started' to 'stream_started'
@@ -295,23 +270,21 @@ inline void assemble_packet(int nfreq, const uint16_t *freq_ids, int nupfreq, in
 }
 
 
-static void *assembler_thread_main(void *opaque_arg)
+// static member function
+void *intensity_beam_assembler::assembler_pthread_main(void *opaque_arg)
 {
     if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_thread_main()");
+	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_pthread_main()");
 
     // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
     shared_ptr<intensity_beam_assembler> *arg = (shared_ptr<intensity_beam_assembler> *) opaque_arg;
-    shared_ptr<intensity_beam_assembler> assembler = *arg;   // 'exchanger' is safe to use below
-    delete arg;
+    shared_ptr<intensity_beam_assembler> assembler = *arg;
 
     if (!assembler)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembler_thread_main()");
 
-    assembler->assembler_thread_startup();
-
     try {
-	assembler_thread_main2(assembler.get());
+	assembler->assembler_thread_main();
     } catch (...) {
 	assembler->assembler_thread_end();
 	throw;
@@ -323,10 +296,14 @@ static void *assembler_thread_main(void *opaque_arg)
 }
 
 
-static void assembler_thread_main2(intensity_beam_assembler *assembler)
+void intensity_beam_assembler::assembler_thread_main()
 {
-    int assembler_beam_id = assembler->beam_id;
-    udp_packet_list unassembled_packet_list = assembler->allocate_unassembled_packet_list();
+    pthread_mutex_lock(&this->lock);
+    this->assembler_thread_started = true;
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_mutex_unlock(&this->lock);
+
+    udp_packet_list unassembled_packet_list = this->allocate_unassembled_packet_list();
 
     // The 'initialized' flag refers to 'assembler_it0', 'chunk0_*', and 'chunk1_*'
     bool initialized = false;
@@ -342,7 +319,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 
     int nupfreq = 0;
     int fpga_counts_per_sample = 0;
-    if (!assembler->wait_for_stream_params(fpga_counts_per_sample, nupfreq))
+    if (!this->wait_for_stream_params(fpga_counts_per_sample, nupfreq))
 	return;
 
     // Sanity check stream params
@@ -354,15 +331,15 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
     // Outer loop over unassembled packets
 
     for (;;) {
-	bool alive = assembler->get_unassembled_packets(unassembled_packet_list);
+	bool alive = this->get_unassembled_packets(unassembled_packet_list);
 
 	if (!alive) {
 	    // FIXME can this be improved?
 	    if (!initialized)
 		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
 
-	    assembler->put_assembled_chunk(chunk0);
-	    assembler->put_assembled_chunk(chunk1);
+	    this->put_assembled_chunk(chunk0);
+	    this->put_assembled_chunk(chunk1);
 	    return;
 	}
 
@@ -406,7 +383,7 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 	    const uint8_t *packet_data = (packet + 26 + 10*packet_nfreq);
 
 	    bad_packet = false;
-	    bad_packet |= (packet_beam_ids[0] != assembler_beam_id);
+	    bad_packet |= (packet_beam_ids[0] != beam_id);
 	    
 	    for (int ifreq = 0; ifreq < packet_nfreq; ifreq++) {
 		int freq_id = packet_freq_ids[ifreq];
@@ -422,11 +399,11 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 		assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
 		initialized = true;
 
-		chunk0 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
+		chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
 		chunk0_intensity = chunk0->intensity;
 		chunk0_weights = chunk0->weights;
 
-		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
+		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;
 	    }
@@ -442,14 +419,14 @@ static void assembler_thread_main2(intensity_beam_assembler *assembler)
 		// needed.  This is to avoid a situation where a single rogue packet timestamped
 		// in the far future kills the L1 node.
 		//
-		assembler->put_assembled_chunk(chunk0);
+		this->put_assembled_chunk(chunk0);
 		assembler_it0 += constants::nt_per_assembled_chunk;
 
 		chunk0 = chunk1;
 		chunk0_intensity = chunk1_intensity;
 		chunk0_weights = chunk1_weights;
 
-		chunk1 = make_shared<assembled_chunk> (assembler_beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
+		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
 		chunk1_intensity = chunk1->intensity;
 		chunk1_weights = chunk1->weights;		
 	    }
