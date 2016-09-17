@@ -37,7 +37,7 @@ namespace ch_frb_io {
 
 
 struct intensity_packet {
-    // Don't add headers before this!
+    // "Header" fields
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
@@ -47,18 +47,42 @@ struct intensity_packet {
     uint16_t  nupfreq;
     uint16_t  ntsamp;
 
+    // "Data" fields
     uint16_t  *beam_ids;   // 1D array of length nbeams
     uint16_t  *freq_ids;   // 1D array of length nfreq_coarse
     float     *scales;     // 2D array of shape (nbeam, nfreq_coarse)
     float     *offsets;    // 2D array of shape (nbeam, nfreq_coarse)
     uint8_t   *data;       // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
+    // FIXME rethink the member function names below, since they're not very intuitive
+
     // Returns true if packet is good, false if bad
     // Note: no checking of freq_ids is performed!
     bool read(const uint8_t *src, int src_nbytes);
 
-    // Returns number of bytes
+    // Returns packet_nbytes (not data_nbytes)
     int write(uint8_t *dst) const;
+
+
+    // The semantics of encode() aren't particularly intuitive, so we document it carefully here!
+    //
+    // It is assumed that the caller has initialized the "header" fields and the data pointers 'beam_ids', 'freq_ids'.
+    // The other three data pointers (scales, offsets, data) are not assumed initialized, and encode() will initialize them
+    // to point to subregions of the 'dst' array.
+    //
+    // The 'dst' array should point to an allocated but uninitialized memory region which will be filled by encode_packet().
+    // Note that encode_packet() doesn't check for overflows (or do any arugment checking at all!)
+    //
+    // The 'intensity' and 'weights' pointers should point to arrays of logical shape (nbeams, nfreq_coarse, nupfreq, ntsamp).
+    //
+    // The stride arguments are defined so that the intensity array element with logical indices (b,f,u,t) is stored at
+    // memory location
+    //
+    //    intensity + b*beam_stride + (f*nupfreq+u)*freq_stride + t
+    //
+    // and likewise for the weights.
+
+    void encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
 };
 
 

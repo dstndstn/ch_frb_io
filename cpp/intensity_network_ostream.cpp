@@ -12,113 +12,10 @@ namespace ch_frb_io {
 #endif
 
 
-// -------------------------------------------------------------------------------------------------
-//
-// Helper functions for encoding L0_L1 packets.
-
-
-//
-// Encodes one "row" of the L0_L1 packet.  A row is a subset of the data with a common (offset, scale).
-// In the current packet protocol this corresponds to all (upfreq, time) pairs for a fixed (beam, freq).
-//
-// The 'intensity' array is a contiguous array of length 'rowlen'.
-// The 'mask' array is a contiguous array of length 'rowlen', which is assumed to contain zeros or ones.
-//
-// We currently assign the scale by computing the unclipped variance and saturating at 5 sigma.
-// FIXME this could be improved by clipping 5 sigma outliers and iteratively computing the variance.
-// 
-inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t *datap, const float *intensity, const float *mask)
-{
-    double acc0 = 0.0;
-    double acc1 = 0.0;
-    double acc2 = 0.0;
-
-    for (int i = 0; i < rowlen; i++) {
-	acc0 += mask[i];
-	acc1 += mask[i] * intensity[i];
-	acc2 += mask[i] * intensity[i] * intensity[i];
-    }
-
-    if (acc0 <= 0.0) {
-	*scalep = 1.0;
-	*offsetp = 0.0;
-	memset(datap, 0, rowlen);
-	return;
-    }
-
-    double mean = acc1/acc0;
-    double var = acc2/acc0 - mean*mean;
-    
-    var = max(var, double(1.0e-10*mean*mean));
-
-    double scale = sqrt(var) / 25.;
-    double offset = -128.*scale + mean;   // 0x80 -> mean
-
-    *scalep = scale;
-    *offsetp = offset;
-
-    for (int i = 0; i < rowlen; i++) {
-	float t = (intensity[i] - offset) / scale;
-	t *= mask[i];           // so that masked samples get encoded as 0x00
-	t = min(t, float(255.));
-	t = max(t, float(0.));
-	datap[i] = int(t+0.5);  // round to nearest integer
-    }
-}
-
-//
-// Note: encode_packet() doesn't do much argument checking.
-//
-// Some checks that the caller is responsible for:
-//   - nbeams, nfreq, nupfreq, ntsamp should all be >=1 and their product should be <= 8900 (udp mtu)
-//   - fpga_counts_per_sample should fit into 16 bits
-//   - fpga_count should be divisible by fpga_counts_per_sample
-//
-inline void encode_packet(int nbeams, int nfreq_coarse, int nupfreq, int ntsamp, 
-			  uint16_t fpga_counts_per_sample, uint64_t fpga_count,
-			  uint8_t *out, const uint16_t *ibeam, const uint16_t *ifreq, 
-			  const float *intensity, const float *mask)
-{
-    int data_nbytes = nbeams * nfreq_coarse * nupfreq * ntsamp;
-
-    // Write 24-byte header
-
-    *((uint32_t *) out) = 1;                            //  uint32_t  protocol
-    *((int16_t *) (out+4)) = data_nbytes;               //  int16_t   data_nbytes
-    *((uint16_t *) (out+6)) = fpga_counts_per_sample;   //  uint16_t  fpga_counts_per_sample
-    *((uint64_t *) (out+8)) = fpga_count;               //  uint64_t  fpga_count
-    *((uint16_t *) (out+16)) = uint16_t(nbeams);        //  uint16_t  nbeams
-    *((uint16_t *) (out+18)) = uint16_t(nfreq_coarse);  //  uint16_t  nfreq_coarse
-    *((uint16_t *) (out+20)) = uint16_t(nupfreq);       //  uint16_t  nupfreq
-    *((uint16_t *) (out+22)) = uint16_t(ntsamp);        //  uint16_t  ntsamp
-
-    // Write ibeam, ifreq arrays
-    // Byte count = (2*nbeams + 2*nfreq_coarse)
-
-    memcpy(out + 24, ibeam, 2*nbeams);
-    memcpy(out + 24 + 2*nbeams, ifreq, 2*nfreq_coarse);
-
-    // Write offset, scale, data
-    // Byte count = (8*nbeams*nfreq_coarse) + (nbeams*nfreq_coarse*nupfreq*nt)
-
-    static_assert(sizeof(float)==4, "the logic below assumes sizeof(float)==4");
-
-    // In this routine, a "row" is a (beam, freq_coarse) pair.
-    int nrows = nbeams * nfreq_coarse;
-    int rowlen = nupfreq * ntsamp;
-
-    float *scale0 = (float *) (out + 24 + 2*nbeams + 2*nfreq_coarse);
-    float *offset0 = (float *) (out + 24 + 2*nbeams + 2*nfreq_coarse + 4*nrows);
-    uint8_t *data0 = out + 24 + 2*nbeams + 2*nfreq_coarse + 8*nrows;
-
-    for (int irow = 0; irow < nrows; irow++)
-	encode_packet_row(rowlen, scale0+irow, offset0+irow, data0 + irow*rowlen, intensity + irow*rowlen, mask + irow*rowlen);
-}
-
 
 // -------------------------------------------------------------------------------------------------
 //
-// intensity_network_ostream
+// class intensity_network_ostream
 
 
 
@@ -251,10 +148,6 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
     int capacity = constants::output_ringbuf_capacity;
     string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, npackets_per_chunk * nbytes_per_packet, dropmsg);
-    
-    int ndata = nbeams * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
-    this->tmp_intensity_vec.resize(ndata, 0.0);
-    this->tmp_mask_vec.resize(ndata, 0.0);
     this->tmp_packet_list = ringbuf->allocate_packet_list();
 }
 
@@ -307,63 +200,45 @@ void intensity_network_ostream::_open_socket()
 
 
 // The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
-void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count,  bool is_blocking)
+void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking)
 {
     if (fpga_count % fpga_counts_per_sample)
 	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by fpga_counts_per_sample");
     if (tmp_packet_list.curr_npackets > 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): internal error: tmp_packet_list nonempty?!");
 
-    // Pointers to contiguous arrays of shape (nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet)
-    float *tmp_intensity = &tmp_intensity_vec[0];
-    float *tmp_mask = &tmp_mask_vec[0];
+    intensity_packet packet;
+    
+    // Some intensity_packet fields are packet-independent; these are initialized here.
+    packet.protocol_version = 1;
+    packet.data_nbytes = nbeams * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
+    packet.fpga_counts_per_sample = fpga_counts_per_sample;
+    packet.nbeams = nbeams;
+    packet.nfreq_coarse = nfreq_coarse_per_packet;
+    packet.nupfreq = nupfreq;
+    packet.ntsamp = nt_per_packet;
+    packet.beam_ids = &beam_ids_16bit[0];
 
     // The number of packets per chunk is (nf_outer * nt_outer)
+    int beam_stride = nfreq_coarse_per_chunk * nupfreq * stride;
     int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
     int nt_outer = nt_per_chunk / nt_per_packet;
 
-    // Outer loop over packets
+    // Outer loop over packets in chunk
     for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
 	for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
+	    int data_offset = (if_outer * nfreq_coarse_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
 
-	    // Copy input data into the { tmp_intensity, tmp_mask } arrays,
-	    // in order to "de-stride" and apply the wt_cutoff.
-	    
-	    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-		for (int if_inner = 0; if_inner < nfreq_coarse_per_packet; if_inner++) {
-		    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
-			// Row offset in 'tmp_intensity' and 'tmp_mask' arrays
-			int idst = ibeam * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
-			idst += if_inner * nupfreq * nt_per_packet;
-			idst += iupfreq * nt_per_packet;
+	    // Some intensity_packet fields are packet-dependent; these are initialized here.
+	    packet.freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
+	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
-			// Row offset in 'intensity' and 'weights' input arrays
-			int isrc = ibeam * nfreq_coarse_per_chunk * nupfreq * stride;
-			isrc += (if_outer * nfreq_coarse_per_packet + if_inner) * nupfreq * stride;
-			isrc += iupfreq * stride;
-			isrc += it_outer * nt_per_packet;
-
-			// Operate on contiguous "row" of length nt_per_packet
-			for (int it_inner = 0; it_inner < nt_per_packet; it_inner++) {
-			    tmp_intensity[idst + it_inner] = intensity[isrc + it_inner];
-			    tmp_mask[idst + it_inner] = (weights[isrc + it_inner] >= wt_cutoff) ? 1.0 : 0.0;
-			}
-		    }
-		}
-	    }
-
-	    encode_packet(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet,
-			  fpga_counts_per_sample, 
-			  fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample,
-			  tmp_packet_list.data_end,                              // output buffer for encoding
-			  &beam_ids_16bit[0],
-			  &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet],
-			  tmp_intensity, tmp_mask);                              // input buffers for encoding
-
+	    packet.encode(tmp_packet_list.data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, wt_cutoff);
 	    tmp_packet_list.add_packet(nbytes_per_packet);
 	}
     }
 
+    // FIXME I think the plan is to make producer_put_packet_list() return void, and throw the exception there instead.
     if (!ringbuf->producer_put_packet_list(tmp_packet_list, is_blocking)) 
 	throw runtime_error("intensity_network_ostream::send_chunk() called after end_stream()");
 }

@@ -412,9 +412,7 @@ protected:
     // ring buffer used to exchange packets with network thread
     std::unique_ptr<udp_packet_ringbuf> ringbuf;
     
-    // buffers for packet encoding
-    std::vector<float> tmp_intensity_vec;
-    std::vector<float> tmp_mask_vec;
+    // Buffers for packet encoding
     udp_packet_list tmp_packet_list;
 
     // Real constructor is protected
