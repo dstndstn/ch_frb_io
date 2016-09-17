@@ -32,6 +32,8 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector
     intensity_network_stream *retp = new intensity_network_stream(assemblers, udp_port);
     shared_ptr<intensity_network_stream> ret(retp);
 
+    ret->_open_socket();
+
     int err = pthread_create(&ret->network_thread, NULL, network_pthread_main, (void *) &ret);
     if (err)
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
@@ -68,7 +70,7 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
     if ((udp_port <= 0) || (udp_port >= 65536))
 	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(udp_port));
 
-    // All initializations except the socket
+    // All initializations except the socket (which is initialized in _open_socket())
 
     this->assembler_packet_lists.resize(nassemblers);
     this->assembler_timestamps.resize(nassemblers, 0);
@@ -81,23 +83,6 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
-
-    // Socket initialization
-
-    int socket_bufsize = constants::recv_socket_bufsize;
-    struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
-
-    this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sockfd < 0)
-	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
-
-    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
-
-    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
 }
 
 
@@ -110,6 +95,27 @@ intensity_network_stream::~intensity_network_stream()
 	close(sockfd);
 	sockfd = -1;
     }
+}
+
+
+// Socket initialization factored to its own routine, rather than putting it in the constructor,
+// so that the socket will always be closed if an exception is thrown somewhere.
+void intensity_network_stream::_open_socket()
+{
+    const int socket_bufsize = constants::recv_socket_bufsize;
+    const struct timeval tv_timeout = { 0, constants::recv_socket_timeout_usec };
+
+    this->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sockfd < 0)
+	throw runtime_error(string("ch_frb_io: socket() failed: ") + strerror(errno));
+
+    int err = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVBUF) failed: ") + strerror(errno));
+
+    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
 }
 
 

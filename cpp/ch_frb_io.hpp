@@ -590,6 +590,7 @@ private:
     static void *network_pthread_main(void *);
     void network_thread_main();
 
+    void _open_socket();
     bool _process_packet(const uint8_t *data, int nbytes);
     void _send_packet_to_assembler(int assembler_ix, const intensity_packet &packet);
     void _send_packet_list_to_assembler(int assembler_ix);
