@@ -157,11 +157,6 @@ void intensity_beam_assembler::join_assembler_thread()
 }
 
 
-udp_packet_list intensity_beam_assembler::allocate_unassembled_packet_list() const
-{
-    return this->unassembled_ringbuf->allocate_packet_list();
-}
-
 bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
 {
     bool is_blocking = false;
@@ -303,7 +298,7 @@ void intensity_beam_assembler::assembler_thread_main()
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_mutex_unlock(&this->lock);
 
-    udp_packet_list unassembled_packet_list = this->allocate_unassembled_packet_list();
+    udp_packet_list unassembled_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
     // The 'initialized' flag refers to 'assembler_it0', 'chunk0_*', and 'chunk1_*'
     bool initialized = false;

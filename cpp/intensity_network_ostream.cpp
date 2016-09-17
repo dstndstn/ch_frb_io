@@ -147,8 +147,8 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
 
     int capacity = constants::output_ringbuf_capacity;
     string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
-    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, npackets_per_chunk * nbytes_per_packet, dropmsg);
-    this->tmp_packet_list = ringbuf->allocate_packet_list();
+    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk, dropmsg);
+    this->tmp_packet_list = udp_packet_list(npackets_per_chunk, nbytes_per_chunk);
 }
 
 
@@ -299,7 +299,7 @@ void intensity_network_ostream::network_thread_main()
     pthread_cond_broadcast(&cond_state_changed);
     pthread_mutex_unlock(&state_lock);
 
-    udp_packet_list packet_list = ringbuf->allocate_packet_list();
+    udp_packet_list packet_list(npackets_per_chunk, nbytes_per_chunk);
     int last_packet_nbytes = 0;
 
     // to be initialized when first packet is sent

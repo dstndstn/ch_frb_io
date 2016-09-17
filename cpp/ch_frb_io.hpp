@@ -303,9 +303,6 @@ struct udp_packet_ringbuf : noncopyable {
     
     // Can be called by either producer or consumer thread
     void end_stream();
-
-    // Helper function to allocate packet_list with appropriate parameters
-    udp_packet_list allocate_packet_list() const;
 };
 
 
@@ -481,9 +478,6 @@ public:
 
     // Called by "downstream" thread
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
-
-    // Helper functions
-    udp_packet_list allocate_unassembled_packet_list() const;
 
     ~intensity_beam_assembler();
 

@@ -77,7 +77,7 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
     this->assembler_beam_ids.resize(nassemblers, -1);
 
     for (int i = 0; i < nassemblers; i++) {
-	assembler_packet_lists[i] = assemblers[i]->allocate_unassembled_packet_list();
+	assembler_packet_lists[i] = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 	assembler_beam_ids[i] = assemblers[i]->beam_id;
     }
 

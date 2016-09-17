@@ -176,10 +176,4 @@ void udp_packet_ringbuf::end_stream()
 }
 
 
-udp_packet_list udp_packet_ringbuf::allocate_packet_list() const
-{
-    return udp_packet_list(this->max_npackets_per_list, this->max_nbytes_per_list);
-}
-
-
 }  // namespace ch_frb_io
