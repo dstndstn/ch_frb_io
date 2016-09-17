@@ -164,12 +164,6 @@ bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_l
 }
 
 
-bool intensity_beam_assembler::get_unassembled_packets(udp_packet_list &packet_list)
-{
-    return this->unassembled_ringbuf->consumer_get_packet_list(packet_list);
-}
-
-
 void intensity_beam_assembler::put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
 {
     pthread_mutex_lock(&this->lock);
@@ -326,7 +320,7 @@ void intensity_beam_assembler::assembler_thread_main()
     // Outer loop over unassembled packets
 
     for (;;) {
-	bool alive = this->get_unassembled_packets(unassembled_packet_list);
+	bool alive = unassembled_ringbuf->consumer_get_packet_list(unassembled_packet_list);
 
 	if (!alive) {
 	    // FIXME can this be improved?

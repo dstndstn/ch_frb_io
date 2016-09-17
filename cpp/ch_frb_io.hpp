@@ -465,14 +465,7 @@ public:
     bool put_unassembled_packets(udp_packet_list &packet_list);
     void end_stream();
 
-    //
     // Called by assembler thread.  
-    //
-    // The function get_unassembled_packets() returns true on success, false if end_assembler() has been called.  
-    // In the latter case, the assembler should exit.  The 'packet_list' arg  should be an unused buffer, which 
-    // is swapped for the buffer of new packets.
-    //
-    bool get_unassembled_packets(udp_packet_list &packet_list);
     void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
     void assembler_thread_end();
 
