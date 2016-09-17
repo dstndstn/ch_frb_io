@@ -396,6 +396,12 @@ protected:
 
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;
+    
+    // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
+    // If we want to make this data accessible by other threads, this needs to be changed.
+    int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
+    int64_t npackets_sent = 0;
+    int64_t nbytes_sent = 0;
 
     pthread_t network_thread;
     pthread_mutex_t state_lock;
@@ -421,6 +427,7 @@ protected:
     void network_thread_main();
 
     void _open_socket();
+    void _announce_end_of_stream();
 };
 
 

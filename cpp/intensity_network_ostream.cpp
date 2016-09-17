@@ -120,6 +120,35 @@ inline void encode_packet(int nbeams, int nfreq_coarse, int nupfreq, int ntsamp,
 //
 // intensity_network_ostream
 
+
+
+// static member function (de facto constructor)
+auto intensity_network_ostream::make(const std::string &dstname_, const std::vector<int> &beam_ids_, 
+				     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
+				     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
+				     float wt_cutoff_, double target_gbps_) 
+    -> std::shared_ptr<intensity_network_ostream>
+{
+    auto p = new intensity_network_ostream(dstname_, beam_ids_, coarse_freq_ids_, nupfreq_, 
+					   nt_per_chunk_, nfreq_coarse_per_packet_, nt_per_packet_, 
+					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
+    
+    shared_ptr<intensity_network_ostream> ret(p);
+
+    ret->_open_socket();
+
+    int err = pthread_create(&ret->network_thread, NULL, intensity_network_ostream::network_pthread_main, (void *) &ret);
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_ostream constructor: ") + strerror(errno));
+
+    pthread_mutex_lock(&ret->state_lock);
+    while (!ret->network_thread_started)
+	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
+    pthread_mutex_unlock(&ret->state_lock);
+
+    return ret;
+}
+
     
 intensity_network_ostream::intensity_network_ostream(const std::string &dstname_, const std::vector<int> &beam_ids_, 
 						     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
@@ -359,34 +388,6 @@ void intensity_network_ostream::end_stream(bool join_network_thread)
 }
 
 
-// static member function (de facto constructor)
-auto intensity_network_ostream::make(const std::string &dstname_, const std::vector<int> &beam_ids_, 
-				     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
-				     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
-				     float wt_cutoff_, double target_gbps_) 
-    -> std::shared_ptr<intensity_network_ostream>
-{
-    auto p = new intensity_network_ostream(dstname_, beam_ids_, coarse_freq_ids_, nupfreq_, 
-					   nt_per_chunk_, nfreq_coarse_per_packet_, nt_per_packet_, 
-					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
-    
-    shared_ptr<intensity_network_ostream> ret(p);
-
-    ret->_open_socket();
-
-    int err = pthread_create(&ret->network_thread, NULL, intensity_network_ostream::network_pthread_main, (void *) &ret);
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_ostream constructor: ") + strerror(errno));
-
-    pthread_mutex_lock(&ret->state_lock);
-    while (!ret->network_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
-    pthread_mutex_unlock(&ret->state_lock);
-
-    return ret;
-}
-
-
 // -------------------------------------------------------------------------------------------------
 //
 // Network write thread
@@ -424,38 +425,38 @@ void intensity_network_ostream::network_thread_main()
     pthread_mutex_unlock(&state_lock);
 
     udp_packet_list packet_list = ringbuf->allocate_packet_list();
+    int last_packet_nbytes = 0;
 
-    // Used for throttling and displaying summary info at the end.
-    struct timeval initial_time;
-    int last_send_bytecount = 0;
-    int64_t last_send_timestamp = 0;   // in usec
-    int64_t npackets_sent = 0;
-    int64_t nbytes_sent = 0;
+    // to be initialized when first packet is sent
+    struct timeval tv_ini;
     
+    // Loop over packet_lists
     for (;;) {
 	if (!ringbuf->consumer_get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
 	
+	// Loop over packets
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
 	    const uint8_t *packet = packet_list.data_start + packet_list.packet_offsets[ipacket];
 	    const int packet_nbytes = packet_list.packet_offsets[ipacket+1] - packet_list.packet_offsets[ipacket];
-	    struct timeval curr_time = xgettimeofday();
 
 	    if (npackets_sent == 0)
-		initial_time = curr_time;
+		tv_ini = xgettimeofday();
 
-	    int64_t curr_timestamp = usec_between(initial_time, curr_time);
-
+	    int64_t last_timestamp = this->curr_timestamp;
+	    curr_timestamp = usec_between(tv_ini, xgettimeofday());
+	    
+	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
+	    // FIXME this throttling logic is simplistic and could be improved.
 	    if ((target_gbps > 0.0) && (npackets_sent > 0)) {
-		int64_t target_timestamp = last_send_timestamp + int64_t(8.0e-3 * last_send_bytecount / target_gbps);
-		
+		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
 		if (curr_timestamp < target_timestamp) {
 		    xusleep(target_timestamp - curr_timestamp);
 		    curr_timestamp = target_timestamp;
 		}
 	    }
 
-	    // FIXME: sendmmsg() may improve performance here
+	    // FIXME(?): sendmmsg() may improve performance here, but throttling logic would definitely need update.
 	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
 	    
 	    if (n < 0)
@@ -463,13 +464,18 @@ void intensity_network_ostream::network_thread_main()
 	    if (n != packet_nbytes)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(packet_nbytes) + " bytes?!");
 
-	    last_send_bytecount = packet_nbytes;
-	    last_send_timestamp = curr_timestamp;
-	    nbytes_sent += packet_nbytes;
-	    npackets_sent++;
+	    last_packet_nbytes = packet_nbytes;
+	    this->nbytes_sent += packet_nbytes;
+	    this->npackets_sent++;
 	}
     }
+    
+    this->_announce_end_of_stream();
+}
 
+
+void intensity_network_ostream::_announce_end_of_stream()
+{
     // FIXME temporary hack.  For testing, it is convenient to have a way of ending the stream. 
     // We make the rule that a packet with nbeams = nfreq_coarse = nupfreq = ntsamp = 0 means "end of stream".
     // Later this will be replaced by something better!  
@@ -505,7 +511,7 @@ void intensity_network_ostream::network_thread_main()
     stringstream ss;
     ss << "ch_frb_io: network output thread exiting, npackets_sent=" << npackets_sent;
     if (npackets_sent >= 2)
-	ss << ", gbps=" << (8.0e-3 * nbytes_sent / double(last_send_timestamp));
+	ss << ", gbps=" << (8.0e-3 * nbytes_sent / double(curr_timestamp));
     if (target_gbps > 0.0)
 	ss << ", target_gbps=" << target_gbps;
     ss << "\n";
