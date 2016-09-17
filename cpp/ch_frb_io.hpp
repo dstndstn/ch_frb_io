@@ -341,20 +341,21 @@ struct assembled_chunk : noncopyable {
 struct intensity_network_ostream : noncopyable {
 public:
     const std::string dstname;
-    const int nbeam;
-    const int nupfreq;
-    const int nfreq_per_chunk;
-    const int nfreq_per_packet;
-    const int nt_per_chunk;
-    const int nt_per_packet;
-    const int fpga_counts_per_sample;
-    const float wt_cutoff;
-    const double target_gbps;
-    const int nbytes_per_packet;
-    const int npackets_per_chunk;
-    const int nbytes_per_chunk;
-    const std::vector<uint16_t> ibeam;
-    const std::vector<uint16_t> ifreq_chunk;
+    const int nbeams = 0;
+    const int nfreq_coarse_per_chunk = 0;
+    const int nfreq_coarse_per_packet = 0;
+    const int nupfreq = 0;
+    const int nt_per_chunk = 0;
+    const int nt_per_packet = 0;
+    const int fpga_counts_per_sample = 0;
+    const int nbytes_per_packet = 0;
+    const int npackets_per_chunk = 0;
+    const int nbytes_per_chunk = 0;
+    const float wt_cutoff = 0.0;
+    const double target_gbps = 0.0;
+
+    const std::vector<int> beam_ids;         // length nbeaams
+    const std::vector<int> coarse_freq_ids;  // length 
 
     //
     // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
@@ -362,15 +363,12 @@ public:
     // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
     // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
     //
-    // The 'ibeam' arg is a list of all beam ids processed by this stream.
-    // The 'ifreq_chunk' arg is a list of all coarse-grained frequency channel ids processed by this stream.
-    //
     // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
     // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
     //
-    static auto make(const std::string &dstname, const std::vector<int> &ibeam, 
-		     const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
-		     int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
+    static auto make(const std::string &dstname, const std::vector<int> &beam_ids,
+		     const std::vector<int> &coarse_freq_ids, int nupfreq, int nt_per_chunk,
+		     int nfreq_coarse_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
 		     float wt_cutoff, double target_gbps) 
 	-> std::shared_ptr<intensity_network_ostream>;
 
@@ -396,6 +394,9 @@ protected:
     std::string hostname;
     uint16_t udp_port = constants::default_udp_port;
 
+    std::vector<uint16_t> beam_ids_16bit;
+    std::vector<uint16_t> coarse_freq_ids_16bit;
+
     pthread_t network_thread;
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;
@@ -411,10 +412,10 @@ protected:
     udp_packet_list tmp_packet_list;
 
     // Real constructor is protected
-    intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam, 
-			      const std::vector<int> &ifreq_chunk, int nupfreq, int nt_per_chunk,
-			      int nfreq_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-			      float wt_cutoff, double gbps);
+    intensity_network_ostream(const std::string &dstname, const std::vector<int> &beam_ids, 
+			      const std::vector<int> &coarse_freq_ids, int nupfreq, int nt_per_chunk,
+			      int nfreq_coarse_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
+			      float wt_cutoff, double target_gbps);
 
     static void *network_pthread_main(void *opaque_args);
     void network_thread_main();

@@ -70,16 +70,16 @@ inline void encode_packet_row(int rowlen, float *scalep, float *offsetp, uint8_t
 // Note: encode_packet() doesn't do much argument checking.
 //
 // Some checks that the caller is responsible for:
-//   - nbeam, nfreq, nupfreq, ntsamp should all be >=1 and their product should be <= 8900 (udp mtu)
+//   - nbeams, nfreq, nupfreq, ntsamp should all be >=1 and their product should be <= 8900 (udp mtu)
 //   - fpga_counts_per_sample should fit into 16 bits
 //   - fpga_count should be divisible by fpga_counts_per_sample
 //
-inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp, 
+inline void encode_packet(int nbeams, int nfreq_coarse, int nupfreq, int ntsamp, 
 			  uint16_t fpga_counts_per_sample, uint64_t fpga_count,
 			  uint8_t *out, const uint16_t *ibeam, const uint16_t *ifreq, 
 			  const float *intensity, const float *mask)
 {
-    int data_nbytes = nbeam * nfreq * nupfreq * ntsamp;
+    int data_nbytes = nbeams * nfreq_coarse * nupfreq * ntsamp;
 
     // Write 24-byte header
 
@@ -87,29 +87,29 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
     *((int16_t *) (out+4)) = data_nbytes;               //  int16_t   data_nbytes
     *((uint16_t *) (out+6)) = fpga_counts_per_sample;   //  uint16_t  fpga_counts_per_sample
     *((uint64_t *) (out+8)) = fpga_count;               //  uint64_t  fpga_count
-    *((uint16_t *) (out+16)) = uint16_t(nbeam);         //  uint16_t  nbeam
-    *((uint16_t *) (out+18)) = uint16_t(nfreq);         //  uint16_t  nfreq
+    *((uint16_t *) (out+16)) = uint16_t(nbeams);        //  uint16_t  nbeams
+    *((uint16_t *) (out+18)) = uint16_t(nfreq_coarse);  //  uint16_t  nfreq_coarse
     *((uint16_t *) (out+20)) = uint16_t(nupfreq);       //  uint16_t  nupfreq
     *((uint16_t *) (out+22)) = uint16_t(ntsamp);        //  uint16_t  ntsamp
 
     // Write ibeam, ifreq arrays
-    // Byte count = (2*nbeam + 2*nfreq)
+    // Byte count = (2*nbeams + 2*nfreq_coarse)
 
-    memcpy(out + 24, ibeam, 2*nbeam);
-    memcpy(out + 24 + 2*nbeam, ifreq, 2*nfreq);
+    memcpy(out + 24, ibeam, 2*nbeams);
+    memcpy(out + 24 + 2*nbeams, ifreq, 2*nfreq_coarse);
 
     // Write offset, scale, data
-    // Byte count = (8*nbeam*nfreq) + (nbeam*nfreq*nupfreq*nt)
+    // Byte count = (8*nbeams*nfreq_coarse) + (nbeams*nfreq_coarse*nupfreq*nt)
 
     static_assert(sizeof(float)==4, "the logic below assumes sizeof(float)==4");
 
     // In this routine, a "row" is a (beam, freq_coarse) pair.
-    int nrows = nbeam * nfreq;
+    int nrows = nbeams * nfreq_coarse;
     int rowlen = nupfreq * ntsamp;
 
-    float *scale0 = (float *) (out + 24 + 2*nbeam + 2*nfreq);
-    float *offset0 = (float *) (out + 24 + 2*nbeam + 2*nfreq + 4*nrows);
-    uint8_t *data0 = out + 24 + 2*nbeam + 2*nfreq + 8*nrows;
+    float *scale0 = (float *) (out + 24 + 2*nbeams + 2*nfreq_coarse);
+    float *offset0 = (float *) (out + 24 + 2*nbeams + 2*nfreq_coarse + 4*nrows);
+    uint8_t *data0 = out + 24 + 2*nbeams + 2*nfreq_coarse + 8*nrows;
 
     for (int irow = 0; irow < nrows; irow++)
 	encode_packet_row(rowlen, scale0+irow, offset0+irow, data0 + irow*rowlen, intensity + irow*rowlen, mask + irow*rowlen);
@@ -118,74 +118,52 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 
 // -------------------------------------------------------------------------------------------------
 //
-// Helper functions for intensity_network_ostream constructor
-
-
-inline vector<uint16_t> _init_ivec(const vector<int> &v, const string &objname)
-{
-    if (v.size() == 0)
-	throw runtime_error("intensity_network_ostream constructor: " + objname + " index array is empty");	
-    if (v.size() >= 65536)
-	throw runtime_error("intensity_network_ostream constructor: " + objname + " index array length is >= 2^16?!");
-
-    int nelts = v.size();
-    vector<uint16_t> ret(nelts);
-
-    for (int i = 0; i < nelts; i++) {
-	if ((v[i] < 0) || (v[i] >= 65536))
-	    throw runtime_error("intensity_network_ostream constructor: " + objname + " indices must be between 0 and 2^16");
-	ret[i] = uint16_t(v[i]);
-    }
-
-    return ret;
-}
-
-
-// -------------------------------------------------------------------------------------------------
-//
 // intensity_network_ostream
 
     
-intensity_network_ostream::intensity_network_ostream(const std::string &dstname_, const std::vector<int> &ibeam_, 
-						     const std::vector<int> &ifreq_chunk_, int nupfreq_, int nt_per_chunk_,
-						     int nfreq_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
+intensity_network_ostream::intensity_network_ostream(const std::string &dstname_, const std::vector<int> &beam_ids_, 
+						     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
+						     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
 						     float wt_cutoff_, double target_gbps_) :
     dstname(dstname_),
-    nbeam(ibeam_.size()),
+    nbeams(beam_ids_.size()),
+    nfreq_coarse_per_chunk(coarse_freq_ids_.size()),
+    nfreq_coarse_per_packet(nfreq_coarse_per_packet_),
     nupfreq(nupfreq_),
-    nfreq_per_chunk(ifreq_chunk_.size()),
-    nfreq_per_packet(nfreq_per_packet_),
     nt_per_chunk(nt_per_chunk_),
     nt_per_packet(nt_per_packet_),
     fpga_counts_per_sample(fpga_counts_per_sample_),
+    nbytes_per_packet(packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet)),
+    npackets_per_chunk((nfreq_coarse_per_chunk / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet)),
+    nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
     wt_cutoff(wt_cutoff_),
     target_gbps(target_gbps_),
-    nbytes_per_packet(packet_size(nbeam, nfreq_per_packet, nupfreq, nt_per_packet)),
-    npackets_per_chunk((nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet)),
-    nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
-    ibeam(_init_ivec(ibeam_,"beam")),
-    ifreq_chunk(_init_ivec(ifreq_chunk_,"freq"))
+    beam_ids(beam_ids_),
+    coarse_freq_ids(coarse_freq_ids_)
 {
     // Tons of argument checking.
-    // The { nbeam, ibeam, nfreq_per_chunk, ifreq_chunk } args have already been checked in _init_ivec().
 
-    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq");
-    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample");
+    if ((beam_ids.size() == 0) || (beam_ids.size() >= 65536))
+	throw runtime_error("chime intensity_network_ostream constructor: beam_ids vector is empty or too large");
 
-    if (nfreq_per_packet <= 0)
+    if ((coarse_freq_ids.size() == 0) || (coarse_freq_ids.size() >= 65536))
+	throw runtime_error("chime intensity_network_ostream constructor: coarse_freq_ids vector is empty or too large");
+    if (nfreq_coarse_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_packet > 0");
-    if (nfreq_per_chunk % nfreq_per_packet)
+    if (nfreq_coarse_per_chunk % nfreq_coarse_per_packet != 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_chunk to be a multiple of nfreq_per_packet");
 
     if (nt_per_chunk <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk > 0");
     if (nt_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_packet > 0");
-    if (nt_per_chunk % nt_per_packet)
+    if (nt_per_chunk % nt_per_packet != 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk to be a multiple of nt_per_packet");
 
+    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq");
+    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample");
     if (wt_cutoff < 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be >= 0.0");
     if (target_gbps < 0.0)
@@ -193,6 +171,22 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
 
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
+
+    for (unsigned int i = 0; i < beam_ids.size(); i++) {
+	if ((beam_ids[i] < 0) || (beam_ids[i] > constants::max_allowed_beam_id))
+	    throw runtime_error("intensity_network_ostream constructor: bad beam_id");
+	for (unsigned int j = 0; j < i; j++)
+	    if (beam_ids[i] == beam_ids[j])
+		throw runtime_error("intensity_network_ostream constructor: duplicate beam_id");
+    }
+
+    for (unsigned int i = 0; i < coarse_freq_ids.size(); i++) {
+	if ((coarse_freq_ids[i] < 0) || (coarse_freq_ids[i] >= constants::nfreq_coarse))
+	    throw runtime_error("intensity_network_ostream constructor: bad coarse_freq_id");
+	for (unsigned int j = 0; j < i; j++)
+	    if (coarse_freq_ids[i] == coarse_freq_ids[j])
+		throw runtime_error("intensity_network_ostream constructor: duplicate coarse_freq_id");
+    }
 
     // Parse dstname: expect string of the form HOSTNAME[:PORT]
 
@@ -212,6 +206,16 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
 	this->hostname = dstname.substr(0,i);
     }
 
+    // Remaining initializations (except socket, which is initialized in intensity_network_ostream::_open_socket())
+
+    this->beam_ids_16bit.resize(nbeams, 0);
+    for (int i = 0; i < nbeams; i++)
+	beam_ids_16bit[i] = uint16_t(beam_ids[i]);
+
+    this->coarse_freq_ids_16bit.resize(nfreq_coarse_per_chunk, 0);
+    for (int i = 0; i < nfreq_coarse_per_chunk; i++)
+	coarse_freq_ids_16bit[i] = uint16_t(coarse_freq_ids[i]);
+    
     xpthread_mutex_init(&this->state_lock);
     xpthread_cond_init(&this->cond_state_changed);
 
@@ -219,8 +223,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
     string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, npackets_per_chunk * nbytes_per_packet, dropmsg);
     
-    // Allocate encoding buffers
-    int ndata = nbeam * nfreq_per_packet * nupfreq * nt_per_packet;
+    int ndata = nbeams * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
     this->tmp_intensity_vec.resize(ndata, 0.0);
     this->tmp_mask_vec.resize(ndata, 0.0);
     this->tmp_packet_list = ringbuf->allocate_packet_list();
@@ -274,7 +277,7 @@ void intensity_network_ostream::_open_socket()
 }
 
 
-// The 'intensity' and 'weights' arrays have shapes (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk)
+// The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
 void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count,  bool is_blocking)
 {
     if (fpga_count % fpga_counts_per_sample)
@@ -282,12 +285,12 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
     if (tmp_packet_list.curr_npackets > 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): internal error: tmp_packet_list nonempty?!");
 
-    // Pointers to contiguous arrays of shape (nbeam, nfreq_per_packet, nupfreq, nt_per_packet)
+    // Pointers to contiguous arrays of shape (nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet)
     float *tmp_intensity = &tmp_intensity_vec[0];
     float *tmp_mask = &tmp_mask_vec[0];
 
     // The number of packets per chunk is (nf_outer * nt_outer)
-    int nf_outer = nfreq_per_chunk / nfreq_per_packet;
+    int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
     int nt_outer = nt_per_chunk / nt_per_packet;
 
     // Outer loop over packets
@@ -297,17 +300,17 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	    // Copy input data into the { tmp_intensity, tmp_mask } arrays,
 	    // in order to "de-stride" and apply the wt_cutoff.
 	    
-	    for (int ibeam = 0; ibeam < nbeam; ibeam++) {
-		for (int if_inner = 0; if_inner < nfreq_per_packet; if_inner++) {
+	    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+		for (int if_inner = 0; if_inner < nfreq_coarse_per_packet; if_inner++) {
 		    for (int iupfreq = 0; iupfreq < nupfreq; iupfreq++) {
 			// Row offset in 'tmp_intensity' and 'tmp_mask' arrays
-			int idst = ibeam * nfreq_per_packet * nupfreq * nt_per_packet;
+			int idst = ibeam * nfreq_coarse_per_packet * nupfreq * nt_per_packet;
 			idst += if_inner * nupfreq * nt_per_packet;
 			idst += iupfreq * nt_per_packet;
 
 			// Row offset in 'intensity' and 'weights' input arrays
-			int isrc = ibeam * nfreq_per_chunk * nupfreq * stride;
-			isrc += (if_outer * nfreq_per_packet + if_inner) * nupfreq * stride;
+			int isrc = ibeam * nfreq_coarse_per_chunk * nupfreq * stride;
+			isrc += (if_outer * nfreq_coarse_per_packet + if_inner) * nupfreq * stride;
 			isrc += iupfreq * stride;
 			isrc += it_outer * nt_per_packet;
 
@@ -320,11 +323,12 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 		}
 	    }
 
-	    encode_packet(nbeam, nfreq_per_packet, nupfreq, nt_per_packet,
+	    encode_packet(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet,
 			  fpga_counts_per_sample, 
 			  fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample,
 			  tmp_packet_list.data_end,                              // output buffer for encoding
-			  &ibeam[0], &ifreq_chunk[if_outer * nfreq_per_packet],  // ibeam, ifreq arrays
+			  &beam_ids_16bit[0],
+			  &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet],
 			  tmp_intensity, tmp_mask);                              // input buffers for encoding
 
 	    tmp_packet_list.add_packet(nbytes_per_packet);
@@ -356,14 +360,14 @@ void intensity_network_ostream::end_stream(bool join_network_thread)
 
 
 // static member function (de facto constructor)
-auto intensity_network_ostream::make(const std::string &dstname, const std::vector<int> &ibeam_, 
-				     const std::vector<int> &ifreq_chunk_, int nupfreq_, int nt_per_chunk_,
-				     int nfreq_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
+auto intensity_network_ostream::make(const std::string &dstname_, const std::vector<int> &beam_ids_, 
+				     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
+				     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
 				     float wt_cutoff_, double target_gbps_) 
     -> std::shared_ptr<intensity_network_ostream>
 {
-    auto p = new intensity_network_ostream(dstname, ibeam_, ifreq_chunk_, nupfreq_, 
-					   nt_per_chunk_, nfreq_per_packet_, nt_per_packet_, 
+    auto p = new intensity_network_ostream(dstname_, beam_ids_, coarse_freq_ids_, nupfreq_, 
+					   nt_per_chunk_, nfreq_coarse_per_packet_, nt_per_packet_, 
 					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
     
     shared_ptr<intensity_network_ostream> ret(p);
@@ -467,7 +471,7 @@ void intensity_network_ostream::network_thread_main()
     }
 
     // FIXME temporary hack.  For testing, it is convenient to have a way of ending the stream. 
-    // We make the rule that a packet with nbeam = nfreq = nupfreq = ntsamp = 0 means "end of stream".
+    // We make the rule that a packet with nbeams = nfreq_coarse = nupfreq = ntsamp = 0 means "end of stream".
     // Later this will be replaced by something better!  
     //
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
