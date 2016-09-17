@@ -391,7 +391,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	// Note that for some choices of unit_test_instance parameters, this can test the timeout logic.
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
-	    while (tp->consumer_tpos[i] + nt_assembler < chunk_t0)
+	    while (tp->consumer_tpos[i] + nt_assembler < uint64_t(chunk_t0))
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);
