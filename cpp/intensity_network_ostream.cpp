@@ -121,57 +121,6 @@ inline void encode_packet(int nbeam, int nfreq, int nupfreq, int ntsamp,
 // Helper functions for intensity_network_ostream constructor
 
 
-static int make_socket_from_dstname(string dstname)
-{
-    // Parse dstname: expect string of the form HOSTNAME[:PORT]
-
-    size_t i = dstname.find(":");
-    uint16_t port = constants::default_udp_port;
-
-    if (i != std::string::npos) {
-	string portstr = dstname.substr(i+1);
-	try {
-	    port = lexical_cast<uint16_t> (portstr);	    
-	} catch (...) {
-	    throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
-	}
-
-	// remove port number
-	dstname = dstname.substr(0,i);
-    }
-
-    struct sockaddr_in saddr;
-    memset(&saddr, 0, sizeof(saddr));
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(port);
-    
-    // FIXME need getaddrinfo() here
-    int err = inet_pton(AF_INET, dstname.c_str(), &saddr.sin_addr);
-    if (err == 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + dstname + "' to an IP address: general parse error");
-    if (err < 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + dstname + "' to an IP address: " + strerror(errno) + "general parse error");
-
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0)
-	throw runtime_error(string("ch_frb_io: couldn't create udp socket: ") + strerror(errno));
-
-    int socket_bufsize = constants::send_socket_bufsize;
-    err = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
-    if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
-    
-    // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
-
-    if (connect(sockfd, reinterpret_cast<struct sockaddr *> (&saddr), sizeof(saddr)) < 0) {
-	close(sockfd);
-	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + dstname + "': " + strerror(errno));
-    }
-
-    return sockfd;
-}
-
-
 inline vector<uint16_t> _init_ivec(const vector<int> &v, const string &objname)
 {
     if (v.size() == 0)
@@ -197,10 +146,11 @@ inline vector<uint16_t> _init_ivec(const vector<int> &v, const string &objname)
 // intensity_network_ostream
 
     
-intensity_network_ostream::intensity_network_ostream(const std::string &dstname, const std::vector<int> &ibeam_, 
+intensity_network_ostream::intensity_network_ostream(const std::string &dstname_, const std::vector<int> &ibeam_, 
 						     const std::vector<int> &ifreq_chunk_, int nupfreq_, int nt_per_chunk_,
 						     int nfreq_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
 						     float wt_cutoff_, double target_gbps_) :
+    dstname(dstname_),
     nbeam(ibeam_.size()),
     nupfreq(nupfreq_),
     nfreq_per_chunk(ifreq_chunk_.size()),
@@ -214,8 +164,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     npackets_per_chunk((nfreq_per_chunk / nfreq_per_packet) * (nt_per_chunk / nt_per_packet)),
     nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
     ibeam(_init_ivec(ibeam_,"beam")),
-    ifreq_chunk(_init_ivec(ifreq_chunk_,"freq")),
-    sockfd(make_socket_from_dstname(dstname))
+    ifreq_chunk(_init_ivec(ifreq_chunk_,"freq"))
 {
     // Tons of argument checking.
     // The { nbeam, ibeam, nfreq_per_chunk, ifreq_chunk } args have already been checked in _init_ivec().
@@ -245,6 +194,24 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
 
+    // Parse dstname: expect string of the form HOSTNAME[:PORT]
+
+    this->hostname = dstname;
+    this->udp_port = constants::default_udp_port;
+
+    size_t i = dstname.find(":");
+
+    if (i != std::string::npos) {
+	string portstr = dstname.substr(i+1);
+	try {
+	    this->udp_port = lexical_cast<uint16_t> (portstr);	    
+	} catch (...) {
+	    throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
+	}
+
+	this->hostname = dstname.substr(0,i);
+    }
+
     xpthread_mutex_init(&this->state_lock);
     xpthread_cond_init(&this->cond_state_changed);
 
@@ -262,9 +229,48 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname,
 
 intensity_network_ostream::~intensity_network_ostream()
 {
-    close(sockfd);
+    if (sockfd >= 0) {
+	close(sockfd);
+	sockfd = -1;
+    }
+
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
+}
+
+
+// Socket initialization factored to its own routine, rather than putting it in the constructor,
+// so that the socket will always be closed if an exception is thrown somewhere.
+void intensity_network_ostream::_open_socket()
+{
+    if (sockfd >= 0)
+	throw runtime_error("double call to intensity_network_ostream::_open_socket()");
+
+    struct sockaddr_in saddr;
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(this->udp_port);
+    
+    // FIXME need getaddrinfo() here
+    int err = inet_pton(AF_INET, this->hostname.c_str(), &saddr.sin_addr);
+    if (err == 0)
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: general parse error");
+    if (err < 0)
+	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: " + strerror(errno) + "general parse error");
+
+    this->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0)
+	throw runtime_error(string("ch_frb_io: couldn't create udp socket: ") + strerror(errno));
+
+    int socket_bufsize = constants::send_socket_bufsize;
+    err = setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &socket_bufsize, sizeof(socket_bufsize));
+    if (err < 0)
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
+    
+    // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
+
+    if (connect(sockfd, reinterpret_cast<struct sockaddr *> (&saddr), sizeof(saddr)) < 0)
+	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + dstname + "': " + strerror(errno));
 }
 
 
@@ -361,6 +367,8 @@ auto intensity_network_ostream::make(const std::string &dstname, const std::vect
 					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
     
     shared_ptr<intensity_network_ostream> ret(p);
+
+    ret->_open_socket();
 
     int err = pthread_create(&ret->network_thread, NULL, intensity_network_ostream::network_pthread_main, (void *) &ret);
     if (err < 0)

@@ -340,6 +340,7 @@ struct assembled_chunk : noncopyable {
 //  
 struct intensity_network_ostream : noncopyable {
 public:
+    const std::string dstname;
     const int nbeam;
     const int nupfreq;
     const int nfreq_per_chunk;
@@ -390,7 +391,10 @@ public:
     
 
 protected:
-    const int sockfd;
+    int sockfd = -1;
+
+    std::string hostname;
+    uint16_t udp_port = constants::default_udp_port;
 
     pthread_t network_thread;
     pthread_mutex_t state_lock;
@@ -414,6 +418,8 @@ protected:
 
     static void *network_pthread_main(void *opaque_args);
     void network_thread_main();
+
+    void _open_socket();
 };
 
 
