@@ -358,7 +358,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	}
     }
     else {
-	// If this is the first packet, need to initialize the expected_* fields, and start the assemblers.
+	// If this is the first packet, need to initialize the expected_* fields, and announce to the assemblers.
 	if (_unlikely(packet.fpga_counts_per_sample == 0)) {
 	    this->_tmp_counts.num_bad_packets = 1;
 	    return true;
@@ -367,9 +367,10 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	this->expected_nupfreq = packet.nupfreq;
 	this->expected_fpga_counts_per_sample = packet.fpga_counts_per_sample;
 	this->first_packet_received = true;
-	
+
+	// Announce first packet to assemblers.
 	for (int i = 0; i < nassemblers; i++)
-	    assemblers[i]->start_stream(expected_fpga_counts_per_sample, expected_nupfreq);
+	    assemblers[i]->_announce_first_packet(expected_fpga_counts_per_sample, expected_nupfreq);
     }
 
     // Note conversions to uint64_t, to prevent integer overflow

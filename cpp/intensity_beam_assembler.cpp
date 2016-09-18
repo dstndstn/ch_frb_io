@@ -60,36 +60,11 @@ intensity_beam_assembler::~intensity_beam_assembler()
 }
 
 
-// Called by network thread, upon receipt of first packet.
-// Advances assembler state from 'assembler_thread_started' to 'stream_started'
-void intensity_beam_assembler::start_stream(int fpga_counts_per_sample_, int nupfreq_)
+bool intensity_beam_assembler::wait_for_first_packet(int &fpga_counts_per_sample_, int &nupfreq_)
 {
     pthread_mutex_lock(&this->lock);
 
-    if (!assembler_thread_started) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::start_stream() was called, but no assembler thread");
-    }
-
-    if (stream_started) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::start_stream()");
-    }
-
-    this->fpga_counts_per_sample = fpga_counts_per_sample_;
-    this->nupfreq = nupfreq_;
-    this->stream_started = true;
-
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_mutex_unlock(&this->lock);
-}
-
-
-bool intensity_beam_assembler::wait_for_stream_params(int &fpga_counts_per_sample_, int &nupfreq_)
-{
-    pthread_mutex_lock(&this->lock);
-
-    while (!stream_started)
+    while (!first_packet_received)
 	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
 
     fpga_counts_per_sample_ = this->fpga_counts_per_sample;
@@ -108,7 +83,7 @@ void intensity_beam_assembler::assembler_thread_end()
     pthread_mutex_lock(&this->lock);
 
     // We set the whole chain of flags, to avoid confusion.
-    this->stream_started = true;
+    this->first_packet_received = true;
     this->assembler_thread_ended = true;
 
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
@@ -209,11 +184,35 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 // Routines called by network thread
 
 
+void intensity_beam_assembler::_announce_first_packet(int fpga_counts_per_sample_, int nupfreq_)
+{
+    pthread_mutex_lock(&this->lock);
+
+    if (!assembler_thread_started) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::_announce_first_packet() was called, but no assembler thread");
+    }
+
+    if (this->first_packet_received) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_announce_first_packet()");
+    }
+
+    this->fpga_counts_per_sample = fpga_counts_per_sample_;
+    this->nupfreq = nupfreq_;
+
+    this->first_packet_received = true;
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_mutex_unlock(&this->lock);
+}
+
+
 // advances state: stream_started -> stream_ended
 void intensity_beam_assembler::_end_stream()
 {
+    // FIXME comment on this
     pthread_mutex_lock(&this->lock);
-    this->stream_started = true;
+    this->first_packet_received = true;
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_mutex_unlock(&this->lock);
 
@@ -260,7 +259,7 @@ void intensity_beam_assembler::assembler_thread_main()
     this->assembler_thread_started = true;
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
 
-    while (!this->stream_started)
+    while (!this->first_packet_received)
 	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
 
     pthread_mutex_unlock(&this->lock);

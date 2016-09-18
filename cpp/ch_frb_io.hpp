@@ -456,11 +456,10 @@ public:
     //
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
-    bool wait_for_stream_params(int &fpga_counts_per_sample, int &nupfreq);
+    bool wait_for_first_packet(int &fpga_counts_per_sample, int &nupfreq);
     void join_assembler_thread();
 
     // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
-    void start_stream(int fpga_counts_per_sample, int nupfreq);
     bool put_unassembled_packets(udp_packet_list &packet_list);
 
     // Called by assembler thread.  
@@ -476,19 +475,22 @@ private:
     // The actual constructor is private, so it can be a helper function 
     // for intensity_beam_assembler::make(), but can't be called otherwise.
     intensity_beam_assembler(int beam_id, bool drops_allowed);
+    
+    friend class intensity_network_stream;
+
+    // Rotuines called by network thread
+    void _announce_first_packet(int fpga_counts_per_sample, int nupfreq);
+    void _end_stream();   // called by network thread on exit
 
     // Stream parameters.  These are not protected by the lock, but only get initialized after
-    // the 'stream_started' flag gets set, and this can only be checked with the lock held.
+    // the 'first_packet_received' flag gets set, and checking this flag does require the lock.
     int fpga_counts_per_sample = 0;
     int nupfreq = 0;
 
-    friend class intensity_network_stream;
-    void _end_stream();   // called by network thread, when exiting
+    pthread_t assembler_thread;
 
     // All state below is protected by a single lock (FIXME could be made more granular)
     pthread_mutex_t lock;
-
-    pthread_t assembler_thread;
     
     //
     // Assembler state model
@@ -498,7 +500,7 @@ private:
     //   assembler_thread_ended: set by assembler thread, on exit
     //
     bool assembler_thread_started = false;
-    bool stream_started = false;
+    bool first_packet_received = false;
     bool assembler_thread_ended = false;
     bool assembler_thread_joined = false;
     pthread_cond_t cond_assembler_state_changed;
