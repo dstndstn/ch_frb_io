@@ -431,17 +431,6 @@ protected:
 // The packet input stream case is more complicated!
 
 
-//
-// An intensity_beam_assembler object is always backed by an assembler thread, running in the background.
-// An "upstream" thread must supply the assembler's input, by calling intensity_beam_assembler::put_unassembled_packets().
-// A "downstream" thread must fetch the assembler's output, by calling intensity_beam_assembler::get_assembled_packets().
-//
-// The assembler starts its shutdown process when intensity_beam_assembler::end_assembler() is called.  This call will
-// probably be made by the "upstream" thread when it reaches end-of-stream, but we don't need to assume this.  After
-// end_assembler() is called, any subsequent calls to put_unassembled_packets() will throw exceptions.  Calls to
-// get_assembled_packets() will succeed until all packets have been extracted, then this call will start returning
-// 'false' to indicate end-of-stream.
-//
 class intensity_beam_assembler : noncopyable {
 public:
     const int beam_id = -1;
@@ -458,16 +447,9 @@ public:
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
     bool wait_for_first_packet(int &fpga_counts_per_sample, int &nupfreq);
-
-    // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
-    bool put_unassembled_packets(udp_packet_list &packet_list);
-
-    // Called by assembler thread.  
-    void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
-    void assembler_thread_end();
-
-    // Called by "downstream" thread
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
+
+    void assembler_thread_end();
 
     ~intensity_beam_assembler();
 
@@ -479,7 +461,9 @@ private:
     friend class intensity_network_stream;
 
     // Rotuines called by network thread
+    // Note: _put_unassembled_packets() returns 'false' if assembler died unexpectedly.
     void _announce_first_packet(int fpga_counts_per_sample, int nupfreq);
+    bool _put_unassembled_packets(udp_packet_list &packet_list);
     void _end_stream();   // called by network thread on exit
     void _join_assembler_thread();
 
@@ -516,6 +500,8 @@ private:
 
     static void *assembler_pthread_main(void *opaque_arg);
     void assembler_thread_main();
+
+    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
 };
 
 

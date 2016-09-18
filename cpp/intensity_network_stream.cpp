@@ -308,11 +308,11 @@ void intensity_network_stream::network_thread_main()
     // If we get here, the stream is terminating, either because a special 'end of stream' packet
     // was received, or because another thread called end_stream().  We just flush all data to
     // the assemblers end exit.  (Note: I think it makes most sense to ignore the return value
-    // from put_unassembled_packets() here.)
+    // from _put_unassembled_packets() here.)
 
     for (int i = 0; i < nassemblers; i++)
 	if (assembler_packet_lists[i].curr_npackets > 0)
-	    assemblers[i]->put_unassembled_packets(assembler_packet_lists[i]);
+	    assemblers[i]->_put_unassembled_packets(assembler_packet_lists[i]);
 }
 
 
@@ -465,7 +465,7 @@ void intensity_network_stream::_send_packet_to_assembler(int assembler_ix, const
 
 void intensity_network_stream::_send_packet_list_to_assembler(int assembler_ix)
 {
-    bool alive = assemblers[assembler_ix]->put_unassembled_packets(assembler_packet_lists[assembler_ix]);
+    bool alive = assemblers[assembler_ix]->_put_unassembled_packets(assembler_packet_lists[assembler_ix]);
     if (!alive)
 	throw runtime_error("ch_frb_io: assembler thread died unexpectedly?!");
 }

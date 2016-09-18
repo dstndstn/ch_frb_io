@@ -95,38 +95,6 @@ void intensity_beam_assembler::assembler_thread_end()
 }
 
 
-bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
-{
-    bool is_blocking = false;
-    return this->unassembled_ringbuf->producer_put_packet_list(packet_list, is_blocking);
-}
-
-
-void intensity_beam_assembler::put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
-{
-    pthread_mutex_lock(&this->lock);
-
-    if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
-	pthread_mutex_unlock(&this->lock);
-	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, some packets will be dropped\n";
-	
-	if (!drops_allowed) {
-	    cerr << "ch_frb_io: assembler's 'drops_allowed' flag was set to false, this will be treated as an error\n";
-	    exit(1);
-	}
-
-	return;
-    }
-
-    int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
-    this->assembled_ringbuf[i] = chunk;
-    this->assembled_ringbuf_size++;
-
-    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
-    pthread_mutex_unlock(&this->lock);
-}
-
-
 bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &chunk)
 {
     pthread_mutex_lock(&this->lock);
@@ -183,6 +151,12 @@ void intensity_beam_assembler::_announce_first_packet(int fpga_counts_per_sample
     this->first_packet_received = true;
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_mutex_unlock(&this->lock);
+}
+
+
+bool intensity_beam_assembler::_put_unassembled_packets(udp_packet_list &packet_list)
+{
+    return this->unassembled_ringbuf->producer_put_packet_list(packet_list, false);   // is_blocking=false
 }
 
 
@@ -291,8 +265,8 @@ void intensity_beam_assembler::assembler_thread_main()
 	    if (!initialized)
 		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
 
-	    this->put_assembled_chunk(chunk0);
-	    this->put_assembled_chunk(chunk1);
+	    this->_put_assembled_chunk(chunk0);
+	    this->_put_assembled_chunk(chunk1);
 	    return;
 	}
 
@@ -328,7 +302,7 @@ void intensity_beam_assembler::assembler_thread_main()
 		// needed.  This is to avoid a situation where a single rogue packet timestamped
 		// in the far future effectively kills the L1 node.
 		//
-		this->put_assembled_chunk(chunk0);
+		this->_put_assembled_chunk(chunk0);
 		assembler_it0 += constants::nt_per_assembled_chunk;
 
 		chunk0 = chunk1;
@@ -355,6 +329,29 @@ void intensity_beam_assembler::assembler_thread_main()
 	    throw runtime_error("DOH");
 	}
     }
+}
+
+
+void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
+{
+    pthread_mutex_lock(&this->lock);
+
+    if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
+	pthread_mutex_unlock(&this->lock);
+	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
+	
+	if (!drops_allowed)
+	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and assembler's 'drops_allowed' flag was set to false");
+
+	return;
+    }
+
+    int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
+    this->assembled_ringbuf[i] = chunk;
+    this->assembled_ringbuf_size++;
+
+    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
+    pthread_mutex_unlock(&this->lock);
 }
 
 
