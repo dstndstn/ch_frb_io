@@ -76,9 +76,12 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     int max_data_nbytes = ch_frb_io::constants::max_output_udp_packet_size - header_nbytes;
     int max_nt_per_packet = min(512, max_data_nbytes / (nbeams * nfreq_coarse_per_packet * nupfreq));
     int min_nt_per_packet = max_nt_per_packet/2 + 1;
-
     assert(max_nt_per_packet >= 3);
-    this->nt_per_packet = randint(rng, min_nt_per_packet, max_nt_per_packet + 1);
+
+    // We now require that nt_per_packet is a power of 2
+    do {
+	this->nt_per_packet = randint(rng, min_nt_per_packet, max_nt_per_packet + 1);
+    } while (!is_power_of_two(nt_per_packet));
     
     // Assign nt_per_chunk.  Each chunk should be no more than 512 samples.
     this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);
@@ -90,8 +93,9 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     int max_nchunks = min(1024, (1<<30) / chunk_nbytes);
     this->nt_tot = nt_per_chunk * randint(rng, 1, max_nchunks+1);
 
+    // We now require that initial_t0 is a multiple of nt_per_packet.
+    this->initial_t0 = randint(rng, 0, 4097) * nt_per_packet;
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
-    this->initial_t0 = randint(rng, 0, 4097);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
 #if 0
