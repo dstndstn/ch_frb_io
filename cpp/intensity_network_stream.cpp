@@ -13,13 +13,23 @@ namespace ch_frb_io {
 
 using event_counts = intensity_network_stream::event_counts;
 
+void event_counts::clear()
+{
+    this->num_bad_packets = 0;
+    this->num_good_packets = 0;
+    this->num_beam_id_mismatches = 0;
+    this->num_first_packet_mismatches = 0;
+}
+
 event_counts &event_counts::operator+=(const event_counts &x)
 {
     this->num_bad_packets += x.num_bad_packets;
     this->num_good_packets += x.num_good_packets;
     this->num_beam_id_mismatches += x.num_beam_id_mismatches;
+    this->num_first_packet_mismatches += x.num_first_packet_mismatches;
     return *this;
 }
+
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -115,7 +125,7 @@ void intensity_network_stream::_open_socket()
 
     err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
     if (err < 0)
-	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIME0) failed: ") + strerror(errno));
+	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIMEO) failed: ") + strerror(errno));
 }
 
 
@@ -257,21 +267,21 @@ void intensity_network_stream::network_thread_main()
 
     for (;;) {
 	this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
+	this->_tmp_counts.clear();
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	int packet_nbytes = read(sockfd, &packet[0], constants::max_input_udp_packet_size + 1);
 
-	// _process_packet() returns 'false' if the stream should end.  (This happens if a special
-	// "short packet" is received.)  It also sets _tmp_counts (see below).
-	//
-	// Note that if read() fails or times out, then 'packet_nbytes' will be negative, but
-	// _process_packet() correctly handles this case.  Because things are organized this way,
-	// the call to _process_packet() should immediately follow the read() system call.
-
-	bool alive = this->_process_packet(&packet[0], packet_nbytes);
-
-	if (!alive)
+	if (packet_nbytes < 0) {
+	    if ((errno != EAGAIN) && (errno != ETIMEDOUT))
+		throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
+	    // If we get here, the read() call timed out.  just fall through...
+	}
+	else if (!this->_process_packet(&packet[0], packet_nbytes)) {
+	    // _process_packet() returns 'false' if the stream should end.
+	    // (This happens if a special "short" packet is received.)
 	    break;
+	}
 
 	// The purpose of the assembler timeouts is to make sure that data gets flushed to the
 	// assembler threads regularly, even if the packet stream stalls.
@@ -284,7 +294,6 @@ void intensity_network_stream::network_thread_main()
 	// for as little time as possible.
 	
 	pthread_mutex_lock(&this->lock);
-
 	this->curr_counts += _tmp_counts;
 
 	if (this->stream_ended) {
@@ -308,23 +317,14 @@ void intensity_network_stream::network_thread_main()
 
 
 // This helper routine is called by network_thread_main() to process a new packet.
+//
 // It returns 'false' if the network thread should exit (this happens if a special
-// "short packet" is received).  It also sets _tmp_counts.
-// 
-// Note: 'packet_nbytes' can be negative, if the read() call failed or timed out.
+// "short packet" is received).  It also sets this->_tmp_counts.  Note that _tmp_counts 
+// is cleared before calling _process_packet().
 
 bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int packet_nbytes)
 {
     intensity_packet packet;
-
-    // Sets _tmp_counts to zero
-    this->_tmp_counts = event_counts();
-
-    if (packet_nbytes < 0) {
-	if ((errno == EAGAIN) || (errno == ETIMEDOUT))
-	    return true;   // read() timed out
-	throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
-    }
 
     if (!packet.read(packet_data, packet_nbytes)) {
 	this->_tmp_counts.num_bad_packets = 1;
@@ -333,16 +333,67 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 
     // If we receive a special "short" packet (length 24), it indicates end-of-stream.
     // FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-    if (packet.data_nbytes == 0)
+    if (_unlikely(packet.data_nbytes == 0))
 	return false;
 
-    this->_tmp_counts.num_good_packets = 1;
+    // The following checks are not included in intensity_packet::read().
 
-    if (!this->assemblers_started) {
-	for (int i = 0; i < nassemblers; i++)
-	    assemblers[i]->start_stream(packet.fpga_counts_per_sample, packet.nupfreq);
-	this->assemblers_started = true;
+    if (!is_power_of_two(packet.ntsamp)) {
+	this->_tmp_counts.num_bad_packets = 1;
+	return true;
     }
+
+    for (int i = 0; i < packet.nfreq_coarse; i++) {
+	if (_unlikely(packet.freq_ids[i] >= constants::nfreq_coarse)) {
+	    this->_tmp_counts.num_bad_packets = 1;
+	    return true;
+	}
+    }
+
+    if (!this->first_packet_received) {
+	// If this is not the first packet, check for mismatch with expected_* fields
+	if (_unlikely((packet.nupfreq != expected_nupfreq) || (packet.fpga_counts_per_sample != expected_fpga_counts_per_sample))) {
+	    this->_tmp_counts.num_bad_packets = 1;
+	    return true;
+	}
+    }
+    else {
+	// If this is the first packet, need to initialize the expected_* fields, and start the assemblers.
+	if (_unlikely(packet.fpga_counts_per_sample == 0)) {
+	    this->_tmp_counts.num_bad_packets = 1;
+	    return true;
+	}
+
+	this->expected_nupfreq = packet.nupfreq;
+	this->expected_fpga_counts_per_sample = packet.fpga_counts_per_sample;
+	this->first_packet_received = true;
+	
+	for (int i = 0; i < nassemblers; i++)
+	    assemblers[i]->start_stream(expected_fpga_counts_per_sample, expected_nupfreq);
+    }
+
+    // Note conversions to uint64_t, to prevent integer overflow
+    uint64_t fpga_counts_per_packet = uint64_t(packet.fpga_counts_per_sample) * uint64_t(packet.ntsamp);
+    if (_unlikely(packet.fpga_count % fpga_counts_per_packet != 0)) {
+	this->_tmp_counts.num_bad_packets = 1;
+	return true;
+    }
+
+    // All checks passed.  Packet is declared "good" here.  
+    //
+    // The following checks have been performed, either in this routine or in intensity_packet::read().
+    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
+    //     and not large enough to lead to integer overflows
+    //   - packet and data byte counts are correct
+    //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
+    //   - ntsamp is a power of two
+    //   - fpga_counts_per_sample is > 0
+    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+    //
+    // These checks are assumed by the assembler thread, and mostly aren't rechecked, 
+    // so it's important that they're done here!
+
+    this->_tmp_counts.num_good_packets = 1;
 
     int nbeams = packet.nbeams;
     int nfreq_coarse = packet.nfreq_coarse;
