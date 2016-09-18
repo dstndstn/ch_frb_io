@@ -533,15 +533,16 @@ public:
     void end_stream();        // asynchronously stops stream
     void join_all_threads();  // should only be called once, does not end stream
 
-    // Note: get_event_counts() can be called at any time.
-
     struct event_counts {
 	ssize_t num_bad_packets = 0;
 	ssize_t num_good_packets = 0;
-	ssize_t num_beam_id_mismatches = 0;
+	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler threads
+	ssize_t num_first_packet_mismatches = 0;    // packet is well-formed, but (nupfreq,fpga_counts_per_sample) don't match first packet recevied
 	event_counts &operator+=(const event_counts &x);
+	void clear();
     };
 
+    // Note: get_event_counts() can be called at any time.
     event_counts get_event_counts() const;
 
     ~intensity_network_stream();
@@ -556,8 +557,13 @@ private:
     std::vector<udp_packet_list> assembler_packet_lists;
     std::vector<int64_t> assembler_timestamps;
     std::vector<int> assembler_beam_ids;
-    bool assemblers_started = false;
-
+    
+    // When the first packet is received, the network thread initializes these fields,
+    // and calls each assembler's start_stream() method.
+    uint16_t expected_nupfreq;
+    uint16_t expected_fpga_counts_per_sample;
+    bool first_packet_received = false;
+    
     // All timestamps are in microseconds, relative to the time when we started listening on the socket.
     int64_t curr_timestamp = 0;
 

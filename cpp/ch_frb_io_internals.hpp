@@ -61,7 +61,7 @@ struct intensity_packet {
     //
     // Includes the following checks:
     //   - protocol version == 1
-    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to overflows
+    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to integer overflows
     //   - packet and data byte counts are correct
     //
     // Does not check the following:
