@@ -350,7 +350,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	}
     }
 
-    if (!this->first_packet_received) {
+    if (this->first_packet_received) {
 	// If this is not the first packet, check for mismatch with expected_* fields
 	if (_unlikely((packet.nupfreq != expected_nupfreq) || (packet.fpga_counts_per_sample != expected_fpga_counts_per_sample))) {
 	    this->_tmp_counts.num_bad_packets = 1;
