@@ -479,6 +479,11 @@ private:
     // for intensity_beam_assembler::make(), but can't be called otherwise.
     intensity_beam_assembler(int beam_id, bool drops_allowed);
 
+    // Stream parameters.  These are not protected by the lock, but only get initialized after
+    // the 'stream_started' flag gets set, and this can only be checked with the lock held.
+    int fpga_counts_per_sample = 0;
+    int nupfreq = 0;
+
     // All state below is protected by a single lock (FIXME could be made more granular)
     pthread_mutex_t lock;
 
@@ -497,10 +502,6 @@ private:
     bool assembler_thread_ended = false;
     bool assembler_thread_joined = false;
     pthread_cond_t cond_assembler_state_changed;
-
-    // Stream parameters 
-    int fpga_counts_per_sample = 0;
-    int nupfreq = 0;
 
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
