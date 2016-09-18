@@ -83,6 +83,8 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk > 0");
     if (nt_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_packet > 0");
+    if (!is_power_of_two(nt_per_packet))
+	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_packet to be a power of two");
     if (nt_per_chunk % nt_per_packet != 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk to be a multiple of nt_per_packet");
 
@@ -202,8 +204,8 @@ void intensity_network_ostream::_open_socket()
 // The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
 void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking)
 {
-    if (fpga_count % fpga_counts_per_sample)
-	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by fpga_counts_per_sample");
+    if (fpga_count % (fpga_counts_per_sample * nt_per_packet) != 0)
+	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
     if (tmp_packet_list.curr_npackets > 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): internal error: tmp_packet_list nonempty?!");
 
