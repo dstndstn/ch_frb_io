@@ -375,7 +375,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 
 	// Announce first packet to assemblers.
 	for (int i = 0; i < nassemblers; i++)
-	    assemblers[i]->_announce_first_packet(expected_nupfreq, expected_nt_per_packet, expected_fpga_counts_per_sample);
+	    assemblers[i]->_announce_first_packet(packet);
     }
 
     // Note conversions to uint64_t, to prevent integer overflow

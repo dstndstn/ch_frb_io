@@ -316,6 +316,7 @@ struct assembled_chunk : noncopyable {
     // Time index of first sample in chunk.
     // The FPGA count of the first sample is chunk_t0 * fpga_counts_per_sample.
     uint64_t chunk_t0;
+    uint64_t chunk_t1;
 
     // Arrays of shape (constants::nfreq_coarse, nupfreq, nt_per_chunk)
     float *intensity = nullptr;
@@ -460,7 +461,7 @@ private:
 
     // Rotuines called by network thread
     // Note: _put_unassembled_packets() returns 'false' if assembler died unexpectedly.
-    void _announce_first_packet(int nupfreq, int nt_per_packet, int fpga_counts_per_sample);
+    void _announce_first_packet(const intensity_packet &packet);
     bool _put_unassembled_packets(udp_packet_list &packet_list);
     void _end_stream();   // called by network thread on exit
     void _join_assembler_thread();
@@ -470,6 +471,10 @@ private:
     int nupfreq = 0;
     int nt_per_packet = 0;
     int fpga_counts_per_sample = 0;
+
+    // These are also not protected by the lock, but are only accessed by the network thread
+    std::shared_ptr<assembled_chunk> active_chunk0;
+    std::shared_ptr<assembled_chunk> active_chunk1;
 
     pthread_t assembler_thread;
 

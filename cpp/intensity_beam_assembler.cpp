@@ -114,8 +114,14 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 // Routines called by network thread
 
 
-void intensity_beam_assembler::_announce_first_packet(int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_)
+void intensity_beam_assembler::_announce_first_packet(const intensity_packet &packet)
 {
+    uint64_t packet_it0 = packet.fpga_count / uint64_t(packet.fpga_counts_per_sample);
+    uint64_t assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
+
+    auto chunk0 = make_shared<assembled_chunk> (this->beam_id, packet.nupfreq, packet.fpga_counts_per_sample, assembler_it0);
+    auto chunk1 = make_shared<assembled_chunk> (this->beam_id, packet.nupfreq, packet.fpga_counts_per_sample, chunk0->chunk_t1);
+
     pthread_mutex_lock(&this->lock);
 
     if (!assembler_thread_started) {
@@ -128,9 +134,11 @@ void intensity_beam_assembler::_announce_first_packet(int nupfreq_, int nt_per_p
 	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_announce_first_packet()");
     }
 
-    this->nupfreq = nupfreq_;
-    this->nt_per_packet = nt_per_packet_;
-    this->fpga_counts_per_sample = fpga_counts_per_sample_;
+    this->nupfreq = packet.nupfreq;
+    this->nt_per_packet = packet.ntsamp;
+    this->fpga_counts_per_sample = packet.fpga_counts_per_sample;
+    this->active_chunk0 = chunk0;
+    this->active_chunk1 = chunk1;
 
     this->first_packet_received = true;
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
@@ -218,25 +226,14 @@ void intensity_beam_assembler::assembler_thread_main()
     udp_packet_list unassembled_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     intensity_packet packet;
 
-    // The 'initialized' flag refers to 'assembler_it0', 'chunk0_*', and 'chunk1_*'
-    bool initialized = false;
-    uint64_t assembler_it0 = 0;
-
-    std::shared_ptr<assembled_chunk> chunk0;
-    std::shared_ptr<assembled_chunk> chunk1;
-
     // Outer loop over unassembled packets
 
     for (;;) {
 	bool alive = unassembled_ringbuf->consumer_get_packet_list(unassembled_packet_list);
 
 	if (!alive) {
-	    // FIXME can this be improved?
-	    if (!initialized)
-		throw runtime_error("ch_frb_io: assembler thread failed to receive any packets from network thread");
-
-	    this->_put_assembled_chunk(chunk0);
-	    this->_put_assembled_chunk(chunk1);
+	    this->_put_assembled_chunk(active_chunk0);
+	    this->_put_assembled_chunk(active_chunk1);
 	    return;
 	}
 
@@ -252,16 +249,7 @@ void intensity_beam_assembler::assembler_thread_main()
 	    uint64_t packet_it0 = packet.fpga_count / fpga_counts_per_sample;
 	    uint64_t packet_it1 = packet_it0 + packet.ntsamp;
 
-	    if (!initialized) {
-		// round down to multiple of constants::nt_per_assembled_chunk
-		assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
-		initialized = true;
-
-		chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0);
-		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
-	    }
-
-	    if (packet_it1 > assembler_it0 + 2 * constants::nt_per_assembled_chunk) {
+	    if (packet_it1 > active_chunk1->chunk_t1) {
 		//
 		// If we receive a packet whose timestamps extend past the range of our current
 		// assembly buffer, then we advance the buffer and send an assembled_chunk to the
@@ -272,28 +260,26 @@ void intensity_beam_assembler::assembler_thread_main()
 		// needed.  This is to avoid a situation where a single rogue packet timestamped
 		// in the far future effectively kills the L1 node.
 		//
-		this->_put_assembled_chunk(chunk0);
-		assembler_it0 += constants::nt_per_assembled_chunk;
-
-		chunk0 = chunk1;
-		chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, assembler_it0 + constants::nt_per_assembled_chunk);
+		this->_put_assembled_chunk(active_chunk0);
+		active_chunk0 = active_chunk1;
+		active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, active_chunk1->chunk_t1);
 	    }
 
-	    if ((packet_it0 >= assembler_it0) && (packet_it1 <= assembler_it0 + constants::nt_per_assembled_chunk)) {
-		// packet is a subset of chunk0
-		int offset = packet_it0 - assembler_it0;
-		packet.decode(chunk0->intensity + offset, chunk0->weights + offset, constants::nt_per_assembled_chunk);
+	    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1)) {
+		// packet is a subset of active_chunk0
+		int offset = packet_it0 - active_chunk0->chunk_t0;
+		packet.decode(active_chunk0->intensity + offset, active_chunk0->weights + offset, constants::nt_per_assembled_chunk);
 		continue;
 	    }
 
-	    if ((packet_it0 >= assembler_it0 + constants::nt_per_assembled_chunk) && (packet_it1 <= assembler_it0 + 2 * constants::nt_per_assembled_chunk)) {
-		// packet is a subset of chunk1
-		int offset = packet_it0 - assembler_it0 - constants::nt_per_assembled_chunk;
-		packet.decode(chunk1->intensity + offset, chunk1->weights + offset, constants::nt_per_assembled_chunk);
+	    if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1)) {
+		// packet is a subset of active_chunk1
+		int offset = packet_it0 - active_chunk1->chunk_t0;
+		packet.decode(active_chunk1->intensity + offset, active_chunk1->weights + offset, constants::nt_per_assembled_chunk);
 		continue;
 	    }
 
-	    if ((packet_it1 <= assembler_it0) || (packet_it0 >= assembler_it0 + 2 * constants::nt_per_assembled_chunk))
+	    if ((packet_it1 <= active_chunk0->chunk_t0) || (packet_it0 >= active_chunk1->chunk_t1))
 		continue;
 
 	    throw runtime_error("DOH");

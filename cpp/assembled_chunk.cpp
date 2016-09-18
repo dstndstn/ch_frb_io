@@ -10,7 +10,11 @@ namespace ch_frb_io {
 
 
 assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int fpga_counts_per_sample_, uint64_t chunk_t0_)
-    : beam_id(beam_id_), nupfreq(nupfreq_), fpga_counts_per_sample(fpga_counts_per_sample_), chunk_t0(chunk_t0_)
+    : beam_id(beam_id_), 
+      nupfreq(nupfreq_), 
+      fpga_counts_per_sample(fpga_counts_per_sample_), 
+      chunk_t0(chunk_t0_),
+      chunk_t1(chunk_t0_ + constants::nt_per_assembled_chunk)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad beam_id argument");
