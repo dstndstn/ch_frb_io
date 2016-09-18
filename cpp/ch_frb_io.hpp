@@ -309,15 +309,14 @@ struct udp_packet_ringbuf : noncopyable {
 struct assembled_chunk : noncopyable {
     // Stream parameters
     int beam_id;
-    int nupfreq;   // upsampling factor (number of channels is 1024 * nupfreq)
+    int nupfreq;
     int fpga_counts_per_sample;
 
     // Time index of first sample in chunk.
     // The FPGA count of the first sample is chunk_t0 * fpga_counts_per_sample.
     uint64_t chunk_t0;
 
-    // Arrays of shape (1024 * nupfreq, nt_per_chunk)
-    // FIXME hardcoded 1024 here
+    // Arrays of shape (constants::nfreq_coarse, nupfreq, nt_per_chunk)
     float *intensity = nullptr;
     float *weights = nullptr;
 

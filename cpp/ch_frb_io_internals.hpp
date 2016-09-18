@@ -75,6 +75,7 @@ struct intensity_packet {
     // Returns packet_nbytes (not data_nbytes)
     int write(uint8_t *dst) const;
 
+    void decode(float *intensity, float *weights, int stride) const;
 
     // The semantics of encode() aren't particularly intuitive, so we document it carefully here!
     //

@@ -67,6 +67,34 @@ int intensity_packet::write(uint8_t *dst) const
 }
 
 
+void intensity_packet::decode(float *intensity, float *weights, int stride) const
+{
+    if (_unlikely(this->nbeams != 1))
+	throw runtime_error("ch_frb_io: internal error: intensity_packet::decode() was called with nbeams != 1");
+
+    int nf = this->nfreq_coarse;
+    int nu = this->nupfreq;
+    int nt = this->ntsamp;
+
+    for (int f = 0; f < nf; f++) {
+	float scale = this->scales[f];
+	float offset = this->offsets[f];
+
+	float *sub_intensity = intensity + this->freq_ids[f] * nu * stride;
+	float *sub_weights = weights + this->freq_ids[f] * nu * stride;
+	const uint8_t *sub_data = this->data + f * nu * nt;
+
+	for (int u = 0; u < nu; u++) {
+	    for (int t = 0; t < nt; t++) {
+		float x = float(sub_data[u*nt+t]);
+		sub_intensity[u*stride+t] = scale*x + offset;
+		sub_weights[u*stride+t] = ((x*(255.-x)) > 0.5) ? 1.0 : 0.0;  // FIXME ugh
+	    }
+	}	    
+    }
+}
+
+
 void intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
 {
     int nb = this->nbeams;
