@@ -77,24 +77,6 @@ bool intensity_beam_assembler::wait_for_first_packet(int &fpga_counts_per_sample
 }
 
 
-// advances state: stream_ended -> assembler_ended
-void intensity_beam_assembler::assembler_thread_end()
-{
-    pthread_mutex_lock(&this->lock);
-
-    // We set the whole chain of flags, to avoid confusion.
-    this->first_packet_received = true;
-    this->assembler_thread_ended = true;
-
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
-    pthread_mutex_unlock(&this->lock);
-
-    // Probably redundant but playing it safe...
-    this->unassembled_ringbuf->end_stream();
-}
-
-
 bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &chunk)
 {
     pthread_mutex_lock(&this->lock);
@@ -217,11 +199,11 @@ void *intensity_beam_assembler::assembler_pthread_main(void *opaque_arg)
     try {
 	assembler->assembler_thread_main();
     } catch (...) {
-	assembler->assembler_thread_end();
+	assembler->_assembler_thread_end();
 	throw;
     }
 
-    assembler->assembler_thread_end();
+    assembler->_assembler_thread_end();
 
     return NULL;
 }
@@ -229,21 +211,7 @@ void *intensity_beam_assembler::assembler_pthread_main(void *opaque_arg)
 
 void intensity_beam_assembler::assembler_thread_main()
 {
-    pthread_mutex_lock(&this->lock);
-
-    this->assembler_thread_started = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-
-    while (!this->first_packet_received)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
-
-    pthread_mutex_unlock(&this->lock);
-
-    // Sanity check stream params
-    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("intensity_beam_assembler: bad value of fpga_counts received from stream");
-    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("intensity_beam_assembler: bad value of nupfreq received from stream");
+    this->_assembler_thread_start();
 
     udp_packet_list unassembled_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     intensity_packet packet;
@@ -332,6 +300,27 @@ void intensity_beam_assembler::assembler_thread_main()
 }
 
 
+void intensity_beam_assembler::_assembler_thread_start()
+{
+    pthread_mutex_lock(&this->lock);
+
+    this->assembler_thread_started = true;
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+
+    while (!this->first_packet_received)
+	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
+
+    pthread_mutex_unlock(&this->lock);
+
+    // Sanity check stream params
+    // FIXME rethink
+    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
+	throw runtime_error("intensity_beam_assembler: bad value of fpga_counts received from stream");
+    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
+	throw runtime_error("intensity_beam_assembler: bad value of nupfreq received from stream");
+}
+
+
 void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
 {
     pthread_mutex_lock(&this->lock);
@@ -352,6 +341,23 @@ void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_c
 
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
+}
+
+
+void intensity_beam_assembler::_assembler_thread_end()
+{
+    pthread_mutex_lock(&this->lock);
+
+    // We set the whole chain of flags, to avoid confusion.
+    this->first_packet_received = true;
+    this->assembler_thread_ended = true;
+
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
+    pthread_mutex_unlock(&this->lock);
+
+    // Probably redundant but playing it safe...
+    this->unassembled_ringbuf->end_stream();
 }
 
 

@@ -449,8 +449,6 @@ public:
     bool wait_for_first_packet(int &fpga_counts_per_sample, int &nupfreq);
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
 
-    void assembler_thread_end();
-
     ~intensity_beam_assembler();
 
 private:
@@ -501,7 +499,9 @@ private:
     static void *assembler_pthread_main(void *opaque_arg);
     void assembler_thread_main();
 
+    void _assembler_thread_start();
     void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
+    void _assembler_thread_end();
 };
 
 
