@@ -95,25 +95,10 @@ bool intensity_beam_assembler::wait_for_stream_params(int &fpga_counts_per_sampl
     fpga_counts_per_sample_ = this->fpga_counts_per_sample;
     nupfreq_ = this->nupfreq;
 
-    bool retval = !stream_ended;
-    pthread_mutex_unlock(&this->lock);
-    return retval;
-}
-
-// advances state: stream_started -> stream_ended
-void intensity_beam_assembler::end_stream()
-{
-    pthread_mutex_lock(&this->lock);
-
-    // We set both flags to imitate a stream which has been started and stopped.
-    // This ensures that threads sleeping in wait_for_stream_params() get unblocked.
-    this->stream_started = true;
-    this->stream_ended = true;
-
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
     pthread_mutex_unlock(&this->lock);
 
-    this->unassembled_ringbuf->end_stream();
+    // FIXME logical choice?  Should we just make this return 'void'?
+    return (nupfreq != 0);
 }
 
 
@@ -124,7 +109,6 @@ void intensity_beam_assembler::assembler_thread_end()
 
     // We set the whole chain of flags, to avoid confusion.
     this->stream_started = true;
-    this->stream_ended = true;
     this->assembler_thread_ended = true;
 
     pthread_cond_broadcast(&this->cond_assembler_state_changed);
@@ -218,6 +202,24 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 	pthread_cond_wait(&this->cond_assembled_chunks_added, &this->lock);
     }
 }
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// Routines called by network thread
+
+
+// advances state: stream_started -> stream_ended
+void intensity_beam_assembler::_end_stream()
+{
+    pthread_mutex_lock(&this->lock);
+    this->stream_started = true;
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_mutex_unlock(&this->lock);
+
+    this->unassembled_ringbuf->end_stream();
+}
+
 
 
 // -------------------------------------------------------------------------------------------------

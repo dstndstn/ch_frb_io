@@ -155,7 +155,7 @@ void intensity_network_stream::end_stream()
     pthread_mutex_unlock(&this->lock);
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->end_stream();
+	assemblers[i]->_end_stream();
 }
 
 
@@ -500,6 +500,7 @@ void intensity_network_stream::_network_thread_exit()
 	sockfd = -1;
     }
 
+    // It's important that end_stream() get called, so that all the assemblers finish.
     this->end_stream();
 }
 

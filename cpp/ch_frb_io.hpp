@@ -334,7 +334,7 @@ struct assembled_chunk : noncopyable {
 // intensity_network_ostream: this class is used to packetize intensity data and send
 // it over the network.
 //  
-struct intensity_network_ostream : noncopyable {
+class intensity_network_ostream : noncopyable {
 public:
     const std::string dstname;
     const int nbeams = 0;
@@ -462,7 +462,6 @@ public:
     // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
     void start_stream(int fpga_counts_per_sample, int nupfreq);
     bool put_unassembled_packets(udp_packet_list &packet_list);
-    void end_stream();
 
     // Called by assembler thread.  
     void put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
@@ -483,6 +482,9 @@ private:
     int fpga_counts_per_sample = 0;
     int nupfreq = 0;
 
+    friend class intensity_network_stream;
+    void _end_stream();   // called by network thread, when exiting
+
     // All state below is protected by a single lock (FIXME could be made more granular)
     pthread_mutex_t lock;
 
@@ -497,7 +499,6 @@ private:
     //
     bool assembler_thread_started = false;
     bool stream_started = false;
-    bool stream_ended = false;
     bool assembler_thread_ended = false;
     bool assembler_thread_joined = false;
     pthread_cond_t cond_assembler_state_changed;
@@ -521,7 +522,7 @@ private:
 // It should be easy to generalize to the case of multiple network interfaces.  In this case I think it would be
 // easiest to have one intensity_network_stream object, backed by multiple network threads.
 //
-struct intensity_network_stream : noncopyable {
+class intensity_network_stream : noncopyable {
 public:
     // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
     static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
