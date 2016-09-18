@@ -179,7 +179,7 @@ void intensity_network_stream::join_all_threads()
     pthread_join(network_thread, NULL);
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->join_assembler_thread();
+	assemblers[i]->_join_assembler_thread();
 }
 
 

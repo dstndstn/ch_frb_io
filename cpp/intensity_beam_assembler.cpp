@@ -95,27 +95,6 @@ void intensity_beam_assembler::assembler_thread_end()
 }
 
 
-void intensity_beam_assembler::join_assembler_thread()
-{
-    bool call_join_after_releasing_lock = false;
-
-    pthread_mutex_lock(&this->lock);
-
-    while (!this->assembler_thread_ended)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
-
-    if (!this->assembler_thread_joined) {
-	this->assembler_thread_joined = true;
-	call_join_after_releasing_lock = true;
-    }
-
-    pthread_mutex_unlock(&this->lock);
-	
-    if (call_join_after_releasing_lock)
-	pthread_join(this->assembler_thread, NULL);
-}
-
-
 bool intensity_beam_assembler::put_unassembled_packets(udp_packet_list &packet_list)
 {
     bool is_blocking = false;
@@ -207,7 +186,6 @@ void intensity_beam_assembler::_announce_first_packet(int fpga_counts_per_sample
 }
 
 
-// advances state: stream_started -> stream_ended
 void intensity_beam_assembler::_end_stream()
 {
     // FIXME comment on this
@@ -217,6 +195,29 @@ void intensity_beam_assembler::_end_stream()
     pthread_mutex_unlock(&this->lock);
 
     this->unassembled_ringbuf->end_stream();
+}
+
+
+void intensity_beam_assembler::_join_assembler_thread()
+{
+    if (this->unassembled_ringbuf->is_alive())
+	throw runtime_error("ch_frb_io: internal error: network thread called intensity_beam_assembler::_join_assembler_thread() before ending stream");
+
+    pthread_mutex_lock(&this->lock);
+
+    while (!this->assembler_thread_ended)
+	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
+
+    if (this->assembler_thread_joined) {
+	pthread_mutex_unlock(&this->lock);
+	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_join_assembler_thread()");
+    }
+
+    this->assembler_thread_joined = true;
+    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    pthread_mutex_unlock(&this->lock);
+
+    pthread_join(assembler_thread, NULL);
 }
 
 

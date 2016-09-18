@@ -303,6 +303,7 @@ struct udp_packet_ringbuf : noncopyable {
     
     // Can be called by either producer or consumer thread
     void end_stream();
+    bool is_alive();
 };
 
 
@@ -457,7 +458,6 @@ public:
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
     bool wait_for_first_packet(int &fpga_counts_per_sample, int &nupfreq);
-    void join_assembler_thread();
 
     // Called by "upstream" thread.  For a description of the 'packet_list' semantics, see the .cpp file.
     bool put_unassembled_packets(udp_packet_list &packet_list);
@@ -481,6 +481,7 @@ private:
     // Rotuines called by network thread
     void _announce_first_packet(int fpga_counts_per_sample, int nupfreq);
     void _end_stream();   // called by network thread on exit
+    void _join_assembler_thread();
 
     // Stream parameters.  These are not protected by the lock, but only get initialized after
     // the 'first_packet_received' flag gets set, and checking this flag does require the lock.

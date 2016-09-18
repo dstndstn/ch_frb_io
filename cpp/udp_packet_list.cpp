@@ -175,5 +175,13 @@ void udp_packet_ringbuf::end_stream()
     pthread_mutex_unlock(&this->lock);
 }
 
+bool udp_packet_ringbuf::is_alive()
+{
+    pthread_mutex_lock(&this->lock);
+    bool ret = !this->stream_ended;
+    pthread_mutex_unlock(&this->lock);
+    return ret;
+}
+
 
 }  // namespace ch_frb_io
