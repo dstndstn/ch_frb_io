@@ -446,8 +446,8 @@ public:
     //
     static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
     
-    bool wait_for_first_packet(int &fpga_counts_per_sample, int &nupfreq);
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
+    bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
 
     ~intensity_beam_assembler();
 
@@ -460,15 +460,16 @@ private:
 
     // Rotuines called by network thread
     // Note: _put_unassembled_packets() returns 'false' if assembler died unexpectedly.
-    void _announce_first_packet(int fpga_counts_per_sample, int nupfreq);
+    void _announce_first_packet(int nupfreq, int nt_per_packet, int fpga_counts_per_sample);
     bool _put_unassembled_packets(udp_packet_list &packet_list);
     void _end_stream();   // called by network thread on exit
     void _join_assembler_thread();
 
     // Stream parameters.  These are not protected by the lock, but only get initialized after
     // the 'first_packet_received' flag gets set, and checking this flag does require the lock.
-    int fpga_counts_per_sample = 0;
     int nupfreq = 0;
+    int nt_per_packet = 0;
+    int fpga_counts_per_sample = 0;
 
     pthread_t assembler_thread;
 
@@ -550,6 +551,7 @@ private:
     // When the first packet is received, the network thread initializes these fields,
     // and calls each assembler's start_stream() method.
     uint16_t expected_nupfreq;
+    uint16_t expected_nt_per_packet;
     uint16_t expected_fpga_counts_per_sample;
     bool first_packet_received = false;
     

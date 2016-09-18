@@ -60,15 +60,16 @@ intensity_beam_assembler::~intensity_beam_assembler()
 }
 
 
-bool intensity_beam_assembler::wait_for_first_packet(int &fpga_counts_per_sample_, int &nupfreq_)
+bool intensity_beam_assembler::wait_for_first_packet(int &nupfreq_, int &nt_per_packet_, int &fpga_counts_per_sample_)
 {
     pthread_mutex_lock(&this->lock);
 
     while (!first_packet_received)
 	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
 
-    fpga_counts_per_sample_ = this->fpga_counts_per_sample;
     nupfreq_ = this->nupfreq;
+    nt_per_packet_ = this->nt_per_packet;
+    fpga_counts_per_sample_ = this->fpga_counts_per_sample;
 
     pthread_mutex_unlock(&this->lock);
 
@@ -113,7 +114,7 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 // Routines called by network thread
 
 
-void intensity_beam_assembler::_announce_first_packet(int fpga_counts_per_sample_, int nupfreq_)
+void intensity_beam_assembler::_announce_first_packet(int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_)
 {
     pthread_mutex_lock(&this->lock);
 
@@ -127,8 +128,9 @@ void intensity_beam_assembler::_announce_first_packet(int fpga_counts_per_sample
 	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_announce_first_packet()");
     }
 
-    this->fpga_counts_per_sample = fpga_counts_per_sample_;
     this->nupfreq = nupfreq_;
+    this->nt_per_packet = nt_per_packet_;
+    this->fpga_counts_per_sample = fpga_counts_per_sample_;
 
     this->first_packet_received = true;
     pthread_cond_broadcast(&this->cond_assembler_state_changed);

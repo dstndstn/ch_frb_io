@@ -352,8 +352,12 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 
     if (this->first_packet_received) {
 	// If this is not the first packet, check for mismatch with expected_* fields
-	if (_unlikely((packet.nupfreq != expected_nupfreq) || (packet.fpga_counts_per_sample != expected_fpga_counts_per_sample))) {
-	    this->_tmp_counts.num_bad_packets = 1;
+	bool mismatch = ((packet.nupfreq != expected_nupfreq) || 
+			 (packet.ntsamp != expected_nt_per_packet) ||
+			 (packet.fpga_counts_per_sample != expected_fpga_counts_per_sample));
+	
+	if (_unlikely(mismatch)) {
+	    this->_tmp_counts.num_first_packet_mismatches = 1;
 	    return true;
 	}
     }
@@ -365,12 +369,13 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	}
 
 	this->expected_nupfreq = packet.nupfreq;
+	this->expected_nt_per_packet = packet.ntsamp;
 	this->expected_fpga_counts_per_sample = packet.fpga_counts_per_sample;
 	this->first_packet_received = true;
 
 	// Announce first packet to assemblers.
 	for (int i = 0; i < nassemblers; i++)
-	    assemblers[i]->_announce_first_packet(expected_fpga_counts_per_sample, expected_nupfreq);
+	    assemblers[i]->_announce_first_packet(expected_nupfreq, expected_nt_per_packet, expected_fpga_counts_per_sample);
     }
 
     // Note conversions to uint64_t, to prevent integer overflow
