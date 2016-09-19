@@ -126,7 +126,7 @@ void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &p
 	//
 	this->_put_assembled_chunk(active_chunk0);
 	active_chunk0 = active_chunk1;
-	active_chunk1 = make_shared<assembled_chunk> (beam_id, nt_per_packet, nupfreq, fpga_counts_per_sample, active_chunk1->chunk_t1);
+	active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk1->chunk_t1);
     }
 
     // FIXME bookkeep drops!
