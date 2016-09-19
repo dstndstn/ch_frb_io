@@ -69,7 +69,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 	this->offsets[coarse_freq_id*nt_coarse + (t0/nt_per_packet)] = packet.offsets[f];
 
 	for (int u = 0; u < nupfreq; u++) {
-	    memcpy(data + (coarse_freq_id*nupfreq + u) * constants::nt_per_assembled_chunk, 
+	    memcpy(data + (coarse_freq_id*nupfreq + u) * constants::nt_per_assembled_chunk + t0, 
 		   packet.data + (f*nupfreq + u) * nt_per_packet,
 		   nt_per_packet);
 	}
