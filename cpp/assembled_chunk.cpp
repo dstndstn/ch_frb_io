@@ -109,6 +109,7 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 #endif
 
 
+#if 1
 inline void _unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
 {
     // FIXME is there a better way to initialize this?
@@ -127,10 +128,10 @@ inline void _unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, 
     y2 = _mm256_srli_epi32(y2, 16);
     y3 = _mm256_srli_epi32(y3, 24);
 
-    out0 = _mm256_permute2f128_ps(y0, y1, 0x20);
-    out1 = _mm256_permute2f128_ps(y2, y3, 0x20);
-    out2 = _mm256_permute2f128_ps(y0, y1, 0x31);
-    out3 = _mm256_permute2f128_ps(y2, y3, 0x31);
+    out0 = _mm256_permute2f128_si256(y0, y1, 0x20);
+    out1 = _mm256_permute2f128_si256(y2, y3, 0x20);
+    out2 = _mm256_permute2f128_si256(y0, y1, 0x31);
+    out3 = _mm256_permute2f128_si256(y2, y3, 0x31);
 }
 
 
@@ -149,7 +150,7 @@ inline void _kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m2
     _mm256_storeu_ps(wtp, w);
     _mm256_storeu_ps(wtp+8, w);
     _mm256_storeu_ps(wtp+16, w);
-    _mm256_storeu_ps(wtp+25, w);
+    _mm256_storeu_ps(wtp+24, w);
 }
 
 
@@ -222,11 +223,11 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 	    float *int_f = intensity + if_fine * stride;
 	    float *wt_f = weights + if_fine * stride;
 
-	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++)
-		_kernel(int_f, wt_f, src_f, scales_f, offsets_f);
+	    _kernel(int_f, wt_f, src_f, scales_f, offsets_f);
 	}
     }    
 }
+#endif
 
 
 }  // namespace ch_frb_io
