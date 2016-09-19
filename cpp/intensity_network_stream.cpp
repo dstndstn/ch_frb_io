@@ -82,14 +82,9 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
 
     // All initializations except the socket (which is initialized in _open_socket())
 
-    this->assembler_packet_lists.resize(nassemblers);
-    this->assembler_timestamps.resize(nassemblers, 0);
     this->assembler_beam_ids.resize(nassemblers, -1);
-
-    for (int i = 0; i < nassemblers; i++) {
-	assembler_packet_lists[i] = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    for (int i = 0; i < nassemblers; i++)
 	assembler_beam_ids[i] = assemblers[i]->beam_id;
-    }
 
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
@@ -159,27 +154,24 @@ void intensity_network_stream::end_stream()
 }
 
 
-void intensity_network_stream::join_all_threads()
+void intensity_network_stream::join_network_thread()
 {
     pthread_mutex_lock(&this->lock);
     
     if (!stream_started) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::join_all_threads() was called with no prior call to start_stream()");
+	throw runtime_error("ch_frb_io: intensity_network_stream::join_network_thread() was called with no prior call to start_stream()");
     }
 
     if (join_called) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_all_threads()");
+	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_network_thread()");
     }
 
     this->join_called = true;
     pthread_mutex_unlock(&this->lock);
 
     pthread_join(network_thread, NULL);
-
-    for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->_join_assembler_thread();
 }
 
 
@@ -280,12 +272,8 @@ void intensity_network_stream::network_thread_main()
 	else if (!this->_process_packet(&packet[0], packet_nbytes)) {
 	    // _process_packet() returns 'false' if the stream should end.
 	    // (This happens if a special "short" packet is received.)
-	    break;
+	    return;
 	}
-
-	// The purpose of the assembler timeouts is to make sure that data gets flushed to the
-	// assembler threads regularly, even if the packet stream stalls.
-	this->_check_assembler_timeouts();
 
 	// All operations requiring the lock are postponed to the bottom of this routine.
 	// In particular, all event count updates have been temporarily buffered in _tmp_counts,
@@ -299,20 +287,11 @@ void intensity_network_stream::network_thread_main()
 	if (this->stream_ended) {
 	    // This can happen if another thread calls end_stream().
 	    pthread_mutex_unlock(&this->lock);
-	    break;
+	    return;
 	}
 
 	pthread_mutex_unlock(&this->lock);
     }
-
-    // If we get here, the stream is terminating, either because a special 'end of stream' packet
-    // was received, or because another thread called end_stream().  We just flush all data to
-    // the assemblers end exit.  (Note: I think it makes most sense to ignore the return value
-    // from _put_unassembled_packets() here.)
-
-    for (int i = 0; i < nassemblers; i++)
-	if (assembler_packet_lists[i].curr_npackets > 0)
-	    assemblers[i]->_put_unassembled_packets(assembler_packet_lists[i]);
 }
 
 
@@ -362,7 +341,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	}
     }
     else {
-	// If this is the first packet, need to initialize the expected_* fields, and announce to the assemblers.
+	// If this is the first packet, need to initialize the expected_* fields.
 	if (_unlikely(packet.fpga_counts_per_sample == 0)) {
 	    this->_tmp_counts.num_bad_packets = 1;
 	    return true;
@@ -372,10 +351,6 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	this->expected_nt_per_packet = packet.ntsamp;
 	this->expected_fpga_counts_per_sample = packet.fpga_counts_per_sample;
 	this->first_packet_received = true;
-
-	// Announce first packet to assemblers.
-	for (int i = 0; i < nassemblers; i++)
-	    assemblers[i]->_announce_first_packet(packet);
     }
 
     // Note conversions to uint64_t, to prevent integer overflow
@@ -424,7 +399,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
 	for (;;) {
 	    if (assembler_ids[assembler_ix] == packet_id) {
 		// Match found
-		this->_send_packet_to_assembler(assembler_ix, packet);
+		assemblers[assembler_ix]->_put_unassembled_packet(packet);
 		break;
 	    }
 
@@ -449,43 +424,6 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
     return true;
 }
 
-
-void intensity_network_stream::_send_packet_to_assembler(int assembler_ix, const intensity_packet &packet)
-{
-    udp_packet_list &packet_list = this->assembler_packet_lists[assembler_ix];
-
-    // assembler_timestamp gets set when first packet is added
-    if (packet_list.curr_npackets == 0)
-	this->assembler_timestamps[assembler_ix] = curr_timestamp;
-
-    // Reminder: to add a packet to a udp_packet_list, we append the data 
-    // to its 'data_end' pointer, then call add_packet().
-    int packet_nbytes = packet.write(packet_list.data_end);
-    packet_list.add_packet(packet_nbytes);
-
-    if (packet_list.is_full)
-	this->_send_packet_list_to_assembler(assembler_ix);
-}
-
-
-void intensity_network_stream::_send_packet_list_to_assembler(int assembler_ix)
-{
-    bool alive = assemblers[assembler_ix]->_put_unassembled_packets(assembler_packet_lists[assembler_ix]);
-    if (!alive)
-	throw runtime_error("ch_frb_io: assembler thread died unexpectedly?!");
-}
-
-
-void intensity_network_stream::_check_assembler_timeouts()
-{
-    int64_t threshold_timestamp = curr_timestamp - constants::unassembled_ringbuf_timeout_usec;
-
-    for (int i = 0; i < nassemblers; i++)
-	if ((assembler_timestamps[i] <= threshold_timestamp) && (assembler_packet_lists[i].curr_npackets > 0))
-	    this->_send_packet_list_to_assembler(i);
-}
-
-
 // This gets called when the network thread exits, either 
 // because the stream ended or an exception was thrown.
 void intensity_network_stream::_network_thread_exit()
@@ -509,5 +447,6 @@ void intensity_network_stream::_network_thread_exit()
     // It's important that end_stream() get called, so that all the assemblers finish.
     this->end_stream();
 }
+
 
 }  // namespace ch_frb_io

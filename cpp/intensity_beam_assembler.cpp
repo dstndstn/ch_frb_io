@@ -14,25 +14,6 @@ namespace ch_frb_io {
 // class intensity_beam_assembler
 
 
-// static member function used as de facto constructor
-shared_ptr<intensity_beam_assembler> intensity_beam_assembler::make(int beam_id_, bool drops_allowed_)
-{
-    intensity_beam_assembler *ret_bare = new intensity_beam_assembler(beam_id_, drops_allowed_);
-    shared_ptr<intensity_beam_assembler> ret(ret_bare);
-
-    int err = pthread_create(&ret->assembler_thread, NULL, intensity_beam_assembler::assembler_pthread_main, &ret);
-    if (err)
-	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_beam_assembler constructor: ") + strerror(errno));
-
-    pthread_mutex_lock(&ret->lock);
-    while (!ret->assembler_thread_started)
-	pthread_cond_wait(&ret->cond_assembler_state_changed, &ret->lock);
-    pthread_mutex_unlock(&ret->lock);
-
-    return ret;
-}
-
-
 intensity_beam_assembler::intensity_beam_assembler(int beam_id_, bool drops_allowed_) 
     : beam_id(beam_id_), drops_allowed(drops_allowed_)
 {
@@ -40,22 +21,15 @@ intensity_beam_assembler::intensity_beam_assembler(int beam_id_, bool drops_allo
 	throw runtime_error("intensity_beam_constructor: invalid beam_id");
 
     pthread_mutex_init(&this->lock, NULL);
-    pthread_cond_init(&this->cond_assembler_state_changed, NULL);
+    pthread_cond_init(&this->cond_initflag_set, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
-
-    int capacity = constants::unassembled_ringbuf_capacity;
-    int max_npackets = constants::max_unassembled_packets_per_list;
-    int max_nbytes = constants::max_unassembled_nbytes_per_list;
-    string dropstr = "warning: assembler thread running too slow, dropping packets";
-
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, drops_allowed);
 }
 
 
 intensity_beam_assembler::~intensity_beam_assembler()
 {
-    pthread_cond_destroy(&this->cond_assembler_state_changed);
     pthread_cond_destroy(&this->cond_assembled_chunks_added);
+    pthread_cond_destroy(&this->cond_initflag_set);
     pthread_mutex_destroy(&this->lock);
 }
 
@@ -64,17 +38,17 @@ bool intensity_beam_assembler::wait_for_first_packet(int &nupfreq_, int &nt_per_
 {
     pthread_mutex_lock(&this->lock);
 
-    while (!first_packet_received)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
+    while (!this->initflag_protected)
+	pthread_cond_wait(&this->cond_initflag_set, &this->lock);
+
+    bool alive = !doneflag_protected;
+    pthread_mutex_unlock(&this->lock);
 
     nupfreq_ = this->nupfreq;
     nt_per_packet_ = this->nt_per_packet;
     fpga_counts_per_sample_ = this->fpga_counts_per_sample;
 
-    pthread_mutex_unlock(&this->lock);
-
-    // FIXME logical choice?  Should we just make this return 'void'?
-    return (nupfreq != 0);
+    return alive;
 }
 
 
@@ -99,7 +73,7 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 	    return true;
 	}
 
-	if (assembler_thread_ended) {
+	if (this->doneflag_protected) {
 	    pthread_mutex_unlock(&this->lock);
 	    return false;
 	}
@@ -114,198 +88,55 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 // Routines called by network thread
 
 
-void intensity_beam_assembler::_announce_first_packet(const intensity_packet &packet)
+void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &packet)
 {
-    uint64_t packet_it0 = packet.fpga_count / uint64_t(packet.fpga_counts_per_sample);
-    uint64_t assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
+    uint64_t packet_it0 = packet.fpga_count / fpga_counts_per_sample;
+    uint64_t packet_it1 = packet_it0 + packet.ntsamp;
 
-    auto chunk0 = make_shared<assembled_chunk> (this->beam_id, packet.nupfreq, packet.fpga_counts_per_sample, assembler_it0);
-    auto chunk1 = make_shared<assembled_chunk> (this->beam_id, packet.nupfreq, packet.fpga_counts_per_sample, chunk0->chunk_t1);
+    if (doneflag_unprotected)
+	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::_put_unassembled_packet() called after _end_stream()");
 
-    pthread_mutex_lock(&this->lock);
+    if (!initflag_unprotected) {
+	uint64_t assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
 
-    if (!assembler_thread_started) {
+	this->nupfreq = packet.nupfreq;
+	this->nt_per_packet = packet.ntsamp;
+	this->fpga_counts_per_sample = packet.fpga_counts_per_sample;
+
+	this->active_chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, assembler_it0);
+	this->active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk0->chunk_t1);
+	this->initflag_unprotected = true;
+
+	pthread_mutex_lock(&this->lock);
+	this->initflag_protected = true;
+	pthread_cond_broadcast(&this->cond_initflag_set);
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::_announce_first_packet() was called, but no assembler thread");
     }
 
-    if (this->first_packet_received) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_announce_first_packet()");
+    if (packet_it1 > active_chunk1->chunk_t1) {
+	//
+	// If we receive a packet whose timestamps extend past the range of our current
+	// assembly buffer, then we advance the buffer and send an assembled_chunk to the
+	// "downstream" thread.
+	//
+	// A design decision here: for a packet which is far in the future, we advance the 
+	// buffer by one assembled_chunk, rather than using the minimum number of advances
+	// needed.  This is to avoid a situation where a single rogue packet timestamped
+	// in the far future effectively kills the L1 node.
+	//
+	this->_put_assembled_chunk(active_chunk0);
+	active_chunk0 = active_chunk1;
+	active_chunk1 = make_shared<assembled_chunk> (beam_id, nt_per_packet, nupfreq, fpga_counts_per_sample, active_chunk1->chunk_t1);
     }
 
-    this->nupfreq = packet.nupfreq;
-    this->nt_per_packet = packet.ntsamp;
-    this->fpga_counts_per_sample = packet.fpga_counts_per_sample;
-    this->active_chunk0 = chunk0;
-    this->active_chunk1 = chunk1;
+    // FIXME bookkeep drops!
 
-    this->first_packet_received = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_mutex_unlock(&this->lock);
-}
-
-
-bool intensity_beam_assembler::_put_unassembled_packets(udp_packet_list &packet_list)
-{
-    return this->unassembled_ringbuf->producer_put_packet_list(packet_list, false);   // is_blocking=false
-}
-
-
-void intensity_beam_assembler::_end_stream()
-{
-    // FIXME comment on this
-    pthread_mutex_lock(&this->lock);
-    this->first_packet_received = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_mutex_unlock(&this->lock);
-
-    this->unassembled_ringbuf->end_stream();
-}
-
-
-void intensity_beam_assembler::_join_assembler_thread()
-{
-    if (this->unassembled_ringbuf->is_alive())
-	throw runtime_error("ch_frb_io: internal error: network thread called intensity_beam_assembler::_join_assembler_thread() before ending stream");
-
-    pthread_mutex_lock(&this->lock);
-
-    while (!this->assembler_thread_ended)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
-
-    if (this->assembler_thread_joined) {
-	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_join_assembler_thread()");
-    }
-
-    this->assembler_thread_joined = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-    pthread_mutex_unlock(&this->lock);
-
-    pthread_join(assembler_thread, NULL);
-}
-
-
-
-// -------------------------------------------------------------------------------------------------
-//
-// assembler thread
-
-
-// static member function
-void *intensity_beam_assembler::assembler_pthread_main(void *opaque_arg)
-{
-    if (!opaque_arg)
-	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_pthread_main()");
-
-    // To pass a shared_ptr to a new pthread, we use a bare pointer to a shared_ptr.
-    shared_ptr<intensity_beam_assembler> *arg = (shared_ptr<intensity_beam_assembler> *) opaque_arg;
-    shared_ptr<intensity_beam_assembler> assembler = *arg;
-
-    if (!assembler)
-	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembler_thread_main()");
-
-    try {
-	assembler->assembler_thread_main();
-    } catch (...) {
-	assembler->_assembler_thread_end();
-	throw;
-    }
-
-    assembler->_assembler_thread_end();
-
-    return NULL;
-}
-
-
-void intensity_beam_assembler::assembler_thread_main()
-{
-    this->_assembler_thread_start();
-
-    udp_packet_list unassembled_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
-    intensity_packet packet;
-
-    // Outer loop over unassembled packets
-
-    for (;;) {
-	bool alive = unassembled_ringbuf->consumer_get_packet_list(unassembled_packet_list);
-
-	if (!alive) {
-	    this->_put_assembled_chunk(active_chunk0);
-	    this->_put_assembled_chunk(active_chunk1);
-	    return;
-	}
-
-	for (int ipacket = 0; ipacket < unassembled_packet_list.curr_npackets; ipacket++) {
-	    uint8_t *packet_data = unassembled_packet_list.data_start + unassembled_packet_list.packet_offsets[ipacket];
-	    int packet_nbytes = unassembled_packet_list.packet_offsets[ipacket+1] - unassembled_packet_list.packet_offsets[ipacket];	    
-	    bool well_formed = packet.read(packet_data, packet_nbytes);
-
-	    // FIXME needs comment
-	    if (_unlikely(!well_formed || (packet.nbeams != 1) || (packet.beam_ids[0] != this->beam_id)))
-		throw runtime_error("ch_frb_io: internal error in assembler thread");
-
-	    uint64_t packet_it0 = packet.fpga_count / fpga_counts_per_sample;
-	    uint64_t packet_it1 = packet_it0 + packet.ntsamp;
-
-	    if (packet_it1 > active_chunk1->chunk_t1) {
-		//
-		// If we receive a packet whose timestamps extend past the range of our current
-		// assembly buffer, then we advance the buffer and send an assembled_chunk to the
-		// "downstream" thread.
-		//
-		// A design decision here: for a packet which is far in the future, we advance the 
-		// buffer by one assembled_chunk, rather than using the minimum number of advances
-		// needed.  This is to avoid a situation where a single rogue packet timestamped
-		// in the far future effectively kills the L1 node.
-		//
-		this->_put_assembled_chunk(active_chunk0);
-		active_chunk0 = active_chunk1;
-		active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, fpga_counts_per_sample, active_chunk1->chunk_t1);
-	    }
-
-	    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1)) {
-		// packet is a subset of active_chunk0
-		int offset = packet_it0 - active_chunk0->chunk_t0;
-		packet.decode(active_chunk0->intensity + offset, active_chunk0->weights + offset, constants::nt_per_assembled_chunk);
-		continue;
-	    }
-
-	    if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1)) {
-		// packet is a subset of active_chunk1
-		int offset = packet_it0 - active_chunk1->chunk_t0;
-		packet.decode(active_chunk1->intensity + offset, active_chunk1->weights + offset, constants::nt_per_assembled_chunk);
-		continue;
-	    }
-
-	    if ((packet_it1 <= active_chunk0->chunk_t0) || (packet_it0 >= active_chunk1->chunk_t1))
-		continue;
-
-	    throw runtime_error("DOH");
-	}
-    }
-}
-
-
-void intensity_beam_assembler::_assembler_thread_start()
-{
-    pthread_mutex_lock(&this->lock);
-
-    this->assembler_thread_started = true;
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
-
-    while (!this->first_packet_received)
-	pthread_cond_wait(&this->cond_assembler_state_changed, &this->lock);
-
-    pthread_mutex_unlock(&this->lock);
-
-    // Sanity check stream params
-    // FIXME rethink
-    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("intensity_beam_assembler: bad value of fpga_counts received from stream");
-    if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("intensity_beam_assembler: bad value of nupfreq received from stream");
+    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1))
+	active_chunk0->add_packet(packet);
+    else if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1))
+	active_chunk1->add_packet(packet);
+    else if ((packet_it0 < active_chunk1->chunk_t1) && (packet_it1 > active_chunk0->chunk_t0))
+	throw runtime_error("DOH");
 }
 
 
@@ -332,20 +163,26 @@ void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_c
 }
 
 
-void intensity_beam_assembler::_assembler_thread_end()
+void intensity_beam_assembler::_end_stream()
 {
+    if (this->doneflag_unprotected)
+	throw runtime_error("ch_frb_io: internal error: double call to intensity_beam_assembler::_end_stream()");
+
+    if (this->initflag_unprotected) {
+	this->_put_assembled_chunk(active_chunk0);
+	this->_put_assembled_chunk(active_chunk1);
+	this->active_chunk0 = this->active_chunk1 = shared_ptr<assembled_chunk> ();
+    }
+
+    this->initflag_unprotected = true;
+    this->doneflag_unprotected = true;
+
     pthread_mutex_lock(&this->lock);
-
-    // We set the whole chain of flags, to avoid confusion.
-    this->first_packet_received = true;
-    this->assembler_thread_ended = true;
-
-    pthread_cond_broadcast(&this->cond_assembler_state_changed);
+    this->initflag_protected = true;
+    this->doneflag_protected = true;
+    pthread_cond_broadcast(&this->cond_initflag_set);
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
-
-    // Probably redundant but playing it safe...
-    this->unassembled_ringbuf->end_stream();
 }
 
 

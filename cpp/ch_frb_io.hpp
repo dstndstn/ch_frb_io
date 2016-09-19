@@ -63,15 +63,6 @@ namespace constants {
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
 
-    //
-    // Parameters of ring buffer between network output thread and assembler threads.
-    // In full CHIME, each unsassembled ring buffer receives ~15000 packets/sec and ~15 MB/sec.  
-    //
-    static constexpr int unassembled_ringbuf_capacity = 64;
-    static constexpr int max_unassembled_packets_per_list = 16384;   // large value is convenient for unit tests.
-    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
-    static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
-
     // Parameters of ring buffers between assembler threads and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;
     static constexpr int nt_per_assembled_chunk = 1024;
@@ -309,21 +300,26 @@ struct udp_packet_ringbuf : noncopyable {
 
 struct assembled_chunk : noncopyable {
     // Stream parameters
-    int beam_id;
-    int nupfreq;
-    int fpga_counts_per_sample;
+    int beam_id = 0;
+    int nupfreq = 0;
+    int nt_per_packet = 0;
+    int fpga_counts_per_sample = 0;
 
     // Time index of first sample in chunk.
-    // The FPGA count of the first sample is chunk_t0 * fpga_counts_per_sample.
-    uint64_t chunk_t0;
-    uint64_t chunk_t1;
+    uint64_t chunk_t0 = 0;
+    uint64_t chunk_t1 = 0;
 
-    // Arrays of shape (constants::nfreq_coarse, nupfreq, nt_per_chunk)
-    float *intensity = nullptr;
-    float *weights = nullptr;
+    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
-    assembled_chunk(int beam_id, int nupfreq, int fpga_counts_per_sample, uint64_t chunk_t0);
+    int nt_coarse = 0;         // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
+    float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
+    float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
+
+    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
     ~assembled_chunk();
+
+    void add_packet(const intensity_packet &p);
+    void decode(float *intensity, float *weights, int stride) const;
 };
 
 
@@ -434,80 +430,49 @@ protected:
 
 class intensity_beam_assembler : noncopyable {
 public:
-    const int beam_id = -1;
-    const bool drops_allowed = true;
-
-    //
-    // The function intensity_beam_assembler::make() is the de facto intensity_beam_assembler constructor.
-    // Thus intensity_beam_assemblers are always used through shared_ptrs.  The reason we do this is that
-    // the assembler thread is always running in the background and needs to keep a reference via a shared_ptr.
-    //
-    // If 'drops_allowed' is false, the process will crash if the ring buffer overfills.
+    // If 'drops_allowed' is false, the process will crash if the assembled_chunk ring buffer overfills.
     // This sometimes makes sense during testing but probably not otherwise.
-    //
-    static std::shared_ptr<intensity_beam_assembler> make(int beam_id, bool drops_allowed=true);
+    intensity_beam_assembler(int beam_id, bool drops_allowed);
     
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
     bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
 
+    const int beam_id = -1;
+    const bool drops_allowed = true;
+
     ~intensity_beam_assembler();
 
 private:
-    // The actual constructor is private, so it can be a helper function 
-    // for intensity_beam_assembler::make(), but can't be called otherwise.
-    intensity_beam_assembler(int beam_id, bool drops_allowed);
-    
     friend class intensity_network_stream;
 
-    // Rotuines called by network thread
-    // Note: _put_unassembled_packets() returns 'false' if assembler died unexpectedly.
-    void _announce_first_packet(const intensity_packet &packet);
-    bool _put_unassembled_packets(udp_packet_list &packet_list);
+    // Routines called by network thread
+    void _put_unassembled_packet(const intensity_packet &packet);
+    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
     void _end_stream();   // called by network thread on exit
-    void _join_assembler_thread();
 
-    // Stream parameters.  These are not protected by the lock, but only get initialized after
-    // the 'first_packet_received' flag gets set, and checking this flag does require the lock.
+    // This data is not protected by the lock, but is only accessed by the network thread.
+    std::shared_ptr<assembled_chunk> active_chunk0;
+    std::shared_ptr<assembled_chunk> active_chunk1;
+    bool initflag_unprotected = false;
+    bool doneflag_unprotected = false;
+
+    // This data can either be accessed by the network thread, or by an outside thread after
+    // acquiring the lock and waiting for initflag_protected (FIXME explain).
     int nupfreq = 0;
     int nt_per_packet = 0;
     int fpga_counts_per_sample = 0;
 
-    // These are also not protected by the lock, but are only accessed by the network thread
-    std::shared_ptr<assembled_chunk> active_chunk0;
-    std::shared_ptr<assembled_chunk> active_chunk1;
-
-    pthread_t assembler_thread;
-
-    // All state below is protected by a single lock (FIXME could be made more granular)
+    // All state below is protected by the lock
     pthread_mutex_t lock;
-    
-    //
-    // Assembler state model
-    //   assembler_thread_started: set by assembler thread, before intensity_beam_assembler::make() returns
-    //   stream_started: set by "upstream" thread, when it calls intensity_beam_assembler::start_stream()
-    //   stream_ended: set by "upstream" thread, when it calls intensity_beam_assembler::end_stream()
-    //   assembler_thread_ended: set by assembler thread, on exit
-    //
-    bool assembler_thread_started = false;
-    bool first_packet_received = false;
-    bool assembler_thread_ended = false;
-    bool assembler_thread_joined = false;
-    pthread_cond_t cond_assembler_state_changed;
+    pthread_cond_t cond_initflag_set;
+    pthread_cond_t cond_assembled_chunks_added;
 
-    std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
+    bool initflag_protected = false;
+    bool doneflag_protected = false;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;
     int assembled_ringbuf_size = 0;
-
-    pthread_cond_t cond_assembled_chunks_added;     // downstream thread waits here for assembled chunks
-
-    static void *assembler_pthread_main(void *opaque_arg);
-    void assembler_thread_main();
-
-    void _assembler_thread_start();
-    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
-    void _assembler_thread_end();
 };
 
 
@@ -524,9 +489,9 @@ public:
 	-> std::shared_ptr<intensity_network_stream>;
 
     // High level control.
-    void start_stream();      // tells network thread to start reading packets
-    void end_stream();        // asynchronously stops stream
-    void join_all_threads();  // should only be called once, does not end stream
+    void start_stream();         // tells network thread to start reading packets
+    void end_stream();           // asynchronously stops stream
+    void join_network_thread();  // should only be called once, does not end stream
 
     struct event_counts {
 	ssize_t num_bad_packets = 0;
@@ -549,8 +514,6 @@ private:
     int udp_port = 0;
 
     std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
-    std::vector<udp_packet_list> assembler_packet_lists;
-    std::vector<int64_t> assembler_timestamps;
     std::vector<int> assembler_beam_ids;
     
     // When the first packet is received, the network thread initializes these fields,
@@ -589,9 +552,6 @@ private:
 
     void _open_socket();
     bool _process_packet(const uint8_t *data, int nbytes);
-    void _send_packet_to_assembler(int assembler_ix, const intensity_packet &packet);
-    void _send_packet_list_to_assembler(int assembler_ix);
-    void _check_assembler_timeouts();
     void _network_thread_exit();
 };
 

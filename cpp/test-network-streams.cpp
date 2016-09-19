@@ -47,7 +47,9 @@ struct unit_test_instance {
     vector<int> recv_beam_ids;
     vector<int> send_beam_ids;
     vector<int> send_freq_ids;
+
     int send_stride;
+    int recv_stride;
 
     // not protected by lock
     pthread_t consumer_threads[maxbeams];    
@@ -65,7 +67,6 @@ struct unit_test_instance {
 unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
-    const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     this->nbeams = randint(rng, 1, maxbeams+1);
     this->nupfreq = randint(rng, 1, 17);
@@ -128,6 +129,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
 
     this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
+    this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
 
     xpthread_mutex_init(&this->tpos_lock);
     xpthread_cond_init(&this->cond_tpos_changed);
@@ -146,25 +148,6 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    initial_t0=" << initial_t0 << endl
 	 << "    wt_cutoff=" << wt_cutoff << endl;
-    
-    // Worst-case storage requirements for unassembled ringbuf.
-    int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
-    int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
-    int wc_nbytes = wc_npackets * packet_size(1, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
-
-    // Storage actually allocated
-    int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
-    int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;
-
-    if ((npackets_alloc < wc_npackets) || (nbytes_alloc < wc_nbytes)) {
-	cout << "    npackets_needed=" << wc_npackets << endl
-	     << "    npackets_allocated=" << npackets_alloc << endl
-	     << "    nbytes_needed=" << wc_nbytes << endl
-	     << "    nbytes_alloc=" << nbytes_alloc << endl
-	     << "Fatal: unassembled_packet_buf is underallocated" << endl;
-
-	exit(1);
-    }
 
     cout << endl;
 }
@@ -224,6 +207,10 @@ static void *consumer_thread_main(void *opaque_arg)
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
 
+    int nalloc = ch_frb_io::constants::nfreq_coarse * tp->nupfreq * tp->recv_stride;
+    vector<float> all_intensities(nalloc, 0.0);
+    vector<float> all_weights(nalloc, 0.0);
+
     double wt_cutoff = tp->wt_cutoff;
     int test_t0 = tp->initial_t0;
     int test_t1 = tp->initial_t0 + tp->nt_tot;
@@ -239,7 +226,10 @@ static void *consumer_thread_main(void *opaque_arg)
 	if (!alive)
 	    break;
 
+	chunk->decode(&all_intensities[0], &all_weights[0], tp->recv_stride);
+
 	assert(chunk->nupfreq == tp->nupfreq);
+	assert(chunk->nt_per_packet == tp->nt_per_packet);
 	assert(chunk->fpga_counts_per_sample == tp->fpga_counts_per_sample);
 	assert(chunk->beam_id == assembler->beam_id);
 
@@ -260,8 +250,8 @@ static void *consumer_thread_main(void *opaque_arg)
 	int chunk_t0 = chunk->chunk_t0;
 
 	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse * tp->nupfreq; ifreq++) {
-	    const float *int_row = chunk->intensity + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
-	    const float *wt_row = chunk->weights + ifreq * ch_frb_io::constants::nt_per_assembled_chunk;
+	    const float *int_row = &all_intensities[0] + ifreq * tp->recv_stride;
+	    const float *wt_row = &all_weights[0] + ifreq * tp->recv_stride;
 
 	    for (int it = 0; it < ch_frb_io::constants::nt_per_assembled_chunk; it++) {
 		// Out of range
@@ -333,7 +323,7 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
     vector<shared_ptr<ch_frb_io::intensity_beam_assembler> > assemblers;
 
     for (int ithread = 0; ithread < tp->nbeams; ithread++) {
-	auto assembler = ch_frb_io::intensity_beam_assembler::make(tp->recv_beam_ids[ithread], false);   // drops_allowed = false
+	auto assembler = make_shared<ch_frb_io::intensity_beam_assembler> (tp->recv_beam_ids[ithread], false);   // drops_allowed = false
 	spawn_consumer_thread(assembler, tp, ithread);
 	assemblers.push_back(assembler);
     }
@@ -442,7 +432,7 @@ int main(int argc, char **argv)
 	tp->istream->start_stream();
 
 	send_data(tp);	
-	tp->istream->join_all_threads();
+	tp->istream->join_network_thread();
 
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
 	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);
