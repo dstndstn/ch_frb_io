@@ -1,4 +1,5 @@
 #include <iostream>
+#include <immintrin.h>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -77,6 +78,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 }
 
 
+#if 0
 void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
     if (stride < constants::nt_per_assembled_chunk)
@@ -103,6 +105,127 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 	    }
 	}
     }
+}
+#endif
+
+
+inline void _unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
+{
+    // FIXME is there a better way to initialize this?
+    static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0,
+						15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0);
+
+    // 4-by-4 transpose within each 128-bit lane
+    x = _mm256_shuffle_epi8(x, ctl0);
+
+    __m256i y0 = _mm256_and_si256(x, _mm256_set1_epi32(0xff));
+    __m256i y1 = _mm256_and_si256(x, _mm256_set1_epi32(0xff00));
+    __m256i y2 = _mm256_and_si256(x, _mm256_set1_epi32(0xff0000));
+    __m256i y3 = _mm256_and_si256(x, _mm256_set1_epi32(0xff000000));
+
+    y1 = _mm256_srli_epi32(y1, 8);
+    y2 = _mm256_srli_epi32(y2, 16);
+    y3 = _mm256_srli_epi32(y3, 24);
+
+    out0 = _mm256_permute2f128_ps(y0, y1, 0x20);
+    out1 = _mm256_permute2f128_ps(y2, y3, 0x20);
+    out2 = _mm256_permute2f128_ps(y0, y1, 0x31);
+    out3 = _mm256_permute2f128_ps(y2, y3, 0x31);
+}
+
+
+inline void _kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m256 scale1, __m256 offset0, __m256 offset1)
+{
+    __m256i in0, in1, in2, in3;
+    _unpack(in0, in1, in2, in3, data);
+    
+    _mm256_storeu_ps(intp, scale0 * _mm256_cvtepi32_ps(in0) + offset0);
+    _mm256_storeu_ps(intp+8, scale0 * _mm256_cvtepi32_ps(in1) + offset0);
+    _mm256_storeu_ps(intp+16, scale1 * _mm256_cvtepi32_ps(in2) + offset1);
+    _mm256_storeu_ps(intp+24, scale1 * _mm256_cvtepi32_ps(in3) + offset1);
+
+    // XXX placeholder for weights
+    __m256 w = _mm256_set1_ps(1.0);
+    _mm256_storeu_ps(wtp, w);
+    _mm256_storeu_ps(wtp+8, w);
+    _mm256_storeu_ps(wtp+16, w);
+    _mm256_storeu_ps(wtp+25, w);
+}
+
+
+inline void _kernel128(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+{
+    __m256 scale = _mm256_loadu_ps(scalep);
+    __m256 offset = _mm256_loadu_ps(offsetp);
+    __m256 scale0, offset0;
+
+
+    scale0 = _mm256_permute2f128_ps(scale, scale, 0x00);
+    offset0 = _mm256_permute2f128_ps(offset, offset, 0x00);
+
+    _kernel32(intp, wtp, 
+	      _mm256_loadu_si256((const __m256i *) (src)),
+	      _mm256_shuffle_ps(scale0, scale0, 0x00), 
+	      _mm256_shuffle_ps(scale0, scale0, 0x55),
+	      _mm256_shuffle_ps(offset0, offset0, 0x00), 
+	      _mm256_shuffle_ps(offset0, offset0, 0x55));
+
+    _kernel32(intp + 32, wtp + 32, 
+	      _mm256_loadu_si256((const __m256i *) (src + 32)),
+	      _mm256_shuffle_ps(scale0, scale0, 0xaa), 
+	      _mm256_shuffle_ps(scale0, scale0, 0xff),
+	      _mm256_shuffle_ps(offset0, offset0, 0xaa), 
+	      _mm256_shuffle_ps(offset0, offset0, 0xff));
+
+
+    scale0 = _mm256_permute2f128_ps(scale, scale, 0x11);
+    offset0 = _mm256_permute2f128_ps(offset, offset, 0x11);
+
+    _kernel32(intp + 64, wtp + 64,
+	      _mm256_loadu_si256((const __m256i *) (src + 64)),
+	      _mm256_shuffle_ps(scale0, scale0, 0x00), 
+	      _mm256_shuffle_ps(scale0, scale0, 0x55),
+	      _mm256_shuffle_ps(offset0, offset0, 0x00), 
+	      _mm256_shuffle_ps(offset0, offset0, 0x55));
+
+    _kernel32(intp + 96, wtp + 96, 
+	      _mm256_loadu_si256((const __m256i *) (src + 96)),
+	      _mm256_shuffle_ps(scale0, scale0, 0xaa), 
+	      _mm256_shuffle_ps(scale0, scale0, 0xff),
+	      _mm256_shuffle_ps(offset0, offset0, 0xaa), 
+	      _mm256_shuffle_ps(offset0, offset0, 0xff));
+}
+
+
+inline void _kernel(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+{
+    constexpr int n = constants::nt_per_assembled_chunk / 128;
+
+    for (int i = 0; i < n; i++)
+	_kernel128(intp + i*128, wtp + i*128, src + i*128, scalep + i*8, offsetp + i*8);
+}
+
+
+void assembled_chunk::decode(float *intensity, float *weights, int stride) const
+{
+    if ((nt_per_packet != 16) || (constants::nt_per_assembled_chunk % 128))
+	throw runtime_error("ch_frb_io: can't use this kernel");
+    if (stride < constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode()");
+
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse; if_coarse++) {
+	const float *scales_f = this->scales + if_coarse * nt_coarse;
+	const float *offsets_f = this->offsets + if_coarse * nt_coarse;
+	
+	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
+	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
+	    float *int_f = intensity + if_fine * stride;
+	    float *wt_f = weights + if_fine * stride;
+
+	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++)
+		_kernel(int_f, wt_f, src_f, scales_f, offsets_f);
+	}
+    }    
 }
 
 
