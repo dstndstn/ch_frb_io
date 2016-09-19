@@ -90,7 +90,7 @@ bool intensity_beam_assembler::get_assembled_chunk(shared_ptr<assembled_chunk> &
 
 void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &packet)
 {
-    uint64_t packet_it0 = packet.fpga_count / fpga_counts_per_sample;
+    uint64_t packet_it0 = packet.fpga_count / packet.fpga_counts_per_sample;
     uint64_t packet_it1 = packet_it0 + packet.ntsamp;
 
     if (doneflag_unprotected)
