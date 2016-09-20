@@ -338,7 +338,7 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 	cerr << ".";
 
 	// Randomized in every iteration
-	const int nupfreq = randint(rng, 1, 17);
+	const int nupfreq = 2 * randint(rng, 1, 9);
 	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
 	
 	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
