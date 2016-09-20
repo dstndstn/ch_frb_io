@@ -64,7 +64,7 @@ namespace constants {
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
 
-    // Parameters of ring buffers between assembler threads and pipeline threads.
+    // Parameters of ring buffers between assembler thread and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;
     static constexpr int nt_per_assembled_chunk = 1024;
     static constexpr int nt_assembler = 2 * nt_per_assembled_chunk;
@@ -519,7 +519,7 @@ public:
     struct event_counts {
 	ssize_t num_bad_packets = 0;
 	ssize_t num_good_packets = 0;
-	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler threads
+	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler beam_ids
 	ssize_t num_first_packet_mismatches = 0;    // packet is well-formed, but (nupfreq,fpga_counts_per_sample) don't match first packet recevied
 	event_counts &operator+=(const event_counts &x);
 	void clear();

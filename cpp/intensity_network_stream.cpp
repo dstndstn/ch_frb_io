@@ -371,7 +371,7 @@ bool intensity_network_stream::_process_packet(const uint8_t *packet_data, int p
     //   - fpga_counts_per_sample is > 0
     //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
     //
-    // These checks are assumed by the assembler thread, and mostly aren't rechecked, 
+    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
     // so it's important that they're done here!
 
     this->_tmp_counts.num_good_packets = 1;
