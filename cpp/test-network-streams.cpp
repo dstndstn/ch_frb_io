@@ -68,8 +68,11 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
 
+    // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
+    const bool use_fast = (irun % 2) == 0;
+
     this->nbeams = randint(rng, 1, maxbeams+1);
-    this->nupfreq = randint(rng, 1, 17);
+    this->nupfreq = use_fast ? 16 : randint(rng,1,17);
     this->nfreq_coarse_per_packet = 1 << randint(rng,0,5);
 
     // Assign nt_per_packet.  Each packet has a max allowed size, and we also require nt_per_packet <= 512.
