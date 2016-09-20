@@ -1,5 +1,6 @@
 #include <cassert>
 #include <iomanip>
+#include <algorithm>
 #include <immintrin.h>
 #include "ch_frb_io_internals.hpp"
 
