@@ -43,6 +43,22 @@ assembled_chunk::~assembled_chunk()
 }
 
 
+void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
+{
+    if (!x)
+	throw runtime_error("assembled_chunk::fill_with_copy() called with empty pointer");
+    if ((this->nupfreq != x->nupfreq) || (this->nt_per_packet != x->nt_per_packet))
+	throw runtime_error("assembled_chunk::fill_with_copy() called on non-conformable chunks");
+
+    if (x.get() == this)
+	return;
+
+    memcpy(this->data, x->data, constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk);
+    memcpy(this->scales, x->scales, constants::nfreq_coarse * nt_coarse * sizeof(float));
+    memcpy(this->offsets, x->offsets, constants::nfreq_coarse * nt_coarse * sizeof(float));
+}
+
+
 void assembled_chunk::add_packet(const intensity_packet &packet)
 {
     // Offset relative to beginning of packet

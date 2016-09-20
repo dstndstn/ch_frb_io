@@ -325,6 +325,9 @@ struct assembled_chunk : noncopyable {
 
     // Factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
     static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+
+    // Utility functions currently used only for testing.
+    void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
 };
 
 
