@@ -62,7 +62,7 @@ template<unsigned int N>
 inline void _vstr_partial(stringstream &ss, __m256 x)
 {
     _vstr_partial<N-1>(ss, x);
-    ss << " " << _extract<N>(x);
+    ss << " " << _extract<N-1>(x);
 }
 
 
@@ -128,9 +128,9 @@ inline void _decode_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m
 {
     __m256i gt0 = _mm256_cmpgt_epi32(x, i0);
     __m256i gt254 = _mm256_cmpgt_epi32(x, i254);
-    __m256i valid = _mm256_andnot_si256(gt0, gt254);
+    __m256i valid = _mm256_andnot_si256(gt254, gt0);
 
-    _mm256_storeu_ps(wtp, _mm256_blendv_ps(f1, f0, valid));
+    _mm256_storeu_ps(wtp, _mm256_blendv_ps(f0,f1,valid));
 }
 
 
@@ -146,8 +146,8 @@ inline void _decode_kernel32(float *intp, float *wtp, __m256i data, __m256 scale
 
     __m256i i0 = _mm256_set1_epi32(0);
     __m256i i254 = _mm256_set1_epi32(254);
-    __m256i f0 = _mm256_set1_ps(0.0);
-    __m256i f1 = _mm256_set1_ps(1.0);
+    __m256 f0 = _mm256_set1_ps(0.0);
+    __m256 f1 = _mm256_set1_ps(1.0);
 
     _decode_weights(wtp, in0, i0, i254, f0, f1);
     _decode_weights(wtp+8, in1, i0, i254, f0, f1);
