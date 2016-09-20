@@ -123,7 +123,7 @@ inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
 inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
 {
     // FIXME is there a better way to initialize this?
-    static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,2,6,13,9,5,1,12,8,4,0,
+    static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0,
 						15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0);
 
     // 4-by-4 transpose within each 128-bit lane

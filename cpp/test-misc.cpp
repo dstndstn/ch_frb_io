@@ -11,6 +11,5 @@ int main(int argc, char **argv)
     test_packet_encoding();
     test_fast_decode_kernel(rng);
 
-    // peek_at_unpack_kernel();
     return 0;
 }
