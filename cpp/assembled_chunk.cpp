@@ -59,6 +59,21 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
 }
 
 
+void assembled_chunk::randomize(std::mt19937 &rng)
+{
+    // Assign ~10% probability to 0x00 or 0xff
+    for (int i = 0; i < constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk; i++) {
+	int x = randint(rng, -25, 281);
+	x = max(x, 0);
+	x = min(x, 255);
+	this->data[i] = uint8_t(x);
+    }
+
+    uniform_rand(rng, this->scales, constants::nfreq_coarse * nt_coarse);
+    uniform_rand(rng, this->offsets, constants::nfreq_coarse * nt_coarse);
+}
+
+
 void assembled_chunk::add_packet(const intensity_packet &packet)
 {
     // Offset relative to beginning of packet

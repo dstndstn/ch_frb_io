@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <random>
 #include <hdf5.h>
 
 namespace ch_frb_io {
@@ -328,6 +329,7 @@ struct assembled_chunk : noncopyable {
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
+    void randomize(std::mt19937 &rng);
 };
 
 
