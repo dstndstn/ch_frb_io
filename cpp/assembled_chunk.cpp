@@ -78,9 +78,12 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 {
     // Offset relative to beginning of packet
     int t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - chunk_t0;
+    
+    // The runtime checks in intensity_network_stream::_process_packet() should
+    // ensure that the following checks are redundant.  I decided to include the 
+    // redundant checks here in the "generic" assembled_chunk::add_packet(), but 
+    // omit them in fast_assembled_chunk::add_packet().
 
-#if 1
-    // FIXME remove later?
     bool bad = ((packet.nbeams != 1) ||
 		(packet.nupfreq != this->nupfreq) ||
 		(packet.ntsamp != this->nt_per_packet) ||
@@ -92,7 +95,6 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 
     if (_unlikely(bad))
 	throw runtime_error("ch_frb_io: internal error in assembled_chunk::add_packet()");
-#endif
 
     for (int f = 0; f < packet.nfreq_coarse; f++) {
 	int coarse_freq_id = packet.freq_ids[f];

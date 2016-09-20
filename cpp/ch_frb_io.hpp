@@ -338,6 +338,7 @@ struct fast_assembled_chunk : public assembled_chunk
 {
     fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
 
+    virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
 };
 

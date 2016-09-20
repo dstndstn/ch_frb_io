@@ -97,13 +97,33 @@ inline string _vstr(__m256 x)
 
 // -------------------------------------------------------------------------------------------------
 //
+// add_packet_kernel
+
+
+inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
+{
+    constexpr int s = constants::nt_per_assembled_chunk;
+
+    for (int i = 0; i < nupfreq; i += 2) {
+	__m256i x = _mm256_loadu_si256((const __m256i *) (src + 16*i));
+	__m128i x0 = _mm256_extractf128_si256(x, 0);
+	__m128i x1 = _mm256_extractf128_si256(x, 1);
+	
+	_mm_storeu_si128((__m128i *) (dst + i*s), x0);
+	_mm_storeu_si128((__m128i *) (dst + (i+1)*s), x1);
+    }
+}
+
+
+// -------------------------------------------------------------------------------------------------
+//
 // Decode kernels
 
 
 inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
 {
     // FIXME is there a better way to initialize this?
-    static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0,
+    static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,2,6,13,9,5,1,12,8,4,0,
 						15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0);
 
     // 4-by-4 transpose within each 128-bit lane
@@ -222,9 +242,33 @@ fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_pe
 {
     if (nt_per_packet_ != 16)
 	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with nt_per_packet != 16");
+    if (nupfreq % 2 != 0)
+	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with odd value of nupfreq");
 }
 
 
+// virtual override
+void fast_assembled_chunk::add_packet(const intensity_packet &packet)
+{
+    // Offset relative to beginning of packet
+    int t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - chunk_t0;
+
+    for (int f = 0; f < packet.nfreq_coarse; f++) {
+	int coarse_freq_id = packet.freq_ids[f];
+
+	int d = coarse_freq_id*nt_coarse + (t0/nt_per_packet);
+	this->scales[d] = packet.scales[f];
+	this->offsets[d] = packet.offsets[f];
+
+	uint8_t *dst = data + coarse_freq_id * nupfreq * constants::nt_per_assembled_chunk + t0;
+	const uint8_t *src = packet.data + f * nupfreq * 16;
+
+	_add_packet_kernel(dst, src, nupfreq);
+    }
+}
+
+
+// virtual override
 void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
     if (stride < constants::nt_per_assembled_chunk)
