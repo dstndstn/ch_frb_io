@@ -10,6 +10,26 @@ namespace ch_frb_io {
 #endif
 
 
+// -------------------------------------------------------------------------------------------------
+//
+// Utils
+
+
+template<unsigned int N>
+inline float _extract(__m128 x)
+{
+    // _mm_extract_ps() returns int instead of float?!
+    int ret = _mm_extract_ps(x, N);
+    return *((float *) &ret);
+}
+
+template<unsigned int N>
+inline float _extract(__m256 x)
+{
+    __m128 x2 = _mm256_extractf128_ps(x, N/4);
+    return _extract<N%4> (x2);
+}
+
 template<unsigned int N> inline void _vstr8_partial(stringstream &ss, __m256i x, bool hexflag);
 template<unsigned int N> inline void _vstr32_partial(stringstream &ss, __m256i x, bool hexflag);
 template<unsigned int N> inline void _vstr_partial(stringstream &ss, __m256 x);
@@ -38,6 +58,13 @@ inline void _vstr32_partial(stringstream &ss, __m256i x, bool hexflag)
 	ss << " " << _mm256_extract_epi32(x,N-1);
 }
 
+template<unsigned int N>
+inline void _vstr_partial(stringstream &ss, __m256 x)
+{
+    _vstr_partial<N-1>(ss, x);
+    ss << " " << _extract<N>(x);
+}
+
 
 inline string _vstr8(__m256i x, bool hexflag=true)
 {
@@ -57,8 +84,19 @@ inline string _vstr32(__m256i x, bool hexflag=false)
     return ss.str();
 }
 
+inline string _vstr(__m256 x)
+{
+    stringstream ss;
+    ss << "[";
+    _vstr_partial<8> (ss, x);
+    ss << " ]";
+    return ss.str();
+}
+
 
 // -------------------------------------------------------------------------------------------------
+//
+// Decode kernels
 
 
 inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
@@ -172,6 +210,11 @@ inline void _decode_kernel(float *intp, float *wtp, const uint8_t *src, const fl
 }
 
 
+// -------------------------------------------------------------------------------------------------
+//
+// class fast_assembled_chunk
+
+
 fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_) :
     assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_)
 {
@@ -201,6 +244,8 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 
 
 // -------------------------------------------------------------------------------------------------
+//
+// Testing
 
 
 // helper function used by test_fast_decode_kernel()
