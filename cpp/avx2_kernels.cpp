@@ -61,7 +61,7 @@ inline string _vstr32(__m256i x, bool hexflag=false)
 // -------------------------------------------------------------------------------------------------
 
 
-inline void _unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
+inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
 {
     // FIXME is there a better way to initialize this?
     static const __m256i ctl0 = _mm256_set_epi8(15,11,7,3,14,10,6,2,13,9,5,1,12,8,4,0,
@@ -86,7 +86,7 @@ inline void _unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, 
 }
 
 
-inline void _set_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m256 f0, __m256 f1)
+inline void _decode_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m256 f0, __m256 f1)
 {
     __m256i gt0 = _mm256_cmpgt_epi32(x, i0);
     __m256i gt254 = _mm256_cmpgt_epi32(x, i254);
@@ -96,10 +96,10 @@ inline void _set_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m256
 }
 
 
-inline void _kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m256 scale1, __m256 offset0, __m256 offset1)
+inline void _decode_kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m256 scale1, __m256 offset0, __m256 offset1)
 {
     __m256i in0, in1, in2, in3;
-    _unpack(in0, in1, in2, in3, data);
+    _decode_unpack(in0, in1, in2, in3, data);
     
     _mm256_storeu_ps(intp, scale0 * _mm256_cvtepi32_ps(in0) + offset0);
     _mm256_storeu_ps(intp+8, scale0 * _mm256_cvtepi32_ps(in1) + offset0);
@@ -111,14 +111,14 @@ inline void _kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m2
     __m256i f0 = _mm256_set1_ps(0.0);
     __m256i f1 = _mm256_set1_ps(1.0);
 
-    _set_weights(wtp, in0, i0, i254, f0, f1);
-    _set_weights(wtp+8, in1, i0, i254, f0, f1);
-    _set_weights(wtp+16, in2, i0, i254, f0, f1);
-    _set_weights(wtp+24, in3, i0, i254, f0, f1);
+    _decode_weights(wtp, in0, i0, i254, f0, f1);
+    _decode_weights(wtp+8, in1, i0, i254, f0, f1);
+    _decode_weights(wtp+16, in2, i0, i254, f0, f1);
+    _decode_weights(wtp+24, in3, i0, i254, f0, f1);
 }
 
 
-inline void _kernel128(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
 {
     __m256 scale = _mm256_loadu_ps(scalep);
     __m256 offset = _mm256_loadu_ps(offsetp);
@@ -127,54 +127,61 @@ inline void _kernel128(float *intp, float *wtp, const uint8_t *src, const float 
     scale0 = _mm256_permute2f128_ps(scale, scale, 0x00);
     offset0 = _mm256_permute2f128_ps(offset, offset, 0x00);
 
-    _kernel32(intp, wtp, 
-	      _mm256_loadu_si256((const __m256i *) (src)),
-	      _mm256_shuffle_ps(scale0, scale0, 0x00), 
-	      _mm256_shuffle_ps(scale0, scale0, 0x55),
-	      _mm256_shuffle_ps(offset0, offset0, 0x00), 
-	      _mm256_shuffle_ps(offset0, offset0, 0x55));
+    _decode_kernel32(intp, wtp, 
+		     _mm256_loadu_si256((const __m256i *) (src)),
+		     _mm256_shuffle_ps(scale0, scale0, 0x00), 
+		     _mm256_shuffle_ps(scale0, scale0, 0x55),
+		     _mm256_shuffle_ps(offset0, offset0, 0x00), 
+		     _mm256_shuffle_ps(offset0, offset0, 0x55));
 
-    _kernel32(intp + 32, wtp + 32, 
-	      _mm256_loadu_si256((const __m256i *) (src + 32)),
-	      _mm256_shuffle_ps(scale0, scale0, 0xaa), 
-	      _mm256_shuffle_ps(scale0, scale0, 0xff),
-	      _mm256_shuffle_ps(offset0, offset0, 0xaa), 
-	      _mm256_shuffle_ps(offset0, offset0, 0xff));
+    _decode_kernel32(intp + 32, wtp + 32, 
+		     _mm256_loadu_si256((const __m256i *) (src + 32)),
+		     _mm256_shuffle_ps(scale0, scale0, 0xaa), 
+		     _mm256_shuffle_ps(scale0, scale0, 0xff),
+		     _mm256_shuffle_ps(offset0, offset0, 0xaa), 
+		     _mm256_shuffle_ps(offset0, offset0, 0xff));
 
 
     scale0 = _mm256_permute2f128_ps(scale, scale, 0x11);
     offset0 = _mm256_permute2f128_ps(offset, offset, 0x11);
 
-    _kernel32(intp + 64, wtp + 64,
-	      _mm256_loadu_si256((const __m256i *) (src + 64)),
-	      _mm256_shuffle_ps(scale0, scale0, 0x00), 
-	      _mm256_shuffle_ps(scale0, scale0, 0x55),
-	      _mm256_shuffle_ps(offset0, offset0, 0x00), 
-	      _mm256_shuffle_ps(offset0, offset0, 0x55));
+    _decode_kernel32(intp + 64, wtp + 64,
+		     _mm256_loadu_si256((const __m256i *) (src + 64)),
+		     _mm256_shuffle_ps(scale0, scale0, 0x00), 
+		     _mm256_shuffle_ps(scale0, scale0, 0x55),
+		     _mm256_shuffle_ps(offset0, offset0, 0x00), 
+		     _mm256_shuffle_ps(offset0, offset0, 0x55));
 
-    _kernel32(intp + 96, wtp + 96, 
-	      _mm256_loadu_si256((const __m256i *) (src + 96)),
-	      _mm256_shuffle_ps(scale0, scale0, 0xaa), 
-	      _mm256_shuffle_ps(scale0, scale0, 0xff),
-	      _mm256_shuffle_ps(offset0, offset0, 0xaa), 
-	      _mm256_shuffle_ps(offset0, offset0, 0xff));
+    _decode_kernel32(intp + 96, wtp + 96, 
+		     _mm256_loadu_si256((const __m256i *) (src + 96)),
+		     _mm256_shuffle_ps(scale0, scale0, 0xaa), 
+		     _mm256_shuffle_ps(scale0, scale0, 0xff),
+		     _mm256_shuffle_ps(offset0, offset0, 0xaa), 
+		     _mm256_shuffle_ps(offset0, offset0, 0xff));
 }
 
 
-inline void _kernel(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+inline void _decode_kernel(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
 {
+    static_assert(constants::nt_per_assembled_chunk % 128 == 0, "_decode_kernel() assumes nt_per_assembled_chunk divisible by 128");
+
     constexpr int n = constants::nt_per_assembled_chunk / 128;
 
     for (int i = 0; i < n; i++)
-	_kernel128(intp + i*128, wtp + i*128, src + i*128, scalep + i*8, offsetp + i*8);
+	_decode_kernel128(intp + i*128, wtp + i*128, src + i*128, scalep + i*8, offsetp + i*8);
 }
 
 
-#if 0
-void assembled_chunk::decode(float *intensity, float *weights, int stride) const
+fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_) :
+    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_)
 {
-    if ((nt_per_packet != 16) || (constants::nt_per_assembled_chunk % 128))
-	throw runtime_error("ch_frb_io: can't use this kernel");
+    if (nt_per_packet_ != 16)
+	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with nt_per_packet != 16");
+}
+
+
+void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
+{
     if (stride < constants::nt_per_assembled_chunk)
 	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode()");
 
@@ -187,11 +194,10 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 	    float *int_f = intensity + if_fine * stride;
 	    float *wt_f = weights + if_fine * stride;
 
-	    _kernel(int_f, wt_f, src_f, scales_f, offsets_f);
+	    _decode_kernel(int_f, wt_f, src_f, scales_f, offsets_f);
 	}
     }    
 }
-#endif
 
 
 // -------------------------------------------------------------------------------------------------
@@ -206,7 +212,7 @@ void peek_at_avx2_kernels()
     __m256i x = _mm256_loadu_si256((const __m256i *) v);
 
     __m256i y0, y1, y2, y3;
-    _unpack(y0, y1, y2, y3, x);
+    _decode_unpack(y0, y1, y2, y3, x);
 
     cout << _vstr8(x,false) << endl
 	 << _vstr32(y0,false) << endl

@@ -316,10 +316,24 @@ struct assembled_chunk : noncopyable {
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
 
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
-    ~assembled_chunk();
+    virtual ~assembled_chunk();
+    
+    // These are virtual so that subclasses can be written with optimized implementations 
+    // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
+    virtual void add_packet(const intensity_packet &p);
+    virtual void decode(float *intensity, float *weights, int stride) const;
 
-    void add_packet(const intensity_packet &p);
-    void decode(float *intensity, float *weights, int stride) const;
+    // Factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
+    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+};
+
+
+// Special case nt_per_packet=16 optimized with avx2 kernels, used in full CHIME
+struct fast_assembled_chunk : public assembled_chunk
+{
+    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+
+    virtual void decode(float *intensity, float *weights, int stride) const override;
 };
 
 

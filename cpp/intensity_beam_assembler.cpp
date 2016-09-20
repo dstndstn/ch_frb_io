@@ -103,8 +103,8 @@ void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &p
 	this->nt_per_packet = packet.ntsamp;
 	this->fpga_counts_per_sample = packet.fpga_counts_per_sample;
 
-	this->active_chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, assembler_it0);
-	this->active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk0->chunk_t1);
+	this->active_chunk0 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, assembler_it0);
+	this->active_chunk1 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk0->chunk_t1);
 	this->initflag_unprotected = true;
 
 	pthread_mutex_lock(&this->lock);
@@ -126,7 +126,7 @@ void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &p
 	//
 	this->_put_assembled_chunk(active_chunk0);
 	active_chunk0 = active_chunk1;
-	active_chunk1 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk1->chunk_t1);
+	active_chunk1 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk1->chunk_t1);
     }
 
     // FIXME bookkeep drops!
