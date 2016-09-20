@@ -6,5 +6,7 @@ int main(int argc, char **argv)
 {
     test_lexical_cast();
     test_packet_encoding();
+
+    // peek_at_avx2_kernels();
     return 0;
 }
