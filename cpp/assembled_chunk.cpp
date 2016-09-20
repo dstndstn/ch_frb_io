@@ -15,6 +15,9 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
       nupfreq(nupfreq_), 
       nt_per_packet(nt_per_packet_),
       fpga_counts_per_sample(fpga_counts_per_sample_), 
+      nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
+      nscales(constants::nfreq_coarse * nt_coarse),
+      ndata(constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk),
       chunk_t0(chunk_t0_),
       chunk_t1(chunk_t0_ + constants::nt_per_assembled_chunk)
 {
@@ -27,11 +30,9 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("assembled_chunk constructor: bad fpga_counts_per_sample argument");
 
-    this->data = aligned_alloc<uint8_t> (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk);
-
-    this->nt_coarse = constants::nt_per_assembled_chunk / nt_per_packet;
-    this->scales = aligned_alloc<float> (constants::nfreq_coarse * nt_coarse);
-    this->offsets = aligned_alloc<float> (constants::nfreq_coarse * nt_coarse);
+    this->scales = aligned_alloc<float> (nscales);
+    this->offsets = aligned_alloc<float> (nscales);
+    this->data = aligned_alloc<uint8_t> (ndata);
 }
 
 
@@ -53,24 +54,24 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
     if (x.get() == this)
 	return;
 
-    memcpy(this->data, x->data, constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk);
-    memcpy(this->scales, x->scales, constants::nfreq_coarse * nt_coarse * sizeof(float));
-    memcpy(this->offsets, x->offsets, constants::nfreq_coarse * nt_coarse * sizeof(float));
+    memcpy(this->data, x->data, ndata);
+    memcpy(this->scales, x->scales, nscales * sizeof(float));
+    memcpy(this->offsets, x->offsets, nscales * sizeof(float));
 }
 
 
 void assembled_chunk::randomize(std::mt19937 &rng)
 {
-    // Assign ~10% probability to 0x00 or 0xff
-    for (int i = 0; i < constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk; i++) {
+    for (int i = 0; i < ndata; i++) {
+	// Assign ~10% probability to 0x00 or 0xff
 	int x = randint(rng, -25, 281);
 	x = max(x, 0);
 	x = min(x, 255);
 	this->data[i] = uint8_t(x);
     }
 
-    uniform_rand(rng, this->scales, constants::nfreq_coarse * nt_coarse);
-    uniform_rand(rng, this->offsets, constants::nfreq_coarse * nt_coarse);
+    uniform_rand(rng, this->scales, nscales);
+    uniform_rand(rng, this->offsets, nscales);
 }
 
 

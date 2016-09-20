@@ -301,20 +301,23 @@ struct udp_packet_ringbuf : noncopyable {
 
 struct assembled_chunk : noncopyable {
     // Stream parameters
-    int beam_id = 0;
-    int nupfreq = 0;
-    int nt_per_packet = 0;
-    int fpga_counts_per_sample = 0;
+    const int beam_id = 0;
+    const int nupfreq = 0;
+    const int nt_per_packet = 0;
+    const int fpga_counts_per_sample = 0;
+
+    // More parameters which are constant after construction.
+    const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
+    const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
+    const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
 
     // Time index of first sample in chunk.
     uint64_t chunk_t0 = 0;
     uint64_t chunk_t1 = 0;
 
-    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
-
-    int nt_coarse = 0;         // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
     float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
+    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
     virtual ~assembled_chunk();
