@@ -202,9 +202,11 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
 
+    stream->_network_thread_start();
+
     // We use try..catch to ensure that _network_thread_exit() always gets called, even if an exception is thrown.
     try {
-	stream->network_thread_main();
+	stream->_network_thread_body();
     } catch (...) {
 	stream->_network_thread_exit();
 	throw;
@@ -215,7 +217,7 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 }
 
 
-void intensity_network_stream::network_thread_main()
+void intensity_network_stream::_network_thread_start()
 {
     // Advance stream state to "network_thread_started" state,
     // and wait for another thread to advance it to "stream_started" state.
@@ -236,7 +238,11 @@ void intensity_network_stream::network_thread_main()
 	}
 	pthread_cond_wait(&this->cond_state_changed, &this->lock);
     }
+}
 
+
+void intensity_network_stream::_network_thread_body()
+{
     // Start listening on socket 
 
     struct sockaddr_in server_address;

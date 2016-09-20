@@ -282,8 +282,10 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
 
+    stream->_network_thread_start();
+
     try {
-	stream->network_thread_main();
+	stream->_network_thread_body();
     } catch (...) {
 	stream->end_stream(false);   // "false" means "don't join threads" (would deadlock otherwise!)
 	throw;
@@ -294,13 +296,17 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 }
 
 
-void intensity_network_ostream::network_thread_main()
+void intensity_network_ostream::_network_thread_start()
 {
     pthread_mutex_lock(&state_lock);
     network_thread_started = true;
     pthread_cond_broadcast(&cond_state_changed);
     pthread_mutex_unlock(&state_lock);
+}
 
+
+void intensity_network_ostream::_network_thread_body()
+{
     udp_packet_list packet_list(npackets_per_chunk, nbytes_per_chunk);
     int last_packet_nbytes = 0;
 

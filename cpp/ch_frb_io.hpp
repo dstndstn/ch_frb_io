@@ -439,7 +439,9 @@ protected:
 			      float wt_cutoff, double target_gbps);
 
     static void *network_pthread_main(void *opaque_args);
-    void network_thread_main();
+
+    void _network_thread_start();
+    void _network_thread_body();
 
     void _open_socket();
     void _announce_end_of_stream();
@@ -571,11 +573,13 @@ private:
 
     // Private methods called by the network thread.
     static void *network_pthread_main(void *);
-    void network_thread_main();
+    
+    void _network_thread_start();
+    void _network_thread_body();
+    void _network_thread_exit();
 
     void _open_socket();
     bool _process_packet(const uint8_t *data, int nbytes);
-    void _network_thread_exit();
 };
 
 
