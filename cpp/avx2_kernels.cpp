@@ -233,6 +233,8 @@ void peek_at_unpack_kernel()
 
 void test_fast_decode_kernel(std::mt19937 &rng)
 {
+    cerr << "test_fast_decode_kernel()";
+
     // Required by fast decode kernel
     const int nt_per_packet = 16;
 
@@ -242,6 +244,8 @@ void test_fast_decode_kernel(std::mt19937 &rng)
     const uint64_t chunk_t0 = 0;
 
     for (int iouter = 0; iouter < 128; iouter++) {
+	cerr << ".";
+
 	// Randomized in every iteration
 	const int nupfreq = randint(rng, 1, 17);
 	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
@@ -266,11 +270,15 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 		int i = ifreq*stride + it;
 		int j = ifreq*constants::nt_per_assembled_chunk + it;
 
-		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5)
+		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5) {
+		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
+			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
+			 << " " << intensity0[i] << " " << intensity1[i] << endl;
 		    throw runtime_error("test_fast_decode_kernel: intensity mismatch");
+		}
 
 		if (weights0[i] != weights1[i]) {
-		    cerr << " " << nupfreq << " " << ifreq << " " << it 
+		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
 			 << " " << weights0[i] << " " << weights1[i] << endl;
 		    throw runtime_error("test_fast_decode_kernel: weights mismatch");
@@ -278,6 +286,8 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 	    }
 	}
     }
+
+    cerr << "success\n";
 }
 
 
