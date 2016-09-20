@@ -16,18 +16,19 @@ namespace ch_frb_io {
 
 
 template<unsigned int N>
-inline float _extract(__m128 x)
+inline float _extract128(__m128 x)
 {
     // _mm_extract_ps() returns int instead of float?!
-    int ret = _mm_extract_ps(x, N);
-    return *((float *) &ret);
+    union { int i; float x; } u;
+    u.i = _mm_extract_ps(x, N);
+    return u.x;
 }
 
 template<unsigned int N>
-inline float _extract(__m256 x)
+inline float _extract256(__m256 x)
 {
     __m128 x2 = _mm256_extractf128_ps(x, N/4);
-    return _extract<N%4> (x2);
+    return _extract128<N%4> (x2);
 }
 
 template<unsigned int N> inline void _vstr8_partial(stringstream &ss, __m256i x, bool hexflag);
@@ -62,7 +63,7 @@ template<unsigned int N>
 inline void _vstr_partial(stringstream &ss, __m256 x)
 {
     _vstr_partial<N-1>(ss, x);
-    ss << " " << _extract<N-1>(x);
+    ss << " " << _extract256<N-1>(x);
 }
 
 
@@ -129,8 +130,9 @@ inline void _decode_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m
     __m256i gt0 = _mm256_cmpgt_epi32(x, i0);
     __m256i gt254 = _mm256_cmpgt_epi32(x, i254);
     __m256i valid = _mm256_andnot_si256(gt254, gt0);
+    __m256  wt = _mm256_blendv_ps(f0, f1, (__m256)valid);
 
-    _mm256_storeu_ps(wtp, _mm256_blendv_ps(f0,f1,valid));
+    _mm256_storeu_ps(wtp, wt);
 }
 
 
