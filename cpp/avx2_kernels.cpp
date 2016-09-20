@@ -1,3 +1,4 @@
+#include <cassert>
 #include <iomanip>
 #include <immintrin.h>
 #include "ch_frb_io_internals.hpp"
@@ -339,10 +340,90 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 
 	// Randomized in every iteration
 	const int nupfreq = 2 * randint(rng, 1, 9);
+	const int nfreq_coarse_per_packet = 1 << randint(rng, 0, 6);
 	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
+
+	// Set up intensity_packet
+
+	vector<uint16_t> beam_ids = { beam_id };
+	vector<uint16_t> freq_ids(nfreq_coarse_per_packet, 0);
+	vector<float> scales(nfreq_coarse_per_packet, 0.0);
+	vector<float> offsets(nfreq_coarse_per_packet, 0.0);
+	vector<uint8_t> packet_data(nfreq_coarse_per_packet * nupfreq * nt_per_packet, 0);
+
+	intensity_packet p;
+	p.protocol_version = 1;
+	p.data_nbytes = nfreq_coarse_per_packet * nupfreq * nt_per_packet;
+	p.fpga_counts_per_sample = fpga_counts_per_sample;
+	p.fpga_count = 0;
+	p.nbeams = 1;
+	p.nfreq_coarse = nfreq_coarse_per_packet;
+	p.nupfreq = nupfreq;
+	p.ntsamp = nt_per_packet;
+	p.beam_ids = &beam_ids[0];
+	p.freq_ids = &freq_ids[0];
+	p.scales = &scales[0];
+	p.offsets = &offsets[0];
+	p.data = &packet_data[0];
+
+	// Some auxiliary data which is useful when simulating random packets
+	
+	const int nt_coarse = constants::nt_per_assembled_chunk / nt_per_packet;
+	const int npacket_max = (constants::nfreq_coarse / nfreq_coarse_per_packet) * nt_coarse;
+	const int npackets = randint(rng, npacket_max/2, npacket_max+1);
+
+	vector<int> freq_ids_remaining(nt_coarse, constants::nfreq_coarse);
+	vector<uint16_t> freq_id_pool(nt_coarse * constants::nfreq_coarse);
+
+	for (int i = 0; i < nt_coarse; i++) {
+	    for (int j = 0; j < constants::nfreq_coarse; j++)
+		freq_id_pool[i*constants::nfreq_coarse + j] = j;
+
+	    std::shuffle(freq_id_pool.begin() + i*constants::nfreq_coarse,
+			 freq_id_pool.begin() + (i+1)*constants::nfreq_coarse,
+			 rng);
+	}
+
+	// Test 1: Equivalence of assembled_chunk::add_packet() and fast_assembled_chunk::add_packet()
 	
 	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
 	auto chunk1 = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+
+	for (int ipacket = 0; ipacket < npackets; ipacket++) {
+	    // Simulate random packet
+	    int it_coarse;
+
+	    do {
+		it_coarse = randint(rng, 0, nt_coarse+1);
+	    } while (freq_ids_remaining[it_coarse] >= nfreq_coarse_per_packet);
+
+	    freq_ids_remaining[it_coarse] -= nfreq_coarse_per_packet;
+	    memcpy(p.freq_ids, &freq_id_pool[0] + it_coarse*constants::nfreq_coarse + freq_ids_remaining[it_coarse], nfreq_coarse_per_packet * sizeof(uint16_t));
+	    
+	    uniform_rand(rng, p.scales, nfreq_coarse_per_packet);
+	    uniform_rand(rng, p.offsets, nfreq_coarse_per_packet);
+
+	    for (unsigned int i = 0; i < packet_data.size(); i++) {
+		// Assign ~10% probability to 0x00 or 0xff
+		int x = randint(rng, -25, 281);
+		x = max(x, 0);
+		x = min(x, 255);
+		p.data[i] = uint8_t(x);
+	    }
+
+	    chunk0->add_packet(p);
+	    chunk1->add_packet(p);
+	}
+
+	for (int i = 0; i < chunk0->nscales; i++) {
+	    assert(chunk0->scales[i] == chunk1->scales[i]);
+	    assert(chunk0->offsets[i] == chunk1->offsets[i]);
+	}
+
+	for (int i = 0; i < chunk0->ndata; i++)
+	    assert(chunk0->data[i] == chunk1->data[i]);
+
+	// Test 2: Equivalence of assembled_chunk::decode() and fast_assembled_chunk::decode()
 
 	chunk0->randomize(rng);
 	chunk1->fill_with_copy(chunk0);
