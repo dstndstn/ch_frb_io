@@ -72,20 +72,20 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     const bool use_fast = (irun % 2) == 0;
 
     this->nbeams = randint(rng, 1, maxbeams+1);
-    this->nupfreq = use_fast ? 16 : randint(rng,1,17);
-    this->nfreq_coarse_per_packet = 1 << randint(rng,0,5);
+    this->nupfreq = use_fast ? (2*randint(rng,1,9)) : randint(rng,1,17);
+    this->nt_per_packet = use_fast ? 16 : (1 << randint(rng,0,5));
 
-    // Assign nt_per_packet.  Each packet has a max allowed size, and we also require nt_per_packet <= 512.
-    int header_nbytes = header_size(nbeams, nfreq_coarse_per_packet);
-    int max_data_nbytes = ch_frb_io::constants::max_output_udp_packet_size - header_nbytes;
-    int max_nt_per_packet = min(512, max_data_nbytes / (nbeams * nfreq_coarse_per_packet * nupfreq));
-    int min_nt_per_packet = max_nt_per_packet/2 + 1;
-    assert(max_nt_per_packet >= 3);
+    // Now assign nfreq_coarse_per_packet, subject to packet size constraints.
+    // The constants "c0" and "c1" are defined so that the packet size is c0 + c1 * nfreq_coarse_per_packet.
+    int c0 = 24 + 2*nbeams;
+    int c1 = 2 + 8*nbeams + nbeams*nupfreq*nt_per_packet;
 
-    // We now require that nt_per_packet is a power of 2
-    do {
-	this->nt_per_packet = randint(rng, min_nt_per_packet, max_nt_per_packet + 1);
-    } while (!is_power_of_two(nt_per_packet));
+    this->nfreq_coarse_per_packet = (ch_frb_io::constants::max_output_udp_packet_size - c0) / c1;
+    this->nfreq_coarse_per_packet = min(nfreq_coarse_per_packet, ch_frb_io::constants::nfreq_coarse);
+    this->nfreq_coarse_per_packet = round_down_to_power_of_two(nfreq_coarse_per_packet);
+    
+    assert(nfreq_coarse_per_packet >= 4);
+    this->nfreq_coarse_per_packet /= (1 << randint(rng,0,3));
     
     // Assign nt_per_chunk.  Each chunk should be no more than 512 samples.
     this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);

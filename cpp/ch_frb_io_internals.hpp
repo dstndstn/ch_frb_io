@@ -117,6 +117,13 @@ inline bool is_power_of_two(int n)
     return (n & (n-1)) == 0;
 }
 
+inline int round_down_to_power_of_two(int n)
+{
+    if (n <= 0)
+	throw std::runtime_error("ch_frb_io: internal error: is_power_of_two() received argument <= 0");
+    return (int)log2(n+0.5);
+}
+
 inline int randint(std::mt19937 &rng, int lo, int hi)
 {
     return std::uniform_int_distribution<>(lo,hi-1)(rng);   // note hi-1 here!
