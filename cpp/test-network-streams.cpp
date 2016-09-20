@@ -435,7 +435,7 @@ int main(int argc, char **argv)
 	tp->istream->start_stream();
 
 	send_data(tp);	
-	tp->istream->join_network_thread();
+	tp->istream->join_threads();
 
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
 	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);

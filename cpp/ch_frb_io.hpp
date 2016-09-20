@@ -60,9 +60,17 @@ namespace constants {
     static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr double max_gbps_for_testing = 0.1;
+    static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
+
+    // Parameters of ring buffer between network thread and assembler thread
+    // FIXME this seems excessive.
+    static constexpr int unassembled_ringbuf_capacity = 64;
+    static constexpr int max_unassembled_packets_per_list = 16384;
+    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
+    static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
 
     // Parameters of ring buffers between assembler thread and pipeline threads.
     static constexpr int assembled_ringbuf_capacity = 8;
@@ -501,12 +509,6 @@ private:
 };
 
 
-//
-// An intensity_network_stream object is always backed by a network thread, running in the background.
-//
-// It should be easy to generalize to the case of multiple network interfaces.  In this case I think it would be
-// easiest to have one intensity_network_stream object, backed by multiple network threads.
-//
 class intensity_network_stream : noncopyable {
 public:
     // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
@@ -516,7 +518,7 @@ public:
     // High level control.
     void start_stream();         // tells network thread to start reading packets
     void end_stream();           // asynchronously stops stream
-    void join_network_thread();  // should only be called once, does not end stream
+    void join_threads();         // should only be called once, does not end stream
 
     struct event_counts {
 	ssize_t num_bad_packets = 0;
@@ -527,59 +529,67 @@ public:
 	void clear();
     };
 
-    // Note: get_event_counts() can be called at any time.
+    // Can be called at any time, from any thread.
     event_counts get_event_counts() const;
 
     ~intensity_network_stream();
 
 private:
-    // Note: most of this data is not protected by a lock, since only the network thread uses it.
-    int sockfd = -1;
-    int nassemblers = 0;
-    int udp_port = 0;
+    // Used to exchange data between the network and assembler threads
+    std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
+    // Used only by the network thread (not protected by lock)
+    int sockfd = -1;
+    int udp_port = 0;
+    udp_packet_list incoming_packet_list;
+
+    // Used only by the assembler thread (not protected by lock)
     std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
     std::vector<int> assembler_beam_ids;
-    
-    // When the first packet is received, the network thread initializes these fields,
-    // and calls each assembler's start_stream() method.
-    uint16_t expected_nupfreq;
-    uint16_t expected_nt_per_packet;
-    uint16_t expected_fpga_counts_per_sample;
-    bool first_packet_received = false;
-    
-    // All timestamps are in microseconds, relative to the time when we started listening on the socket.
-    int64_t curr_timestamp = 0;
+    int nassemblers = 0;
 
-    // Used internally to accumulate counts temporarily without holding a lock (see comments in intensity_network_stream.cpp)
+    // Used only by assembler thread (not protected by lock)
+    uint16_t expected_nupfreq = 0;
+    uint16_t expected_nt_per_packet = 0;
+    uint16_t expected_fpga_counts_per_sample = 0;
+    bool expected_params_initialized = false;
     event_counts _tmp_counts;
 
-    mutable pthread_mutex_t lock;
     pthread_t network_thread;
+    pthread_t assembler_thread;
 
-    // All state below is protected by the lock.
+    mutable pthread_mutex_t lock;
 
+    // State model
+    bool assembler_thread_started = false;
     bool network_thread_started = false;
     bool stream_started = false;
     bool stream_ended = false;
     bool join_called = false;
     pthread_cond_t cond_state_changed;
-
+    
     event_counts curr_counts;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
 
-    // Private methods called by the network thread.
+    void _open_socket();
+
     static void *network_pthread_main(void *);
-    
+    static void *assembler_pthread_main(void *);
+
+    // Private methods called by the network thread.    
     void _network_thread_start();
     void _network_thread_body();
     void _network_thread_exit();
+    void _put_unassembled_packets();
 
-    void _open_socket();
-    bool _process_packet(const uint8_t *data, int nbytes);
+    // Private methods called by the assembler thread.     
+    void _assembler_thread_start();
+    void _assembler_thread_body();
+    void _assembler_thread_exit();
+    void _assemble_packet(const uint8_t *data, int nbytes);
 };
 
 
