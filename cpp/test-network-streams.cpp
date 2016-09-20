@@ -84,7 +84,6 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->nfreq_coarse_per_packet = min(nfreq_coarse_per_packet, ch_frb_io::constants::nfreq_coarse);
     this->nfreq_coarse_per_packet = round_down_to_power_of_two(nfreq_coarse_per_packet);
 
-    cerr << "XXX " << nbeams << " " << nupfreq << " " << nt_per_packet << " " << c0 << " " << c1 << " " << ch_frb_io::constants::max_output_udp_packet_size << endl;
     assert(nfreq_coarse_per_packet >= 4);
     this->nfreq_coarse_per_packet /= (1 << randint(rng,0,3));
     
