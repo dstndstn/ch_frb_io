@@ -717,6 +717,8 @@ template<typename T> extern T lexical_cast(const std::string &x);
 // Unit tests
 extern void test_lexical_cast();
 extern void test_packet_encoding();
+extern void test_fast_decode_kernel(std::mt19937 &rng);
+extern void peek_at_unpack_kernel();
 
 
 }  // namespace ch_frb_io

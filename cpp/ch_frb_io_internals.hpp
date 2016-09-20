@@ -234,12 +234,6 @@ inline void xpthread_cond_init(pthread_cond_t *cond)
 }
 
 
-// -------------------------------------------------------------------------------------------------
-
-
-extern void peek_at_avx2_kernels();
-
-
 }  // namespace ch_frb_io
 
 #endif // _CH_FRB_IO_INTERNALS_HPP

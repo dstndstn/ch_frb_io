@@ -203,7 +203,16 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 // -------------------------------------------------------------------------------------------------
 
 
-void peek_at_avx2_kernels()
+// helper function used by test_fast_decode_kernel()
+static vector<float> randvec(std::mt19937 &rng, ssize_t n)
+{
+    vector<float> ret(n);
+    uniform_rand(rng, &ret[0], n);
+    return ret;
+}
+
+
+void peek_at_unpack_kernel()
 {
     uint8_t v[32];
     for (int i = 0; i < 32; i++)
@@ -219,6 +228,56 @@ void peek_at_avx2_kernels()
 	 << _vstr32(y1,false) << endl
 	 << _vstr32(y2,false) << endl
 	 << _vstr32(y3,false) << endl;
+}
+
+
+void test_fast_decode_kernel(std::mt19937 &rng)
+{
+    // Required by fast decode kernel
+    const int nt_per_packet = 16;
+
+    // Initialized arbitrarily, since decode() doesn't use them.
+    const int beam_id = 0;
+    const int fpga_counts_per_sample = 384;
+    const uint64_t chunk_t0 = 0;
+
+    for (int iouter = 0; iouter < 128; iouter++) {
+	// Randomized in every iteration
+	const int nupfreq = randint(rng, 1, 17);
+	const int stride = randint(rng, constants::nt_per_assembled_chunk, constants::nt_per_assembled_chunk + 16);
+	
+	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	auto chunk1 = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+
+	chunk0->randomize(rng);
+	chunk1->fill_with_copy(chunk0);
+
+	int nfreq_fine = constants::nfreq_coarse * nupfreq;
+	vector<float> intensity0 = randvec(rng, nfreq_fine * stride);
+	vector<float> intensity1 = randvec(rng, nfreq_fine * stride);
+	vector<float> weights0 = randvec(rng, nfreq_fine * stride);
+	vector<float> weights1 = randvec(rng, nfreq_fine * stride);
+
+	chunk0->decode(&intensity0[0], &weights0[0], stride);
+	chunk1->decode(&intensity1[0], &weights1[0], stride);
+
+	for (int ifreq = 0; ifreq < nfreq_fine; ifreq++) {
+	    for (int it = 0; it < constants::nt_per_assembled_chunk; it++) {
+		int i = ifreq*stride + it;
+		int j = ifreq*constants::nt_per_assembled_chunk + it;
+
+		if (fabs(intensity0[i] - intensity1[i]) > 1.0e-5)
+		    throw runtime_error("test_fast_decode_kernel: intensity mismatch");
+
+		if (weights0[i] != weights1[i]) {
+		    cerr << " " << nupfreq << " " << ifreq << " " << it 
+			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
+			 << " " << weights0[i] << " " << weights1[i] << endl;
+		    throw runtime_error("test_fast_decode_kernel: weights mismatch");
+		}
+	    }
+	}
+    }
 }
 
 
