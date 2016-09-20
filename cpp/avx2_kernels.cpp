@@ -394,8 +394,8 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 	    int it_coarse;
 
 	    do {
-		it_coarse = randint(rng, 0, nt_coarse+1);
-	    } while (freq_ids_remaining[it_coarse] >= nfreq_coarse_per_packet);
+		it_coarse = randint(rng, 0, nt_coarse);
+	    } while (freq_ids_remaining[it_coarse] < nfreq_coarse_per_packet);
 
 	    freq_ids_remaining[it_coarse] -= nfreq_coarse_per_packet;
 	    memcpy(p.freq_ids, &freq_id_pool[0] + it_coarse*constants::nfreq_coarse + freq_ids_remaining[it_coarse], nfreq_coarse_per_packet * sizeof(uint16_t));
