@@ -301,7 +301,7 @@ void intensity_network_stream::_network_thread_body()
 	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->lock);
 
-	    if (!this->stream_ended) {
+	    if (this->stream_ended) {
 		pthread_mutex_unlock(&this->lock);    
 		return;
 	    }
@@ -436,7 +436,7 @@ void intensity_network_stream::_assembler_thread_exit()
     event_counts counts = this->get_event_counts();
 
     stringstream ss;
-    ss << "ch_frb_io: network input thread exiting:"
+    ss << "ch_frb_io: assembler thread exiting:"
        << " good_packets=" << counts.num_good_packets 
        << ", bad_packets=" << counts.num_bad_packets 
        << ", beam_id_mismatches=" << counts.num_beam_id_mismatches 
