@@ -99,7 +99,7 @@ intensity_network_stream::intensity_network_stream(const vector<shared_ptr<inten
     int max_npackets = constants::max_unassembled_packets_per_list;
     int max_nbytes = constants::max_unassembled_nbytes_per_list;
     string dropstr = "warning: assembler thread running too slow, dropping packets";
-    bool drops_allowed = true;    // FIXME
+    bool drops_allowed = false;    // FIXME
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, drops_allowed);
 
     this->assembler_beam_ids.resize(nassemblers, -1);
@@ -290,13 +290,9 @@ void intensity_network_stream::_network_thread_body()
     uint64_t cancellation_check_timestamp = 0;
 
     for (;;) {
-	// Read new packet from socket (note that socket has a timeout, so this call can time out)
-	uint8_t *packet = incoming_packet_list.data_end;
-	int packet_nbytes = read(sockfd, packet, constants::max_input_udp_packet_size + 1);
-
 	// All timestamps are in microseconds relative to tv_ini.
 	uint64_t curr_timestamp = usec_between(tv_ini, xgettimeofday());
-	
+
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->lock);
@@ -314,6 +310,10 @@ void intensity_network_stream::_network_thread_body()
 	if (curr_timestamp > packet_list_start_timestamp + constants::unassembled_ringbuf_timeout_usec)
 	    this->_put_unassembled_packets();
 
+	// Read new packet from socket (note that socket has a timeout, so this call can time out)
+	uint8_t *packet = incoming_packet_list.data_end;
+	int packet_nbytes = read(sockfd, packet, constants::max_input_udp_packet_size + 1);
+
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
@@ -326,13 +326,13 @@ void intensity_network_stream::_network_thread_body()
 	if (is_end_of_stream_packet(packet, packet_nbytes))
 	    return;
 
-	// If we get here, then the packet will be sent to the assembler thread
-
 	if (incoming_packet_list.curr_npackets == 0)
 	    packet_list_start_timestamp = curr_timestamp;
 
+	// Add packet to list.  Note that there is no way that _put_unassembled_packets() can get called
+	// between the read() call and here (this would be a bug).
 	incoming_packet_list.add_packet(packet_nbytes);
-	
+
 	if (incoming_packet_list.is_full)
 	    this->_put_unassembled_packets();
     }
