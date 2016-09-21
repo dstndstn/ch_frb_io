@@ -144,7 +144,8 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 
 shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_)
 {
-#if 0
+#if 1
+    // Special code optimized for full CHIME.
     if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
 	return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_);
 #endif
