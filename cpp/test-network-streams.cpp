@@ -48,8 +48,11 @@ struct unit_test_instance {
     vector<int> send_beam_ids;
     vector<int> send_freq_ids;
 
-    int send_stride;
-    int recv_stride;
+    int send_stride = 0;
+    int recv_stride = 0;
+
+    int nbytes_per_packet = 0;
+    int npackets_per_chunk = 0;
 
     // not protected by lock
     pthread_t consumer_threads[maxbeams];    
@@ -135,6 +138,9 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
     this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
 
+    this->nbytes_per_packet = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
+    this->npackets_per_chunk = (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
+
     xpthread_mutex_init(&this->tpos_lock);
     xpthread_cond_init(&this->cond_tpos_changed);
     
@@ -151,12 +157,14 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    nt_tot=" << nt_tot << endl
 	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    initial_t0=" << initial_t0 << endl
-	 << "    wt_cutoff=" << wt_cutoff << endl;
+	 << "    wt_cutoff=" << wt_cutoff << endl
+	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
+	 << "    npackets_per_chunk=" << npackets_per_chunk << endl;
 
     // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
-    int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
-    int wc_nbytes = wc_npackets * packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
+    int wc_npackets = wc_nchunks * npackets_per_chunk;
+    int wc_nbytes = wc_npackets * nbytes_per_packet;
     
     // Storage actually allocated
     int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
