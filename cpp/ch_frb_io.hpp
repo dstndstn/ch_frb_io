@@ -69,7 +69,7 @@ namespace constants {
     // FIXME this seems excessive.
     static constexpr int unassembled_ringbuf_capacity = 64;
     static constexpr int max_unassembled_packets_per_list = 16384;
-    static constexpr int max_unassembled_nbytes_per_list = 1024 * 1024;
+    static constexpr int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
     static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
 
     // Parameters of ring buffers between assembler thread and pipeline threads.

@@ -67,6 +67,7 @@ struct unit_test_instance {
 unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
+    const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
     const bool use_fast = (irun % 2) == 0;
@@ -151,6 +152,25 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    initial_t0=" << initial_t0 << endl
 	 << "    wt_cutoff=" << wt_cutoff << endl;
+
+    // Worst-case storage requirements for unassembled ringbuf.
+    int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
+    int wc_npackets = wc_nchunks  * (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
+    int wc_nbytes = wc_npackets * packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
+    
+    // Storage actually allocated
+    int npackets_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_packets_per_list;
+    int nbytes_alloc = ch_frb_io::constants::unassembled_ringbuf_capacity * ch_frb_io::constants::max_unassembled_nbytes_per_list;
+    
+    if ((npackets_alloc < wc_npackets) || (nbytes_alloc < wc_nbytes)) {
+	cout << "    npackets_needed=" << wc_npackets << endl
+	     << "    npackets_allocated=" << npackets_alloc << endl
+	     << "    nbytes_needed=" << wc_nbytes << endl
+	     << "    nbytes_alloc=" << nbytes_alloc << endl
+	     << "Fatal: unassembled_packet_buf is underallocated" << endl;
+	
+	exit(1);
+    }
 
     cout << endl;
 }
