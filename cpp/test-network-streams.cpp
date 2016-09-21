@@ -289,7 +289,7 @@ static void *consumer_thread_main(void *opaque_arg)
 
 		if ((wt_row[it] == 0.0) && (wval > wt_cutoff))
 		    ss << "A probable reason for this failure is that the receive threads can't keep up with the sender.\n"
-		       << "Try increasing ch_frb_io::constants::max_gbps_for_testing (in ch_frb_io.hpp), recompiling and trying again.\n";
+		       << "Try decreasing ch_frb_io::constants::max_gbps_for_testing (in ch_frb_io.hpp), recompiling and trying again.\n";
 
 		cerr << ss.str();
 		exit(1);
