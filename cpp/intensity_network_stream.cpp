@@ -93,10 +93,8 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
     if (x.mandate_fast_kernels && x.mandate_reference_kernels)
 	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
 
-    // All initializations except the socket (which is initialized in _open_socket())
-
-    for (int ix = 0; ix < nassemblers; ix++)
-	this->assemblers.push_back(make_shared<intensity_beam_assembler>(x,ix));
+    // All initializations except the socket (which is initialized in _open_socket()),
+    // and the assemblers (which are initalized when the first packet is received).
 
     int capacity = constants::unassembled_ringbuf_capacity;
     int max_npackets = constants::max_unassembled_packets_per_list;
@@ -166,6 +164,7 @@ void intensity_network_stream::end_stream()
 {
     pthread_mutex_lock(&this->lock);
     this->stream_started = true;
+    this->first_packet_received = true;
     this->stream_ended = true;    
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->lock);
@@ -194,11 +193,17 @@ void intensity_network_stream::join_threads()
 }
 
 
-shared_ptr<intensity_beam_assembler> intensity_network_stream::get_assembler(int assembler_index) const
+shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index)
 {
     if ((assembler_index < 0) || (assembler_index >= nassemblers))
-	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembler()");
-    return assemblers[assembler_index];
+	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
+
+    pthread_mutex_lock(&this->lock);
+    while (!first_packet_received)
+	pthread_cond_wait(&this->cond_state_changed, &this->lock);
+    pthread_mutex_unlock(&this->lock);
+
+    return assemblers[assembler_index]->get_assembled_chunk();
 }
 
 
@@ -427,6 +432,7 @@ void intensity_network_stream::_assembler_thread_start()
 void intensity_network_stream::_assembler_thread_body()
 {
     udp_packet_list packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    bool first_packet = true;
 
     while (unassembled_ringbuf->consumer_get_packet_list(packet_list)) {
 	this->_tmp_counts.clear();
@@ -434,10 +440,98 @@ void intensity_network_stream::_assembler_thread_body()
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list.data_start + packet_list.packet_offsets[ipacket];
             int packet_nbytes = packet_list.packet_offsets[ipacket+1] - packet_list.packet_offsets[ipacket];
-	    
-	    this->_assemble_packet(packet_data, packet_nbytes);
-	}
+	    intensity_packet packet;
 
+	    if (!packet.read(packet_data, packet_nbytes)) {
+		this->_tmp_counts.num_bad_packets++;
+		continue;
+	    }
+
+	    if (first_packet) {
+		this->fp_nupfreq = packet.nupfreq;
+		this->fp_nt_per_packet = packet.ntsamp;
+		this->fp_fpga_counts_per_sample = packet.fpga_counts_per_sample;
+		this->fp_fpga_count = packet.fpga_count;
+		first_packet = false;
+
+		for (int ix = 0; ix < nassemblers; ix++)
+		    this->assemblers.push_back(make_shared<intensity_beam_assembler>(*this,ix));
+
+		pthread_mutex_lock(&this->lock);
+		this->first_packet_received = true;
+		pthread_cond_broadcast(&this->cond_state_changed);
+		pthread_mutex_unlock(&this->lock);
+	    }
+
+	    bool mismatch = (packet.nupfreq != fp_nupfreq) || (packet.ntsamp != fp_nt_per_packet) || (packet.fpga_counts_per_sample != fp_fpga_counts_per_sample);
+
+	    if (_unlikely(mismatch)) {
+		this->_tmp_counts.num_first_packet_mismatches++;
+		continue;
+	    }
+
+	    // All checks passed.  Packet is declared "good" here.  
+	    //
+	    // The following checks have been performed, either in this routine or in intensity_packet::read().
+	    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
+	    //     and not large enough to lead to integer overflows
+	    //   - packet and data byte counts are correct
+	    //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
+	    //   - ntsamp is a power of two
+	    //   - fpga_counts_per_sample is > 0
+	    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+	    //
+	    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
+	    // so it's important that they're done here!
+
+	    this->_tmp_counts.num_good_packets++;
+	    
+	    int nbeams = packet.nbeams;
+	    int nfreq_coarse = packet.nfreq_coarse;
+	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
+	    const int *assembler_beam_ids = &_initializer.beam_ids[0];  // bare pointer for speed
+    
+	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
+	    // length fields.  The new packet corresponds to a subset of the original packet containing
+	    // only beam index zero.
+	    
+	    packet.data_nbytes = new_data_nbytes;
+	    packet.nbeams = 1;
+	    
+	    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
+		// Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
+		// original packet containing only beam index 'ibeam'.
+		
+		// Loop over assembler ids, to find a match for the packet_id.
+		int packet_id = packet.beam_ids[0];
+		int assembler_ix = 0;
+		
+		for (;;) {
+		    if (assembler_beam_ids[assembler_ix] == packet_id) {
+			// Match found
+			assemblers[assembler_ix]->put_unassembled_packet(packet);
+			break;
+		    }
+		    
+		    assembler_ix++;
+		    
+		    if (assembler_ix >= nassemblers) {
+			// No match found
+			this->_tmp_counts.num_beam_id_mismatches++;
+			break;
+		    }
+		}
+		
+		// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
+		// corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
+		
+		packet.beam_ids += 1;
+		packet.scales += nfreq_coarse;
+		packet.offsets += nfreq_coarse;
+		packet.data += new_data_nbytes;
+	    }
+	}
+	    
 	pthread_mutex_lock(&this->lock);
 	this->curr_counts += _tmp_counts;
 	pthread_mutex_unlock(&this->lock);
@@ -461,122 +555,7 @@ void intensity_network_stream::_assembler_thread_exit()
     unassembled_ringbuf->end_stream();
 
     for (int i = 0; i < nassemblers; i++)
-	assemblers[i]->_end_stream();
-}
-
-
-void intensity_network_stream::_assemble_packet(const uint8_t *packet_data, int packet_nbytes)
-{
-    intensity_packet packet;
-
-    if (!packet.read(packet_data, packet_nbytes)) {
-	this->_tmp_counts.num_bad_packets++;
-	return;
-    }
-
-    // The following checks are not included in intensity_packet::read().
-
-    if (!is_power_of_two(packet.ntsamp)) {
-	this->_tmp_counts.num_bad_packets++;
-	return;
-    }
-
-    for (int i = 0; i < packet.nfreq_coarse; i++) {
-	if (_unlikely(packet.freq_ids[i] >= constants::nfreq_coarse)) {
-	    this->_tmp_counts.num_bad_packets++;
-	    return;
-	}
-    }
-
-    if (this->expected_params_initialized) {
-	bool mismatch = ((packet.nupfreq != expected_nupfreq) || 
-			 (packet.ntsamp != expected_nt_per_packet) ||
-			 (packet.fpga_counts_per_sample != expected_fpga_counts_per_sample));
-	
-	if (_unlikely(mismatch)) {
-	    this->_tmp_counts.num_first_packet_mismatches++;
-	    return;
-	}
-    }
-    else {
-	if (_unlikely(packet.fpga_counts_per_sample == 0)) {
-	    this->_tmp_counts.num_bad_packets++;
-	    return;
-	}
-
-	this->expected_nupfreq = packet.nupfreq;
-	this->expected_nt_per_packet = packet.ntsamp;
-	this->expected_fpga_counts_per_sample = packet.fpga_counts_per_sample;
-	this->expected_params_initialized = true;
-    }
-
-    // Note conversions to uint64_t, to prevent integer overflow
-    uint64_t fpga_counts_per_packet = uint64_t(packet.fpga_counts_per_sample) * uint64_t(packet.ntsamp);
-    if (_unlikely(packet.fpga_count % fpga_counts_per_packet != 0)) {
-	this->_tmp_counts.num_bad_packets++;
-	return;
-    }
-
-    // All checks passed.  Packet is declared "good" here.  
-    //
-    // The following checks have been performed, either in this routine or in intensity_packet::read().
-    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are positive,
-    //     and not large enough to lead to integer overflows
-    //   - packet and data byte counts are correct
-    //   - coarse_freq_ids are valid (didn't check for duplicates but that's ok)
-    //   - ntsamp is a power of two
-    //   - fpga_counts_per_sample is > 0
-    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
-    //
-    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
-    // so it's important that they're done here!
-
-    this->_tmp_counts.num_good_packets++;
-
-    int nbeams = packet.nbeams;
-    int nfreq_coarse = packet.nfreq_coarse;
-    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-    const int *assembler_beam_ids = &_initializer.beam_ids[0];  // bare pointer for speed
-
-    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
-    // length fields.  The new packet corresponds to a subset of the original packet containing
-    // only beam index zero.
-
-    packet.data_nbytes = new_data_nbytes;
-    packet.nbeams = 1;
-    
-    for (int ibeam = 0; ibeam < nbeams; ibeam++) {
-	// Loop invariant: at the top of this loop, 'packet' corresponds to a subset of the
-	// original packet containing only beam index 'ibeam'.
-
-	// Loop over assembler ids, to find a match for the packet_id.
-	int packet_id = packet.beam_ids[0];
-	int assembler_ix = 0;
-
-	for (;;) {
-	    if (assembler_beam_ids[assembler_ix] == packet_id) {
-		// Match found
-		assemblers[assembler_ix]->_put_unassembled_packet(packet);
-		break;
-	    }
-
-	    assembler_ix++;
-
-	    if (assembler_ix >= nassemblers) {
-		// No match found
-		this->_tmp_counts.num_beam_id_mismatches++;
-		break;
-	    }
-	}
-
-	// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
-	// corresponds to a new subset of the original packet, corresponding to beam index (ibeam+1).
-
-	packet.beam_ids += 1;
-	packet.scales += nfreq_coarse;
-	packet.offsets += nfreq_coarse;
-	packet.data += new_data_nbytes;
-    }
+	assemblers[i]->end_stream();
 }
 
 

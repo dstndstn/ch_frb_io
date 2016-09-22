@@ -201,7 +201,6 @@ unit_test_instance::~unit_test_instance()
 
 
 struct consumer_thread_context {
-    shared_ptr<ch_frb_io::intensity_beam_assembler> assembler;
     shared_ptr<unit_test_instance> tp;
     int ithread = 0;
 
@@ -209,8 +208,8 @@ struct consumer_thread_context {
     pthread_cond_t cond_running;
     bool is_running = false;
 
-    consumer_thread_context(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler_, const shared_ptr<unit_test_instance> &tp_, int ithread_)
-	: assembler(assembler_), tp(tp_), ithread(ithread_)
+    consumer_thread_context(const shared_ptr<unit_test_instance> &tp_, int ithread_)
+	: tp(tp_), ithread(ithread_)
     {
 	xpthread_mutex_init(&lock);
 	xpthread_cond_init(&cond_running);
@@ -234,7 +233,6 @@ static void *consumer_thread_main(void *opaque_arg)
     // setting context->is_running to unblock the parent thread.  The first thing we do is
     // extract all members of the context struct so we don't need to access it again.
     //
-    shared_ptr<ch_frb_io::intensity_beam_assembler> assembler = context->assembler;
     shared_ptr<unit_test_instance> tp = context->tp;
     int ithread = context->ithread;
     
@@ -251,16 +249,15 @@ static void *consumer_thread_main(void *opaque_arg)
     double wt_cutoff = tp->wt_cutoff;
     int test_t0 = tp->initial_t0;
     int test_t1 = tp->initial_t0 + tp->nt_tot;
-    int beam_id = assembler->beam_id;
+    int beam_id = tp->recv_beam_ids[ithread];
 
     uint64_t tpos = 0;
     bool tpos_initialized = false;
 
     for (;;) {
-	shared_ptr<assembled_chunk> chunk;
-	bool alive = assembler->get_assembled_chunk(chunk);
+	auto chunk = tp->istream->get_assembled_chunk(ithread);
 
-	if (!alive)
+	if (!chunk)
 	    break;
 
 	chunk->decode(&all_intensities[0], &all_weights[0], tp->recv_stride);
@@ -268,7 +265,7 @@ static void *consumer_thread_main(void *opaque_arg)
 	assert(chunk->nupfreq == tp->nupfreq);
 	assert(chunk->nt_per_packet == tp->nt_per_packet);
 	assert(chunk->fpga_counts_per_sample == tp->fpga_counts_per_sample);
-	assert(chunk->beam_id == assembler->beam_id);
+	assert(chunk->beam_id == beam_id);
 
 	if (tpos_initialized)
 	    assert(chunk->chunk_t0 == tpos);
@@ -340,9 +337,9 @@ static void *consumer_thread_main(void *opaque_arg)
 }
 
 
-static void spawn_consumer_thread(const shared_ptr<ch_frb_io::intensity_beam_assembler> &assembler, const shared_ptr<unit_test_instance> &tp, int ithread)
+static void spawn_consumer_thread(const shared_ptr<unit_test_instance> &tp, int ithread)
 {
-    consumer_thread_context context(assembler, tp, ithread);
+    consumer_thread_context context(tp, ithread);
 
     int err = pthread_create(&tp->consumer_threads[ithread], NULL, consumer_thread_main, &context);
     if (err)
@@ -365,10 +362,8 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 
     tp->istream = intensity_network_stream::make(initializer);
     
-    for (int ithread = 0; ithread < tp->nbeams; ithread++) {
-	auto assembler = tp->istream->get_assembler(ithread);
-	spawn_consumer_thread(assembler, tp, ithread);
-    }
+    for (int ithread = 0; ithread < tp->nbeams; ithread++)
+	spawn_consumer_thread(tp, ithread);
 }
 
 

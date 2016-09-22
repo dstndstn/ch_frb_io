@@ -443,8 +443,10 @@ public:
     void end_stream();           // asynchronously stops stream
     void join_threads();         // should only be called once, does not asynchronously stop stream.
 
-    // Returns a per-beam assembler object which can be queried for intensity and weights arrays.
-    std::shared_ptr<intensity_beam_assembler> get_assembler(int assembler_index) const;
+    // FIXME Not sure if we really need this.
+    // bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
+
+    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
 
     struct event_counts {
 	ssize_t num_bad_packets = 0;
@@ -454,7 +456,7 @@ public:
 	event_counts &operator+=(const event_counts &x);
 	void clear();
     };
-
+    
     // Can be called at any time, from any thread.
     initializer get_initializer() const;
     event_counts get_event_counts() const;
@@ -462,10 +464,22 @@ public:
     ~intensity_network_stream();
 
 private:
+    friend class intensity_beam_assembler;
+
     // Constant after construction, so not protected by lock
     const initializer _initializer;
     const int nassemblers = 0;
     std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
+    
+    // These fields are initialized from the first packet received ("fp_" stands for "first packet").
+    // They are initialized by the assembler thread, which then advances the state model to "first_packet_received".
+    // They are not protected by a lock!  This is OK as long as non-assembler threads access them read-only, and
+    // only after checking the first_packet_received flag (which does require a lock).
+
+    uint16_t fp_nupfreq = 0;
+    uint16_t fp_nt_per_packet = 0;
+    uint16_t fp_fpga_counts_per_sample = 0;
+    uint64_t fp_fpga_count = 0;
 
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
@@ -475,10 +489,6 @@ private:
     udp_packet_list incoming_packet_list;
 
     // Used only by assembler thread (not protected by lock)
-    uint16_t expected_nupfreq = 0;
-    uint16_t expected_nt_per_packet = 0;
-    uint16_t expected_fpga_counts_per_sample = 0;
-    bool expected_params_initialized = false;
     event_counts _tmp_counts;
 
     pthread_t network_thread;
@@ -486,10 +496,11 @@ private:
 
     mutable pthread_mutex_t lock;
 
-    // State model
+    // State model.  Note that the 
     bool assembler_thread_started = false;
     bool network_thread_started = false;
     bool stream_started = false;
+    bool first_packet_received = false;
     bool stream_ended = false;
     bool join_called = false;
     pthread_cond_t cond_state_changed;
@@ -515,55 +526,47 @@ private:
     void _assembler_thread_start();
     void _assembler_thread_body();
     void _assembler_thread_exit();
-    void _assemble_packet(const uint8_t *data, int nbytes);
 };
 
 
 class intensity_beam_assembler : noncopyable {
 public:
-    intensity_beam_assembler(const intensity_network_stream::initializer &x, int assembler_ix);
-    
-    bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
-    bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
-
-    const intensity_network_stream::initializer _initializer;
-    int beam_id = -1;
-
+    // When the assembler is constructed, the fp_ fields must be initialized.
+    intensity_beam_assembler(const intensity_network_stream &s, int assembler_ix);
     ~intensity_beam_assembler();
 
-private:
-    friend class intensity_network_stream;
+    // Called by assembler thread
+    void put_unassembled_packet(const intensity_packet &packet);
+    void end_stream();   // called when assembler thread exits
 
-    // Routines called by network thread
-    void _put_unassembled_packet(const intensity_packet &packet);
-    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
-    void _end_stream();   // called by network thread on exit
+    // Called by "processing" threads, via intensity_network_stream::get_assembled_chunk().
+    std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
-    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
 
-    // This data is not protected by the lock, but is only accessed by the network thread.
-    std::shared_ptr<assembled_chunk> active_chunk0;
-    std::shared_ptr<assembled_chunk> active_chunk1;
-    bool initflag_unprotected = false;
-    bool doneflag_unprotected = false;
+protected:
+    // Initialized at construction
+    const intensity_network_stream::initializer _initializer;
 
-    // This data can either be accessed by the network thread, or by an outside thread after
-    // acquiring the lock and waiting for initflag_protected (FIXME explain).
+    int beam_id = 0;
     int nupfreq = 0;
     int nt_per_packet = 0;
     int fpga_counts_per_sample = 0;
 
+    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
+    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
+
+    // This data is not protected by the lock, but is only accessed by the assembler thread.
+    std::shared_ptr<assembled_chunk> active_chunk0;
+    std::shared_ptr<assembled_chunk> active_chunk1;
+
     // All state below is protected by the lock
     pthread_mutex_t lock;
-    pthread_cond_t cond_initflag_set;
     pthread_cond_t cond_assembled_chunks_added;
-
-    bool initflag_protected = false;
-    bool doneflag_protected = false;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
     int assembled_ringbuf_pos = 0;
     int assembled_ringbuf_size = 0;
+    bool doneflag = false;
 };
 
 
