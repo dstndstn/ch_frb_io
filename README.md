@@ -73,18 +73,49 @@ INSTALLATION (PYTHON)
 
 ### LOOSE ENDS IN NETWORKING CODE
 
+  - We plan to implement RPC's which operate on the assembled_ringbufs, and support
+    operations such as flushes to disk, and retrieval of ring-buffered data over the network.
+    The first step here is doing some research to decide which RPC framework to use (maybe
+    google RPC?)
+
+  - We don't have thread-safe logging, so diagnostic messages from the various threads
+    sometimes interleave each other and are unreadable.  (Implementing thread-safe
+    logging is a general todo item for the whole CHIMEFRB backend, not just this repository!)
+
+  - There is a proposal to bitshuffle-compress the packets, which may reduce bandwidth
+    by ~20%, but this is currently unimplemented.
+
+  - Eventually it would be nice to do an end-to-end test of the FRB backend, by having
+    a "simulator" node generate timestreams containing noise + FRB's, and sending them
+    over the network.  However, the current simulation code is single-threaded, and a
+    single core is too slow to even generate a stream of Gaussian random numbers at
+    full CHIME bandwidth!
+
   - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
     to avoid dropping packets.  This means that the unit tests take about an hour to run,
     which isn't really a problem, but is indicative of deeper performance problems?  It
     would be nice to understand where the bottleneck is.
 
-  - We don't have thread-safe logging, so diagnostic messages from the various threads
-    sometimes interleave each other and are unreadable.  (Implementing thread-safe
-    logging is a general todo item for the whole project, not just libch_frb_io!)
+  - It might be possible to further optimize the assembly-language kernels for packet assembly
+    and decoding, using streaming writes.  See Chapter 7 ("optimizing cache usage") of the
+    intel optimization manual.  We also might be able to improve performance a little using
+    aligned loads/stores, but this would impose pointer alignment requirements on callers of
+    assembled_chunk::decode().
 
-  - Cleanup: it would be great to switch from pthreads to C++11 threads.  (The C++11 API
-    is much nicer but I'm not sure that code written using pthreads and C++11 threads can
+  - It would be great to switch from pthreads to C++11 threads.  (The C++11 API is
+    much nicer but I'm not sure that code written using pthreads and C++11 threads can
     interoperate.  If not, then we have to make the switch in many libraries at once!)
 
-  - There is a proposal to bitshuffle-compress the packets, which may reduce bandwidth
-    by ~20%, but this is currently unimplemented.
+  - Nuisance issue: if a chime_network_stream is constructed from python, then it doesn't
+    respond to control-C (not sure if this is a 'ch_frb_io' loose end, or an 'rf_pipelines' 
+    loose end).
+
+  - We'll probably want a member function of intensity_network_stream which pins the
+    network and assembler threads to specific cores.
+
+  - Open-ended item: there are lots of things that can go wrong in a realtime system,
+    such as temporary network failures, and threads running slow so that ring buffers
+    overfill.  We need to think carefully about different failure modes and figure out
+    how best to handle them.
+
+
