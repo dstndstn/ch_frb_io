@@ -32,9 +32,9 @@ endif
 LIBS = -lhdf5
 
 OFILES = assembled_chunk.o \
+	assembled_chunk_ringbuf.o \
 	avx2_kernels.o \
 	hdf5.o \
-	intensity_beam_assembler.o \
 	intensity_hdf5_file.o \
 	intensity_hdf5_ofile.o \
 	intensity_network_stream.o \

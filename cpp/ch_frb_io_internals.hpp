@@ -87,6 +87,7 @@ struct intensity_packet {
 };
 
 
+// FIXME make these static member functions of intensity_packet?
 inline int header_size(int nbeams, int nfreq_coarse)
 {
     return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
@@ -96,6 +97,50 @@ inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_pac
 {
     return header_size(nbeams, nfreq_coarse) + (nbeams * nfreq_coarse * nupfreq * nt_per_packet);
 }
+
+
+// -------------------------------------------------------------------------------------------------
+
+
+class assembled_chunk_ringbuf : noncopyable {
+public:
+    // When the assembler is constructed, the fp_ fields must be initialized.
+    assembled_chunk_ringbuf(const intensity_network_stream &s, int assembler_ix);
+    ~assembled_chunk_ringbuf();
+
+    // Called by assembler thread
+    void put_unassembled_packet(const intensity_packet &packet);
+    void end_stream();   // called when assembler thread exits
+
+    // Called by "processing" threads, via intensity_network_stream::get_assembled_chunk().
+    std::shared_ptr<assembled_chunk> get_assembled_chunk();
+
+
+protected:
+    // Initialized at construction
+    const intensity_network_stream::initializer _initializer;
+
+    int beam_id = 0;
+    int nupfreq = 0;
+    int nt_per_packet = 0;
+    int fpga_counts_per_sample = 0;
+
+    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
+    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
+
+    // This data is not protected by the lock, but is only accessed by the assembler thread.
+    std::shared_ptr<assembled_chunk> active_chunk0;
+    std::shared_ptr<assembled_chunk> active_chunk1;
+
+    // All state below is protected by the lock
+    pthread_mutex_t lock;
+    pthread_cond_t cond_assembled_chunks_added;
+
+    std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
+    int assembled_ringbuf_pos = 0;
+    int assembled_ringbuf_size = 0;
+    bool doneflag = false;
+};
 
 
 // -------------------------------------------------------------------------------------------------
