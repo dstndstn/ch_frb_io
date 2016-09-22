@@ -171,12 +171,12 @@ template<typename T> inline T prod(const std::vector<T> &v)
 }
 
 // returns string representation of a vector
-template<typename T> inline std::string vstr(const T *buf, int n)
+template<typename T> inline std::string vstr(const T *buf, int n, int stride=1)
 {
     std::stringstream ss;
     ss << "[";
     for (int i = 0; i < n; i++)
-	ss << " " << buf[i];
+	ss << " " << buf[i*stride];
     ss << " ]";
     return ss.str();
 }
