@@ -11,7 +11,16 @@ namespace ch_frb_io {
 
 
 // Returns true if packet is good, false if bad.
-// Note: no checking of freq_ids is performed!
+//
+// Explicitly, the following checks are performed:
+//   - protocol version == 1
+//   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to integer overflows
+//   - packet and data byte counts are correct
+//   - coarse_freq_ids are in range
+//   - ntsamp is a power of two
+//   - nbeams, nfreq_coarse, nupfreq, ntsamp, fpga_counts_per_sample are all > 0
+//   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
+
 bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 {
     if (_unlikely(src_nbytes < 24))
@@ -23,9 +32,16 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 
     if (_unlikely(protocol_version != 1))
 	return false;
+    if (_unlikely(!is_power_of_two(ntsamp)))
+	return false;
+    if (_unlikely(fpga_counts_per_sample == 0))
+	return false;
+
+    // Note conversions to uint64_t, to prevent integer overflow
+    uint64_t fpga_counts_per_packet = uint64_t(fpga_counts_per_sample) * uint64_t(ntsamp);
+    if (_unlikely(fpga_count % fpga_counts_per_packet != 0))
+	return false;
 	
-    // The following arithmetic operations have been chosen to avoid integer overflows,
-    // and to minimize the number of branches required to validate the packet.
     uint64_t n1 = uint64_t(nbeams);
     uint64_t n2 = uint64_t(nfreq_coarse);
     uint64_t n3 = uint64_t(nupfreq);
@@ -45,6 +61,10 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
     this->scales = (float *) (src + 24 + 2*n1 + 2*n2);
     this->offsets = (float *) (src + 24 + 2*n1 + 2*n2 + 4*n1*n2);
     this->data = (uint8_t *) (src + nh);
+
+    for (int i = 0; i < nfreq_coarse; i++)
+	if (_unlikely(freq_ids[i] >= constants::nfreq_coarse))
+	    return false;
 
     return true;
 }

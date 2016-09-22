@@ -55,20 +55,7 @@ struct intensity_packet {
 
     // FIXME rethink the member function names below, since they're not very intuitive
 
-    //
     // Returns true if packet is good, false if bad
-    //
-    // Includes the following checks:
-    //   - protocol version == 1
-    //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to integer overflows
-    //   - packet and data byte counts are correct
-    //
-    // Does not check the following:
-    //   - any checks on beam ids or coarse_freq_ids
-    //   - ntsamp is a power of two
-    //   - nbeams, nfreq_coarse, nupfreq, ntsamp, fpga_counts_per_sample are all > 0
-    //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
-    //
     bool read(const uint8_t *src, int src_nbytes);
 
     // Returns packet_nbytes (not data_nbytes)
