@@ -460,13 +460,6 @@ void intensity_network_stream::_assemble_packet(const uint8_t *packet_data, int 
 	return;
     }
 
-    if (packet.fpga_count == 3754*93) {
-	int i = packet.find_freq_id(490);
-	if (i >= 0) {
-	    cerr << "XXX " << int32_t(packet.data[7*i+2]) << endl;
-	}
-    }
-
     // The following checks are not included in intensity_packet::read().
 
     if (!is_power_of_two(packet.ntsamp)) {

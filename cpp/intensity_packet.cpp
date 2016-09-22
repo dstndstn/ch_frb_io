@@ -113,7 +113,12 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
 	    float mean = acc1/acc0;
 	    float var = acc2/acc0 - mean*mean;
     
-	    var = max(var, float(1.0e-10) * mean*mean);
+	    // Since we use single precision, the numerical error in 'var' is approx (1.0e-7 * mean*mean),
+	    // so we need to regulate values of 'var' which are of this order or smaller.  The radiometer
+	    // equation predicts that the ideal variance is (1.0e-3 * mean*mean) or more, depending on
+	    // the correlator configuration.  We choose a regulator which is safely in between these values.
+
+	    var = max(var, float(1.0e-5) * mean*mean);
 
 	    float scale = sqrt(var) / 25.;
 	    float offset = -128.*scale + mean;   // 0x80 -> mean
@@ -134,6 +139,22 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
 	    }
 	}
     }
+}
+
+
+int intensity_packet::find_freq_id(int freq_id) const
+{
+    for (int i = 0; i < this->nfreq_coarse; i++)
+	if (this->freq_ids[i] == freq_id)
+	    return i;
+    return -1;
+}
+
+
+bool intensity_packet::contains_freq_id(int freq_id) const
+{
+    int i = this->find_freq_id(freq_id);
+    return (i >= 0);
 }
 
 
