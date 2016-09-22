@@ -469,6 +469,12 @@ private:
     // Constant after construction, so not protected by lock
     const initializer _initializer;
     const int nassemblers = 0;
+
+    // This is initialized by the assembler thread before it sets 'first_packet_received' flag.
+    // Therefore, other threads can access it without a lock, but should wait for this flag to be set (which does
+    // require a lock).  There is a corner case where the vector is still length-zero after the flag gets set.
+    // This happens if the stream was asynchronously cancelled before receiving the first packet.
+
     std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
     
     // These fields are initialized from the first packet received ("fp_" stands for "first packet").

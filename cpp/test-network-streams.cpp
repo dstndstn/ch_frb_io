@@ -111,17 +111,18 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 
 #if 0
     // Sometimes it's convenient to debug a specific test case...
-    this->nbeams = 1;
-    this->nupfreq = 7;
-    this->nfreq_coarse_per_packet = 256;
-    this->nt_per_packet = 1;
-    this->nt_per_chunk = 66;
-    this->nt_tot = 27258;
-    this->initial_t0 = 2998;
-    this->fpga_counts_per_sample = 93;
-    this->wt_cutoff = 0.597753;
-    this->send_stride = 78;
-    this->recv_stride = 1057;
+    this->use_fast_kernels = false;
+    this->nbeams = 8;
+    this->nupfreq = 4;
+    this->nfreq_coarse_per_packet = 8;
+    this->nt_per_packet = 8;
+    this->nt_per_chunk = 488;
+    this->nt_tot = 6344;
+    this->initial_t0 = 15840;
+    this->fpga_counts_per_sample = 862;
+    this->wt_cutoff = 0.565123;
+    this->send_stride = 646;
+    this->recv_stride = 1424;
 #endif
 
     // Clunky way of generating random beam_ids
@@ -153,7 +154,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 
     cout << "\nStarting test run " << irun << "/" << nrun << endl;
 
-    cout << "    nbeams=" << nbeams << endl
+    cout << "    use_fast_kernels=" << use_fast_kernels << endl
+	 << "    nbeams=" << nbeams << endl
 	 << "    nupfreq=" << nupfreq << endl
 	 << "    nfreq_coarse_per_packet=" << nfreq_coarse_per_packet << endl
 	 << "    nt_per_packet=" << nt_per_packet << endl

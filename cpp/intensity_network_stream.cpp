@@ -198,10 +198,16 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     if ((assembler_index < 0) || (assembler_index >= nassemblers))
 	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
 
+    // Wait for first_packet_received flag to be set.
     pthread_mutex_lock(&this->lock);
     while (!first_packet_received)
 	pthread_cond_wait(&this->cond_state_changed, &this->lock);
     pthread_mutex_unlock(&this->lock);
+
+    // There is a corner case where the vector is still length-zero after the flag gets set.
+    // This happens if the stream was asynchronous cancelled before receiving the first packet.
+    if (assemblers.size() == 0)
+	return shared_ptr<assembled_chunk> ();
 
     return assemblers[assembler_index]->get_assembled_chunk();
 }
@@ -255,7 +261,7 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 	stream->_network_thread_exit();
 	throw;
     }
-
+    
     stream->_network_thread_exit();
     return NULL;
 }
@@ -554,7 +560,10 @@ void intensity_network_stream::_assembler_thread_exit()
 
     unassembled_ringbuf->end_stream();
 
-    for (int i = 0; i < nassemblers; i++)
+    // Use assemblers.size() instead of 'nassemblers', to correctly handle a corner case where the stream
+    // is asynchronously cancelled before receiving the first packet, and the vector never gets allocated.
+
+    for (unsigned int i = 0; i < assemblers.size(); i++)
 	assemblers[i]->end_stream();
 }
 
