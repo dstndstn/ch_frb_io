@@ -34,6 +34,7 @@ inline double wtval(int beam_id, int ifreq, int it)
 struct unit_test_instance {
     static constexpr int maxbeams = 8;
 
+    bool use_fast_kernels = false;
     int nbeams = 0;
     int nupfreq = 0;
     int nfreq_coarse_per_packet = 0;
@@ -73,11 +74,10 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
-    const bool use_fast = (irun % 2) == 0;
-
+    this->use_fast_kernels = ((irun % 2) == 0);
     this->nbeams = randint(rng, 1, maxbeams+1);
-    this->nupfreq = use_fast ? (2*randint(rng,1,9)) : randint(rng,1,17);
-    this->nt_per_packet = use_fast ? 16 : (1 << randint(rng,0,5));
+    this->nupfreq = use_fast_kernels ? (2*randint(rng,1,9)) : randint(rng,1,17);
+    this->nt_per_packet = use_fast_kernels ? 16 : (1 << randint(rng,0,5));
 
     // Now assign nfreq_coarse_per_packet, subject to packet size constraints.
     // The constants "c0" and "c1" are defined so that the packet size is c0 + c1 * nfreq_coarse_per_packet.
@@ -357,15 +357,18 @@ static void spawn_consumer_thread(const shared_ptr<ch_frb_io::intensity_beam_ass
 
 static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 {
-    vector<shared_ptr<ch_frb_io::intensity_beam_assembler> > assemblers;
+    ch_frb_io::intensity_network_stream::initializer initializer;
+    initializer.beam_ids = tp->recv_beam_ids;
+    initializer.mandate_reference_kernels = !tp->use_fast_kernels;
+    initializer.mandate_fast_kernels = tp->use_fast_kernels;
+    initializer.drops_allowed = false;
 
+    tp->istream = intensity_network_stream::make(initializer);
+    
     for (int ithread = 0; ithread < tp->nbeams; ithread++) {
-	auto assembler = make_shared<ch_frb_io::intensity_beam_assembler> (tp->recv_beam_ids[ithread], false);   // drops_allowed = false
+	auto assembler = tp->istream->get_assembler(ithread);
 	spawn_consumer_thread(assembler, tp, ithread);
-	assemblers.push_back(assembler);
     }
-
-    tp->istream = intensity_network_stream::make(assemblers, ch_frb_io::constants::default_udp_port);
 }
 
 

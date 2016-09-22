@@ -14,11 +14,13 @@ namespace ch_frb_io {
 // class intensity_beam_assembler
 
 
-intensity_beam_assembler::intensity_beam_assembler(int beam_id_, bool drops_allowed_) 
-    : beam_id(beam_id_), drops_allowed(drops_allowed_)
+intensity_beam_assembler::intensity_beam_assembler(const intensity_network_stream::initializer &x, int assembler_ix) :
+    _initializer(x)
 {
-    if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
-	throw runtime_error("intensity_beam_constructor: invalid beam_id");
+    if ((assembler_ix < 0) || (assembler_ix >= (int)x.beam_ids.size()))
+	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_beam_assembler constructor");
+
+    this->beam_id = x.beam_ids[assembler_ix];
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_initflag_set, NULL);
@@ -103,8 +105,8 @@ void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &p
 	this->nt_per_packet = packet.ntsamp;
 	this->fpga_counts_per_sample = packet.fpga_counts_per_sample;
 
-	this->active_chunk0 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, assembler_it0);
-	this->active_chunk1 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk0->chunk_t1);
+	this->active_chunk0 = this->_make_assembled_chunk(assembler_it0);
+	this->active_chunk1 = this->_make_assembled_chunk(active_chunk0->chunk_t1);
 	this->initflag_unprotected = true;
 
 	pthread_mutex_lock(&this->lock);
@@ -126,7 +128,7 @@ void intensity_beam_assembler::_put_unassembled_packet(const intensity_packet &p
 	//
 	this->_put_assembled_chunk(active_chunk0);
 	active_chunk0 = active_chunk1;
-	active_chunk1 = assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, active_chunk1->chunk_t1);
+	active_chunk1 = this->_make_assembled_chunk(active_chunk1->chunk_t1);
     }
 
     // FIXME bookkeep drops!
@@ -148,7 +150,7 @@ void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_c
 	pthread_mutex_unlock(&this->lock);
 	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
 	
-	if (!drops_allowed)
+	if (!_initializer.drops_allowed)
 	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and assembler's 'drops_allowed' flag was set to false");
 
 	return;
@@ -183,6 +185,17 @@ void intensity_beam_assembler::_end_stream()
     pthread_cond_broadcast(&this->cond_initflag_set);
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
+}
+
+
+std::shared_ptr<assembled_chunk> intensity_beam_assembler::_make_assembled_chunk(uint64_t chunk_t0)
+{
+    if (_initializer.mandate_fast_kernels)
+	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+    else if (_initializer.mandate_reference_kernels)
+	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+    else
+	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
 }
 
 

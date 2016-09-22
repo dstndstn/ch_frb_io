@@ -25,6 +25,10 @@ struct noncopyable
     noncopyable& operator=(const noncopyable &) = delete;
 };
 
+// Defined later in this file
+class intensity_beam_assembler;
+struct assembled_chunk;
+
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
 
@@ -307,52 +311,6 @@ struct udp_packet_ringbuf : noncopyable {
 };
 
 
-struct assembled_chunk : noncopyable {
-    // Stream parameters
-    const int beam_id = 0;
-    const int nupfreq = 0;
-    const int nt_per_packet = 0;
-    const int fpga_counts_per_sample = 0;
-
-    // More parameters which are constant after construction.
-    const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
-    const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
-    const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
-
-    // Time index of first sample in chunk.
-    uint64_t chunk_t0 = 0;
-    uint64_t chunk_t1 = 0;
-
-    float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
-    float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
-    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
-
-    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
-    virtual ~assembled_chunk();
-    
-    // These are virtual so that subclasses can be written with optimized implementations 
-    // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
-    virtual void add_packet(const intensity_packet &p);
-    virtual void decode(float *intensity, float *weights, int stride) const;
-
-    // Factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
-    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
-
-    // Utility functions currently used only for testing.
-    void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
-    void randomize(std::mt19937 &rng);
-};
-
-
-// Special case nt_per_packet=16 optimized with avx2 kernels, used in full CHIME
-struct fast_assembled_chunk : public assembled_chunk
-{
-    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
-
-    virtual void add_packet(const intensity_packet &p) override;
-    virtual void decode(float *intensity, float *weights, int stride) const override;
-};
-
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -461,17 +419,115 @@ protected:
 // The packet input stream case is more complicated!
 
 
+class intensity_network_stream : noncopyable {
+public:
+    // Note: If 'drops_allowed' is false, the process will crash if any ring buffer overfills.
+    // This sometimes makes sense during testing but probably not otherwise.
+    struct initializer {
+	std::vector<int> beam_ids;
+	int udp_port = constants::default_udp_port;
+	bool mandate_reference_kernels = false;
+	bool mandate_fast_kernels = false;
+	bool drops_allowed = true;
+    };
+    
+    // It's convenient to initialize intensity_network_streams using a static factory function make(),
+    // rather than having a public constructor.  Note that make() spawns a network and assembler thread,
+    // but won't listen for packets until start_stream() is called.  Between calling make() and start_stream(),
+    // you'll want to spawn "consumer" threads which query the assemblers for intensity and weights arrays.
+
+    static std::shared_ptr<intensity_network_stream> make(const initializer &x);
+
+    // High level control.
+    void start_stream();         // tells network thread to start listening for packets
+    void end_stream();           // asynchronously stops stream
+    void join_threads();         // should only be called once, does not asynchronously stop stream.
+
+    // Returns a per-beam assembler object which can be queried for intensity and weights arrays.
+    std::shared_ptr<intensity_beam_assembler> get_assembler(int assembler_index) const;
+
+    struct event_counts {
+	ssize_t num_bad_packets = 0;
+	ssize_t num_good_packets = 0;
+	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler beam_ids
+	ssize_t num_first_packet_mismatches = 0;    // packet is well-formed, but (nupfreq,fpga_counts_per_sample) don't match first packet recevied
+	event_counts &operator+=(const event_counts &x);
+	void clear();
+    };
+
+    // Can be called at any time, from any thread.
+    initializer get_initializer() const;
+    event_counts get_event_counts() const;
+
+    ~intensity_network_stream();
+
+private:
+    // Constant after construction, so not protected by lock
+    const initializer _initializer;
+    const int nassemblers = 0;
+    std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
+
+    // Used to exchange data between the network and assembler threads
+    std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
+
+    // Used only by the network thread (not protected by lock)
+    int sockfd = -1;
+    udp_packet_list incoming_packet_list;
+
+    // Used only by assembler thread (not protected by lock)
+    uint16_t expected_nupfreq = 0;
+    uint16_t expected_nt_per_packet = 0;
+    uint16_t expected_fpga_counts_per_sample = 0;
+    bool expected_params_initialized = false;
+    event_counts _tmp_counts;
+
+    pthread_t network_thread;
+    pthread_t assembler_thread;
+
+    mutable pthread_mutex_t lock;
+
+    // State model
+    bool assembler_thread_started = false;
+    bool network_thread_started = false;
+    bool stream_started = false;
+    bool stream_ended = false;
+    bool join_called = false;
+    pthread_cond_t cond_state_changed;
+    
+    event_counts curr_counts;
+
+    // The actual constructor is private, so it can be a helper function 
+    // for intensity_network_stream::make(), but can't be called otherwise.
+    intensity_network_stream(const initializer &x);
+
+    void _open_socket();
+
+    static void *network_pthread_main(void *);
+    static void *assembler_pthread_main(void *);
+
+    // Private methods called by the network thread.    
+    void _network_thread_start();
+    void _network_thread_body();
+    void _network_thread_exit();
+    void _put_unassembled_packets();
+
+    // Private methods called by the assembler thread.     
+    void _assembler_thread_start();
+    void _assembler_thread_body();
+    void _assembler_thread_exit();
+    void _assemble_packet(const uint8_t *data, int nbytes);
+};
+
+
 class intensity_beam_assembler : noncopyable {
 public:
-    // If 'drops_allowed' is false, the process will crash if the assembled_chunk ring buffer overfills.
-    // This sometimes makes sense during testing but probably not otherwise.
-    intensity_beam_assembler(int beam_id, bool drops_allowed);
+    intensity_beam_assembler(const intensity_network_stream::initializer &x, int assembler_ix);
     
     bool get_assembled_chunk(std::shared_ptr<assembled_chunk> &chunk);
     bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
 
-    const int beam_id = -1;
-    const bool drops_allowed = true;
+    const intensity_network_stream::initializer _initializer;
+    int beam_id = -1;
 
     ~intensity_beam_assembler();
 
@@ -482,6 +538,8 @@ private:
     void _put_unassembled_packet(const intensity_packet &packet);
     void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
     void _end_stream();   // called by network thread on exit
+
+    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
 
     // This data is not protected by the lock, but is only accessed by the network thread.
     std::shared_ptr<assembled_chunk> active_chunk0;
@@ -509,87 +567,50 @@ private:
 };
 
 
-class intensity_network_stream : noncopyable {
-public:
-    // De facto constructor.  A thread is spawned, but it won't start reading packets until start_stream() is called.
-    static auto make(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
-	-> std::shared_ptr<intensity_network_stream>;
+struct assembled_chunk : noncopyable {
+    // Stream parameters
+    const int beam_id = 0;
+    const int nupfreq = 0;
+    const int nt_per_packet = 0;
+    const int fpga_counts_per_sample = 0;
 
-    // High level control.
-    void start_stream();         // tells network thread to start reading packets
-    void end_stream();           // asynchronously stops stream
-    void join_threads();         // should only be called once, does not end stream
+    // More parameters which are constant after construction.
+    const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
+    const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
+    const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
 
-    struct event_counts {
-	ssize_t num_bad_packets = 0;
-	ssize_t num_good_packets = 0;
-	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler beam_ids
-	ssize_t num_first_packet_mismatches = 0;    // packet is well-formed, but (nupfreq,fpga_counts_per_sample) don't match first packet recevied
-	event_counts &operator+=(const event_counts &x);
-	void clear();
-    };
+    // Time index of first sample in chunk.
+    uint64_t chunk_t0 = 0;
+    uint64_t chunk_t1 = 0;
 
-    // Can be called at any time, from any thread.
-    event_counts get_event_counts() const;
+    float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
+    float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
+    uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
-    ~intensity_network_stream();
-
-private:
-    // Used to exchange data between the network and assembler threads
-    std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
-
-    // Used only by the network thread (not protected by lock)
-    int sockfd = -1;
-    int udp_port = 0;
-    udp_packet_list incoming_packet_list;
-
-    // Used only by the assembler thread (not protected by lock)
-    std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
-    std::vector<int> assembler_beam_ids;
-    int nassemblers = 0;
-
-    // Used only by assembler thread (not protected by lock)
-    uint16_t expected_nupfreq = 0;
-    uint16_t expected_nt_per_packet = 0;
-    uint16_t expected_fpga_counts_per_sample = 0;
-    bool expected_params_initialized = false;
-    event_counts _tmp_counts;
-
-    pthread_t network_thread;
-    pthread_t assembler_thread;
-
-    mutable pthread_mutex_t lock;
-
-    // State model
-    bool assembler_thread_started = false;
-    bool network_thread_started = false;
-    bool stream_started = false;
-    bool stream_ended = false;
-    bool join_called = false;
-    pthread_cond_t cond_state_changed;
+    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+    virtual ~assembled_chunk();
     
-    event_counts curr_counts;
+    // These are virtual so that subclasses can be written with optimized implementations 
+    // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
+    virtual void add_packet(const intensity_packet &p);
+    virtual void decode(float *intensity, float *weights, int stride) const;
 
-    // The actual constructor is private, so it can be a helper function 
-    // for intensity_network_stream::make(), but can't be called otherwise.
-    intensity_network_stream(const std::vector<std::shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port);
+    // Factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
+    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
 
-    void _open_socket();
+    // Utility functions currently used only for testing.
+    void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
+    void randomize(std::mt19937 &rng);
+};
 
-    static void *network_pthread_main(void *);
-    static void *assembler_pthread_main(void *);
 
-    // Private methods called by the network thread.    
-    void _network_thread_start();
-    void _network_thread_body();
-    void _network_thread_exit();
-    void _put_unassembled_packets();
+// Special case nt_per_packet=16 optimized with avx2 kernels, used in full CHIME
+struct fast_assembled_chunk : public assembled_chunk
+{
+    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
 
-    // Private methods called by the assembler thread.     
-    void _assembler_thread_start();
-    void _assembler_thread_body();
-    void _assembler_thread_exit();
-    void _assemble_packet(const uint8_t *data, int nbytes);
+    virtual void add_packet(const intensity_packet &p) override;
+    virtual void decode(float *intensity, float *weights, int stride) const override;
 };
 
 

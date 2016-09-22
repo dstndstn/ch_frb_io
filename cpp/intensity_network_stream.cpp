@@ -37,9 +37,9 @@ event_counts &event_counts::operator+=(const event_counts &x)
 
 
 // Static member function (de facto constructor)
-shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector<shared_ptr<intensity_beam_assembler> > &assemblers, int udp_port)
+shared_ptr<intensity_network_stream> intensity_network_stream::make(const initializer &x)
 {
-    intensity_network_stream *retp = new intensity_network_stream(assemblers, udp_port);
+    intensity_network_stream *retp = new intensity_network_stream(x);
     shared_ptr<intensity_network_stream> ret(retp);
 
     ret->_open_socket();
@@ -70,41 +70,41 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const vector
 }
 
 
-intensity_network_stream::intensity_network_stream(const vector<shared_ptr<intensity_beam_assembler> > &assemblers_, int udp_port_) :
-    udp_port(udp_port_),
-    incoming_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list),
-    assemblers(assemblers_),
-    nassemblers(assemblers_.size())
+intensity_network_stream::intensity_network_stream(const initializer &x) :
+    _initializer(x),
+    nassemblers(x.beam_ids.size())
 {
     // Argument checking
 
     if (nassemblers == 0)
-	throw runtime_error("ch_frb_io: empty assembler list passed to intensity_network_stream constructor");
+	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
 
     for (int i = 0; i < nassemblers; i++) {
-	if (!assemblers_[i])
-	    throw runtime_error("ch_frb_io: empty assembler pointer passed to intensity_network_stream constructor");
-
+	if ((x.beam_ids[i] < 0) || (x.beam_ids[i] > constants::max_allowed_beam_id))
+	    throw runtime_error("ch_frb_io: bad beam_id passed to intensity_network_stream constructor");
 	for (int j = 0; j < i; j++)
-	    if (assemblers_[i]->beam_id == assemblers_[j]->beam_id)
-		throw runtime_error("ch_frb_io: assembler list passed to intensity_network_stream constructor contains duplicate beam_ids");
+	    if (x.beam_ids[i] == x.beam_ids[j])
+		throw runtime_error("ch_frb_io: duplicate beam_ids passed to intensity_network_stream constructor");
     }
 
-    if ((udp_port <= 0) || (udp_port >= 65536))
-	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(udp_port));
+    if ((x.udp_port <= 0) || (x.udp_port >= 65536))
+	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(x.udp_port));
+
+    if (x.mandate_fast_kernels && x.mandate_reference_kernels)
+	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
 
     // All initializations except the socket (which is initialized in _open_socket())
+
+    for (int ix = 0; ix < nassemblers; ix++)
+	this->assemblers.push_back(make_shared<intensity_beam_assembler>(x,ix));
 
     int capacity = constants::unassembled_ringbuf_capacity;
     int max_npackets = constants::max_unassembled_packets_per_list;
     int max_nbytes = constants::max_unassembled_nbytes_per_list;
     string dropstr = "warning: assembler thread running too slow, dropping packets";
-    bool drops_allowed = false;    // FIXME
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, drops_allowed);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, x.drops_allowed);
 
-    this->assembler_beam_ids.resize(nassemblers, -1);
-    for (int i = 0; i < nassemblers; i++)
-	assembler_beam_ids[i] = assemblers[i]->beam_id;
+    this->incoming_packet_list = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
@@ -194,6 +194,20 @@ void intensity_network_stream::join_threads()
 }
 
 
+shared_ptr<intensity_beam_assembler> intensity_network_stream::get_assembler(int assembler_index) const
+{
+    if ((assembler_index < 0) || (assembler_index >= nassemblers))
+	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembler()");
+    return assemblers[assembler_index];
+}
+
+
+intensity_network_stream::initializer intensity_network_stream::get_initializer() const
+{
+    return this->_initializer;
+}
+
+
 intensity_network_stream::event_counts intensity_network_stream::get_event_counts() const
 {
     pthread_mutex_lock(&this->lock);
@@ -275,13 +289,13 @@ void intensity_network_stream::_network_thread_body()
 	
     server_address.sin_family = AF_INET;
     inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
-    server_address.sin_port = htons(udp_port);
+    server_address.sin_port = htons(_initializer.udp_port);
 
     int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets on port " + to_string(udp_port) + "\n");
+    cerr << ("ch_frb_io: listening for packets on port " + to_string(_initializer.udp_port) + "\n");
 
     // Main packet loop
 
@@ -522,7 +536,7 @@ void intensity_network_stream::_assemble_packet(const uint8_t *packet_data, int 
     int nbeams = packet.nbeams;
     int nfreq_coarse = packet.nfreq_coarse;
     int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-    int *assembler_ids = &assembler_beam_ids[0];  // bare pointer for speed
+    const int *assembler_beam_ids = &_initializer.beam_ids[0];  // bare pointer for speed
 
     // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
     // length fields.  The new packet corresponds to a subset of the original packet containing
@@ -540,7 +554,7 @@ void intensity_network_stream::_assemble_packet(const uint8_t *packet_data, int 
 	int assembler_ix = 0;
 
 	for (;;) {
-	    if (assembler_ids[assembler_ix] == packet_id) {
+	    if (assembler_beam_ids[assembler_ix] == packet_id) {
 		// Match found
 		assemblers[assembler_ix]->_put_unassembled_packet(packet);
 		break;
