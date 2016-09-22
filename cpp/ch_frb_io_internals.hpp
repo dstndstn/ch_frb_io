@@ -93,6 +93,10 @@ struct intensity_packet {
     // and likewise for the weights.
 
     void encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
+
+    // Currently used only for debugging
+    int find_freq_id(int freq_id) const;
+    bool contains_freq_id(int freq_id) const;
 };
 
 
