@@ -9,11 +9,11 @@ namespace ch_frb_io {
 #endif
 
 
-intensity_beam_assembler::intensity_beam_assembler(const intensity_network_stream &s, int assembler_ix) :
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream &s, int assembler_ix) :
     _initializer(s._initializer)
 {
     if ((assembler_ix < 0) || (assembler_ix >= s.nassemblers))
-	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_beam_assembler constructor");
+	throw runtime_error("ch_frb_io: bad assembler_ix passed to assembled_chunk_ringbuf constructor");
 
     this->beam_id = s._initializer.beam_ids[assembler_ix];
     this->nupfreq = s.fp_nupfreq;
@@ -31,17 +31,17 @@ intensity_beam_assembler::intensity_beam_assembler(const intensity_network_strea
 }
 
 
-intensity_beam_assembler::~intensity_beam_assembler()
+assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 {
     pthread_cond_destroy(&this->cond_assembled_chunks_added);
     pthread_mutex_destroy(&this->lock);
 }
 
 
-void intensity_beam_assembler::put_unassembled_packet(const intensity_packet &packet)
+void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet)
 {
     if (!active_chunk0 || !active_chunk1)
-	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::put_unassembled_packet() called after end_stream()");
+	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
 
     uint64_t packet_it0 = packet.fpga_count / packet.fpga_counts_per_sample;
     uint64_t packet_it1 = packet_it0 + packet.ntsamp;
@@ -73,16 +73,16 @@ void intensity_beam_assembler::put_unassembled_packet(const intensity_packet &pa
 }
 
 
-void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
+void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
 {
     if (!chunk)
-	throw runtime_error("ch_frb_io: internal error: empty pointer passed to intensity_beam_assembler::_put_unassembled_packet()");
+	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
 	
     pthread_mutex_lock(&this->lock);
 
     if (this->doneflag) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: intensity_beam_assembler::put_unassembled_packet() called after end_stream()");
+	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
     }
 
     if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
@@ -104,7 +104,7 @@ void intensity_beam_assembler::_put_assembled_chunk(const shared_ptr<assembled_c
 }
 
 
-shared_ptr<assembled_chunk> intensity_beam_assembler::get_assembled_chunk()
+shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 {
     pthread_mutex_lock(&this->lock);
 
@@ -134,10 +134,10 @@ shared_ptr<assembled_chunk> intensity_beam_assembler::get_assembled_chunk()
 }
 
 
-void intensity_beam_assembler::end_stream()
+void assembled_chunk_ringbuf::end_stream()
 {
     if (!active_chunk0 || !active_chunk1)
-	throw runtime_error("ch_frb_io: internal error: empty pointers in intensity_beam_assembler::end_stream(), this can happen if end_stream() is called twice");
+	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
     this->_put_assembled_chunk(active_chunk0);
     this->_put_assembled_chunk(active_chunk1);
@@ -147,7 +147,7 @@ void intensity_beam_assembler::end_stream()
 
     if (doneflag) {
 	pthread_mutex_unlock(&this->lock);
-	throw runtime_error("ch_frb_io: internal error: doneflag already set in intensity_beam_assembler::end_stream()");
+	throw runtime_error("ch_frb_io: internal error: doneflag already set in assembled_chunk_ringbuf::end_stream()");
     }
 
     this->doneflag = true;
@@ -156,7 +156,7 @@ void intensity_beam_assembler::end_stream()
 }
 
 
-std::shared_ptr<assembled_chunk> intensity_beam_assembler::_make_assembled_chunk(uint64_t chunk_t0)
+std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t chunk_t0)
 {
     if (_initializer.mandate_fast_kernels)
 	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);

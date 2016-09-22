@@ -461,7 +461,7 @@ void intensity_network_stream::_assembler_thread_body()
 		first_packet = false;
 
 		for (int ix = 0; ix < nassemblers; ix++)
-		    this->assemblers.push_back(make_shared<intensity_beam_assembler>(*this,ix));
+		    this->assemblers.push_back(make_shared<assembled_chunk_ringbuf>(*this, ix));
 
 		pthread_mutex_lock(&this->lock);
 		this->first_packet_received = true;

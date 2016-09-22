@@ -26,8 +26,8 @@ struct noncopyable
 };
 
 // Defined later in this file
-class intensity_beam_assembler;
 struct assembled_chunk;
+class assembled_chunk_ringbuf;
 
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
@@ -464,7 +464,8 @@ public:
     ~intensity_network_stream();
 
 private:
-    friend class intensity_beam_assembler;
+    // FIXME do we need this?
+    friend class assembled_chunk_ringbuf;
 
     // Constant after construction, so not protected by lock
     const initializer _initializer;
@@ -475,7 +476,7 @@ private:
     // require a lock).  There is a corner case where the vector is still length-zero after the flag gets set.
     // This happens if the stream was asynchronously cancelled before receiving the first packet.
 
-    std::vector<std::shared_ptr<intensity_beam_assembler> > assemblers;
+    std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
     
     // These fields are initialized from the first packet received ("fp_" stands for "first packet").
     // They are initialized by the assembler thread, which then advances the state model to "first_packet_received".
@@ -535,11 +536,11 @@ private:
 };
 
 
-class intensity_beam_assembler : noncopyable {
+class assembled_chunk_ringbuf : noncopyable {
 public:
     // When the assembler is constructed, the fp_ fields must be initialized.
-    intensity_beam_assembler(const intensity_network_stream &s, int assembler_ix);
-    ~intensity_beam_assembler();
+    assembled_chunk_ringbuf(const intensity_network_stream &s, int assembler_ix);
+    ~assembled_chunk_ringbuf();
 
     // Called by assembler thread
     void put_unassembled_packet(const intensity_packet &packet);
