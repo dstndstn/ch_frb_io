@@ -161,7 +161,7 @@ std::shared_ptr<assembled_chunk> intensity_beam_assembler::_make_assembled_chunk
     if (_initializer.mandate_fast_kernels)
 	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
     else if (_initializer.mandate_reference_kernels)
-	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	return make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
     else
 	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
 }
