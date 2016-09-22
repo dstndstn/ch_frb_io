@@ -106,15 +106,22 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
 
+    this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
+    this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
+
 #if 0
     // Sometimes it's convenient to debug a specific test case...
     this->nbeams = 1;
-    this->nupfreq = 14;
-    this->nfreq_coarse_per_packet = 4;
-    this->nt_per_packet = 61;
-    this->nt_per_chunk = 305;
-    this->nt_tot = 4575;
-    this->initial_t0 = 1015;
+    this->nupfreq = 7;
+    this->nfreq_coarse_per_packet = 256;
+    this->nt_per_packet = 1;
+    this->nt_per_chunk = 66;
+    this->nt_tot = 27258;
+    this->initial_t0 = 2998;
+    this->fpga_counts_per_sample = 93;
+    this->wt_cutoff = 0.597753;
+    this->send_stride = 78;
+    this->recv_stride = 1057;
 #endif
 
     // Clunky way of generating random beam_ids
@@ -135,9 +142,6 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	send_freq_ids[i] = i;
     std::shuffle(send_freq_ids.begin(), send_freq_ids.end(), rng);
 
-    this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
-    this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
-
     this->nbytes_per_packet = packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     this->npackets_per_chunk = (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
 
@@ -155,9 +159,11 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    nt_per_packet=" << nt_per_packet << endl
 	 << "    nt_per_chunk=" << nt_per_chunk << endl
 	 << "    nt_tot=" << nt_tot << endl
-	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    initial_t0=" << initial_t0 << endl
+	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    wt_cutoff=" << wt_cutoff << endl
+	 << "    send_stride=" << send_stride << endl
+	 << "    recv_stride=" << recv_stride << endl
 	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
 	 << "    npackets_per_chunk=" << npackets_per_chunk << endl;
 
@@ -438,7 +444,7 @@ int main(int argc, char **argv)
 {
     const int nrun = 100;
 
-#if 0
+#if 1
     std::random_device rd;
     std::mt19937 rng(rd());
 #else
