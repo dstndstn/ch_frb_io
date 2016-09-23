@@ -87,9 +87,12 @@ INSTALLATION (PYTHON)
 
   - Eventually it would be nice to do an end-to-end test of the FRB backend, by having
     a "simulator" node generate timestreams containing noise + FRB's, and sending them
-    over the network.  However, the current simulation code is single-threaded, and a
-    single core is too slow to even generate a stream of Gaussian random numbers at
-    full CHIME bandwidth!
+    over the network.  However, the current simulation code is too slow to do this!
+
+    The most important thing is to multithread the part of the code which simulates 
+    the timestream (e.g. we could have one rf_pipeline per beam, with outputs combined
+    into a ring buffer which feeds the intensity_network_ostream).  It may also help	
+    a little to write an AVX2 packet encoding kernel.
 
   - When the network stream is running, it maintains "event counts" for many types of
     events, such as packet drops, assembler hits/misses etc.  Right now we don't really
