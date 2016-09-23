@@ -404,12 +404,10 @@ void intensity_network_stream::_network_thread_body()
 	    is_first_packet = false;
 
 	    // Now that we know the first packet params, we can initialize the assemblers
-	    for (int ix = 0; ix < nassemblers; ix++) {
-		auto ringbuf = make_shared<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], fp_nupfreq, 
-								    fp_nt_per_packet, fp_fpga_counts_per_sample, fp_fpga_count);
-
-		this->assemblers.push_back(ringbuf);
-	    }
+	    this->assemblers.resize(nassemblers);
+	    for (int ix = 0; ix < nassemblers; ix++)
+		assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], fp_nupfreq, 
+								      fp_nt_per_packet, fp_fpga_counts_per_sample, fp_fpga_count);
 
 	    // This will unblock the assembler thread, which waits for the first_packet_received
 	    // flag as soon as it is spawned.

@@ -442,7 +442,7 @@ protected:
     // require a lock).  There is a corner case where the vector is still length-zero after the flag gets set.
     // This happens if the stream was asynchronously cancelled before receiving the first packet.
 
-    std::vector<std::shared_ptr<assembled_chunk_ringbuf> > assemblers;
+    std::vector<std::unique_ptr<assembled_chunk_ringbuf> > assemblers;
     
     // These fields are initialized from the first packet received ("fp_" stands for "first packet").
     // They are initialized by the assembler thread, which then advances the state model to "first_packet_received".
