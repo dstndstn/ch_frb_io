@@ -351,6 +351,7 @@ void intensity_network_stream::_network_thread_body()
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
+	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
 
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
@@ -577,6 +578,7 @@ void intensity_network_stream::_assembler_thread_exit()
 
     stringstream ss;
     ss << "ch_frb_io: assembler thread exiting\n"
+       << "    bytes recevied (GB): " << (1.0e-9 * counts[event_type::byte_received]) << "\n"
        << "    packets received: " << counts[event_type::packet_received] << "\n"
        << "    good packets: " << counts[event_type::packet_good] << "\n"
        << "    bad packets: " << counts[event_type::packet_bad] << "\n"

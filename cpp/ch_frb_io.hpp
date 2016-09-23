@@ -412,18 +412,19 @@ public:
     std::vector<int64_t> get_event_counts();
 
     enum event_type {
-	packet_received = 0,
-	packet_good = 1,
-	packet_bad = 2,
-	packet_dropped = 3,
-	packet_end_of_stream = 4,
-	beam_id_mismatch = 5,
-	first_packet_mismatch = 6,
-	assembler_hit = 7,
-	assembler_miss = 8,
-	assembled_chunk_dropped = 9,
-	assembled_chunk_queued = 10,
-	num_types = 11
+	byte_received = 0,
+	packet_received = 1,
+	packet_good = 2,
+	packet_bad = 3,
+	packet_dropped = 4,
+	packet_end_of_stream = 5,
+	beam_id_mismatch = 6,
+	first_packet_mismatch = 7,
+	assembler_hit = 8,
+	assembler_miss = 9,
+	assembled_chunk_dropped = 10,
+	assembled_chunk_queued = 11,
+	num_types = 12
     };
 
     ~intensity_network_stream();
