@@ -360,7 +360,7 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
     initializer.beam_ids = tp->recv_beam_ids;
     initializer.mandate_reference_kernels = !tp->use_fast_kernels;
     initializer.mandate_fast_kernels = tp->use_fast_kernels;
-    initializer.drops_allowed = false;
+    initializer.throw_exception_if_packets_dropped = true;
 
     tp->istream = intensity_network_stream::make(initializer);
     

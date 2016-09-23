@@ -263,13 +263,6 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
 // Network thread
 
 
-// FIXME improve?
-inline bool is_end_of_stream_packet(const uint8_t *packet, int packet_nbytes)
-{
-    return packet_nbytes == 24;
-}
-
-
 // static member function
 void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 {
@@ -383,9 +376,11 @@ void intensity_network_stream::_network_thread_body()
 
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-	if (is_end_of_stream_packet(packet_data, packet_nbytes)) {
+	if (_unlikely(packet_nbytes == 24)) {
 	    event_subcounts[event_type::packet_end_of_stream]++;
-	    return;
+	    if (ini_params.accept_end_of_stream_packets)
+		return;   // triggers shutdown of entire stream
+	    continue;
 	}
 
 	// Special logic for processing first packet, which triggers some initializations.
@@ -459,8 +454,10 @@ void intensity_network_stream::_put_unassembled_packets()
     if (!success) {
 	network_thread_event_subcounts[event_type::packet_dropped] += npackets;
 
-	if (!ini_params.drops_allowed)
-	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with drops_allowed=false");
+	if (ini_params.warn_if_packets_dropped)
+	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
+	if (ini_params.throw_exception_if_packets_dropped)
+	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_if_packets_dropped' flag");
     }
 
     this->_add_event_counts(network_thread_event_subcounts);

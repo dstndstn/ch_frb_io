@@ -93,10 +93,10 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 	pthread_mutex_unlock(&this->lock);
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
 
-	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
-	
-	if (ini_params.drops_allowed)
-	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and assembler's 'drops_allowed' flag was set to false");
+	if (ini_params.warn_if_packets_dropped)
+	    cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
+	if (ini_params.throw_exception_if_packets_dropped)
+	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_if_packets_dropped' flag");
 
 	return;
     }

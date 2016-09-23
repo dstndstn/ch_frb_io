@@ -387,7 +387,9 @@ public:
 	int udp_port = constants::default_udp_port;
 	bool mandate_reference_kernels = false;
 	bool mandate_fast_kernels = false;
-	bool drops_allowed = true;
+	bool warn_if_packets_dropped = true;
+	bool throw_exception_if_packets_dropped = false;
+	bool accept_end_of_stream_packets = true;
     };
 
     enum event_type {
