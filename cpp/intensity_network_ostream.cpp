@@ -212,9 +212,10 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
     int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
     int nt_outer = nt_per_chunk / nt_per_packet;
 
-    // Outer loop over packets in chunk
-    for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
-	for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
+    // Loop over packets in chunk.
+    // I decided it made most sense to make (time, frequency) the (outer, inner) loops.
+    for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
+	for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
 	    int data_offset = (if_outer * nfreq_coarse_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
 
 	    // Some intensity_packet fields are packet-dependent; these are initialized here.
