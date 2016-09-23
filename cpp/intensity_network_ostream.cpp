@@ -148,8 +148,7 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
     xpthread_cond_init(&this->cond_state_changed);
 
     int capacity = constants::output_ringbuf_capacity;
-    string dropmsg = "warning: network write thread couldn't keep up with data, dropping packets";
-    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk, dropmsg);
+    this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk);
     this->tmp_packet_list = udp_packet_list(npackets_per_chunk, nbytes_per_chunk);
 }
 
@@ -240,9 +239,9 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	}
     }
 
-    // FIXME I think the plan is to make producer_put_packet_list() return void, and throw the exception there instead.
-    if (!ringbuf->producer_put_packet_list(tmp_packet_list, is_blocking)) 
-	throw runtime_error("intensity_network_ostream::send_chunk() called after end_stream()");
+    // FIXME should count dropped packets here
+    // FIXME should have boolean drops_allowed
+    ringbuf->put_packet_list(tmp_packet_list, is_blocking);
 }
 
 
@@ -315,7 +314,7 @@ void intensity_network_ostream::_network_thread_body()
     
     // Loop over packet_lists
     for (;;) {
-	if (!ringbuf->consumer_get_packet_list(packet_list))
+	if (!ringbuf->get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
 	
 	// Loop over packets

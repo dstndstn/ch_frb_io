@@ -80,8 +80,7 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
     int capacity = constants::unassembled_ringbuf_capacity;
     int max_npackets = constants::max_unassembled_packets_per_list;
     int max_nbytes = constants::max_unassembled_nbytes_per_list;
-    string dropstr = "warning: assembler thread running too slow, dropping packets";
-    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes, dropstr, x.drops_allowed);
+    this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes);
 
     this->incoming_packet_list = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
@@ -395,16 +394,20 @@ void intensity_network_stream::_network_thread_exit()
 
 void intensity_network_stream::_put_unassembled_packets()
 {
-    this->_add_event_counts(network_thread_event_subcounts);
-
-    if (incoming_packet_list.curr_npackets == 0)
+    int npackets = incoming_packet_list.curr_npackets;
+    if (!npackets)
 	return;
-    
-    if (!unassembled_ringbuf->producer_put_packet_list(incoming_packet_list, false))
-	throw runtime_error("ch_frb_io: internal error: couldn't write packets to unassembled_ringbuf");
 
-    // FIXME maintain count of packets dropped
-    // FIXME throw exception if drops_allowed=false and packets were dropped
+    bool success = unassembled_ringbuf->put_packet_list(incoming_packet_list, false);
+
+    if (!success) {
+	network_thread_event_subcounts[event_type::packet_dropped] += npackets;
+
+	if (!_initializer.drops_allowed)
+	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with drops_allowed=false");
+    }
+
+    this->_add_event_counts(network_thread_event_subcounts);
 }
 
 
@@ -455,7 +458,7 @@ void intensity_network_stream::_assembler_thread_body()
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
     bool first_packet = true;
 
-    while (unassembled_ringbuf->consumer_get_packet_list(packet_list)) {
+    while (unassembled_ringbuf->get_packet_list(packet_list)) {
 
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list.get_packet_data(ipacket);
