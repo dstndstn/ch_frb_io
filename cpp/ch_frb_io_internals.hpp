@@ -102,6 +102,54 @@ inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_pac
 // -------------------------------------------------------------------------------------------------
 
 
+struct udp_packet_ringbuf : noncopyable {
+    pthread_mutex_t lock;
+    pthread_cond_t cond_packets_added;
+    pthread_cond_t cond_packets_removed;
+    bool stream_ended = false;
+    bool drops_allowed = true;
+
+    const int ringbuf_capacity;
+    int ringbuf_size = 0;
+    int ringbuf_pos = 0;
+    std::vector<udp_packet_list> ringbuf;
+
+    // Specified at construction, used when new udp_packet_list objects are allocated
+    const int max_npackets_per_list = 0;
+    const int max_nbytes_per_list = 0;
+    
+    // This message is printed to stderr whenever packets are dropped (if empty string, no message will be printed)
+    std::string dropmsg;
+
+    // If 'drops_allowed' is false, the process will crash if the ring buffer overfills.
+    // This sometimes makes sense during testing but probably not otherwise.
+    udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list, 
+		       const std::string &dropmsg = std::string(), bool drops_allowed = true);
+
+    ~udp_packet_ringbuf();
+    
+    //
+    // Important note!  These routines _swap_ their udp_packet_list argument with a packet_list in the ringbuf.
+    //
+    // I.e., producer_put_packet_list() is called with a full packet list, and swaps it for an empty packet list, which the
+    // producer thread can fill with packets.  Similary, consumer_get_packet_list() is called with a "junk" packet list (which
+    // may or may not be empty), and swaps it for a full packet list.
+    //
+    // The producer_put_packet_list() routine is nonblocking; if the ring buffer is full then it prints an error message 
+    // ("dropmsg") and discards the packets.  Both routines return false if stream has ended, true otherwise.
+    // 
+    bool producer_put_packet_list(udp_packet_list &l, bool is_blocking);
+    bool consumer_get_packet_list(udp_packet_list &l);
+    
+    // Can be called by either producer or consumer thread
+    void end_stream();
+    bool is_alive();
+};
+
+
+// -------------------------------------------------------------------------------------------------
+
+
 class assembled_chunk_ringbuf : noncopyable {
 public:
     // When the assembler is constructed, the fp_ fields must be initialized.
