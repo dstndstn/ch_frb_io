@@ -149,8 +149,9 @@ struct udp_packet_ringbuf : noncopyable {
 
 class assembled_chunk_ringbuf : noncopyable {
 public:
-    // When the assembler is constructed, the fp_ fields must be initialized.
-    assembled_chunk_ringbuf(const intensity_network_stream &s, int assembler_ix);
+    assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params, int beam_id, int nupfreq,
+			    int nt_per_packet, uint64_t fpga_counts_per_sample, uint64_t fpga_count0);
+
     ~assembled_chunk_ringbuf();
 
     // Called by assembler thread
@@ -162,13 +163,12 @@ public:
 
 
 protected:
-    // Initialized at construction
-    const intensity_network_stream::initializer _initializer;
+    const intensity_network_stream::initializer ini_params;
 
-    int beam_id = 0;
-    int nupfreq = 0;
-    int nt_per_packet = 0;
-    int fpga_counts_per_sample = 0;
+    const int beam_id;
+    const int nupfreq;
+    const int nt_per_packet;
+    const uint64_t fpga_counts_per_sample;
 
     std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
     void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk, int64_t *event_counts);

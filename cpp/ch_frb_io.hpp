@@ -389,6 +389,22 @@ public:
 	bool mandate_fast_kernels = false;
 	bool drops_allowed = true;
     };
+
+    enum event_type {
+	byte_received = 0,
+	packet_received = 1,
+	packet_good = 2,
+	packet_bad = 3,
+	packet_dropped = 4,
+	packet_end_of_stream = 5,
+	beam_id_mismatch = 6,
+	first_packet_mismatch = 7,
+	assembler_hit = 8,
+	assembler_miss = 9,
+	assembled_chunk_dropped = 10,
+	assembled_chunk_queued = 11,
+	num_types = 12
+    };
     
     // It's convenient to initialize intensity_network_streams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns a network and assembler thread,
@@ -411,30 +427,14 @@ public:
     initializer get_initializer();
     std::vector<int64_t> get_event_counts();
 
-    enum event_type {
-	byte_received = 0,
-	packet_received = 1,
-	packet_good = 2,
-	packet_bad = 3,
-	packet_dropped = 4,
-	packet_end_of_stream = 5,
-	beam_id_mismatch = 6,
-	first_packet_mismatch = 7,
-	assembler_hit = 8,
-	assembler_miss = 9,
-	assembled_chunk_dropped = 10,
-	assembled_chunk_queued = 11,
-	num_types = 12
-    };
+    // Will block until first packet is received, or stream ends.  Returns true in former case.
+    bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
 
     ~intensity_network_stream();
 
 protected:
-    // FIXME do we need this?
-    friend class assembled_chunk_ringbuf;
-
     // Constant after construction, so not protected by lock
-    const initializer _initializer;
+    const initializer ini_params;
     const int nassemblers = 0;
 
     // This is initialized by the assembler thread before it sets 'first_packet_received' flag.

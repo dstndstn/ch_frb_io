@@ -9,18 +9,17 @@ namespace ch_frb_io {
 #endif
 
 
-assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream &s, int assembler_ix) :
-    _initializer(s._initializer)
+assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream::initializer &ini_params_, int beam_id_, int nupfreq_,
+						 int nt_per_packet_, uint64_t fpga_counts_per_sample_, uint64_t fpga_count0) :
+    ini_params(ini_params_),
+    beam_id(beam_id_),
+    nupfreq(nupfreq_),
+    nt_per_packet(nt_per_packet_),
+    fpga_counts_per_sample(fpga_counts_per_sample_)
 {
-    if ((assembler_ix < 0) || (assembler_ix >= s.nassemblers))
-	throw runtime_error("ch_frb_io: bad assembler_ix passed to assembled_chunk_ringbuf constructor");
+    // FIXME I suppose we should do some parameter checking
 
-    this->beam_id = s._initializer.beam_ids[assembler_ix];
-    this->nupfreq = s.fp_nupfreq;
-    this->nt_per_packet = s.fp_nt_per_packet;
-    this->fpga_counts_per_sample = s.fp_fpga_counts_per_sample;
-
-    uint64_t packet_it0 = s.fp_fpga_count / fpga_counts_per_sample;
+    uint64_t packet_it0 = fpga_count0 / fpga_counts_per_sample;
     uint64_t assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
 
     this->active_chunk0 = this->_make_assembled_chunk(assembler_it0);
@@ -96,7 +95,7 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 
 	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
 	
-	if (!_initializer.drops_allowed)
+	if (ini_params.drops_allowed)
 	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and assembler's 'drops_allowed' flag was set to false");
 
 	return;
@@ -166,9 +165,9 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 
 std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t chunk_t0)
 {
-    if (_initializer.mandate_fast_kernels)
+    if (ini_params.mandate_fast_kernels)
 	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
-    else if (_initializer.mandate_reference_kernels)
+    else if (ini_params.mandate_reference_kernels)
 	return make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
     else
 	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);

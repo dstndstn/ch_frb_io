@@ -52,7 +52,7 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 
 
 intensity_network_stream::intensity_network_stream(const initializer &x) :
-    _initializer(x),
+    ini_params(x),
     nassemblers(x.beam_ids.size())
 {
     // Argument checking
@@ -215,7 +215,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
 
 intensity_network_stream::initializer intensity_network_stream::get_initializer()
 {
-    return this->_initializer;
+    return this->ini_params;
 }
 
 
@@ -228,6 +228,33 @@ vector<int64_t> intensity_network_stream::get_event_counts()
     pthread_mutex_unlock(&this->event_lock);    
 
     return ret;
+}
+
+
+bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count)
+{
+    pthread_mutex_lock(&this->state_lock);
+
+    while (!this->first_packet_received)
+	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+    
+    if (this->stream_ended) {
+	pthread_mutex_unlock(&this->state_lock);
+	nupfreq = 0;
+	nt_per_packet = 0;
+	fpga_counts_per_sample = 0;
+	fpga_count = 0;
+	return false;
+    }
+    
+    pthread_mutex_unlock(&this->state_lock);
+
+    // OK to make these assignments without holding lock
+    nupfreq = fp_nupfreq;
+    nt_per_packet = fp_nt_per_packet;
+    fpga_counts_per_sample = fp_fpga_counts_per_sample;
+    fpga_count = fp_fpga_count;
+    return true;
 }
 
 
@@ -303,13 +330,13 @@ void intensity_network_stream::_network_thread_body()
 	
     server_address.sin_family = AF_INET;
     inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
-    server_address.sin_port = htons(_initializer.udp_port);
+    server_address.sin_port = htons(ini_params.udp_port);
 
     int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
 
-    cerr << ("ch_frb_io: listening for packets on port " + to_string(_initializer.udp_port) + "\n");
+    cerr << ("ch_frb_io: listening for packets on port " + to_string(ini_params.udp_port) + "\n");
 
     // Main packet loop
 
@@ -377,8 +404,12 @@ void intensity_network_stream::_network_thread_body()
 	    is_first_packet = false;
 
 	    // Now that we know the first packet params, we can initialize the assemblers
-	    for (int ix = 0; ix < nassemblers; ix++)
-		this->assemblers.push_back(make_shared<assembled_chunk_ringbuf>(*this, ix));
+	    for (int ix = 0; ix < nassemblers; ix++) {
+		auto ringbuf = make_shared<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], fp_nupfreq, 
+								    fp_nt_per_packet, fp_fpga_counts_per_sample, fp_fpga_count);
+
+		this->assemblers.push_back(ringbuf);
+	    }
 
 	    // This will unblock the assembler thread, which waits for the first_packet_received
 	    // flag as soon as it is spawned.
@@ -430,7 +461,7 @@ void intensity_network_stream::_put_unassembled_packets()
     if (!success) {
 	network_thread_event_subcounts[event_type::packet_dropped] += npackets;
 
-	if (!_initializer.drops_allowed)
+	if (!ini_params.drops_allowed)
 	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with drops_allowed=false");
     }
 
@@ -528,7 +559,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    int nbeams = packet.nbeams;
 	    int nfreq_coarse = packet.nfreq_coarse;
 	    int new_data_nbytes = nfreq_coarse * packet.nupfreq * packet.ntsamp;
-	    const int *assembler_beam_ids = &_initializer.beam_ids[0];  // bare pointer for speed
+	    const int *assembler_beam_ids = &ini_params.beam_ids[0];  // bare pointer for speed
     
 	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
 	    // length fields.  The new packet corresponds to a subset of the original packet containing
