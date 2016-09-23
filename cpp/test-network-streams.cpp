@@ -477,10 +477,16 @@ int main(int argc, char **argv)
 		throw runtime_error("pthread_join() failed");	    
 	}
 
-	intensity_network_stream::event_counts counts = tp->istream->get_event_counts();
+	vector<int64_t> counts = tp->istream->get_event_counts();
 
-	assert(counts.num_bad_packets == 0);
-	assert(counts.num_beam_id_mismatches == 0);
+	typedef ch_frb_io::intensity_network_stream::event_type ev_type;
+	assert(counts[ev_type::packet_bad] == 0);
+	assert(counts[ev_type::packet_bad] == 0);
+	assert(counts[ev_type::packet_dropped] == 0);
+	assert(counts[ev_type::beam_id_mismatch] == 0);
+	assert(counts[ev_type::first_packet_mismatch] == 0);
+	assert(counts[ev_type::assembler_misses] == 0);
+	assert(counts[ev_type::assembled_chunk_dropped] == 0);
     }
 
     cout << "\n    ****  network test passed!! ****\n\n";

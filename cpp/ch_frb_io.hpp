@@ -447,19 +447,25 @@ public:
     // bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
 
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
-
-    struct event_counts {
-	ssize_t num_bad_packets = 0;
-	ssize_t num_good_packets = 0;
-	ssize_t num_beam_id_mismatches = 0;         // packet is well-formed, but beam_id doesn't match any of the assembler beam_ids
-	ssize_t num_first_packet_mismatches = 0;    // packet is well-formed, but (nupfreq,fpga_counts_per_sample) don't match first packet recevied
-	event_counts &operator+=(const event_counts &x);
-	void clear();
-    };
     
     // Can be called at any time, from any thread.
     initializer get_initializer() const;
-    event_counts get_event_counts() const;
+    std::vector<int64_t> get_event_counts() const;
+
+    enum event_type {
+	packet_received = 0,
+	packet_good = 1,
+	packet_bad = 2,
+	packet_dropped = 3,
+	packet_end_of_stream = 4,
+	beam_id_mismatch = 5,
+	first_packet_mismatch = 6,
+	assembler_hits = 7,
+	assembler_misses = 8,
+	assembled_chunk_dropped = 9,
+	assembled_chunk_processed = 10,
+	num_types = 11
+    };
 
     ~intensity_network_stream();
 
@@ -495,15 +501,12 @@ private:
     int sockfd = -1;
     udp_packet_list incoming_packet_list;
 
-    // Used only by assembler thread (not protected by lock)
-    event_counts _tmp_counts;
-
     pthread_t network_thread;
     pthread_t assembler_thread;
 
     mutable pthread_mutex_t lock;
 
-    // State model.  Note that the 
+    // State model.  [ XXX comment on meaning of stream_ended ]
     bool assembler_thread_started = false;
     bool network_thread_started = false;
     bool stream_started = false;
@@ -511,14 +514,17 @@ private:
     bool stream_ended = false;
     bool join_called = false;
     pthread_cond_t cond_state_changed;
-    
-    event_counts curr_counts;
+
+    std::vector<int64_t> event_counts;
+    std::vector<int64_t> network_thread_event_subcounts;
+    std::vector<int64_t> assembler_thread_event_subcounts;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
 
     void _open_socket();
+    void _add_event_counts(std::vector<int64_t> &event_subcounts);
 
     static void *network_pthread_main(void *);
     static void *assembler_pthread_main(void *);

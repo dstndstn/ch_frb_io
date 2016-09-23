@@ -38,7 +38,8 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 }
 
 
-void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet)
+// Returns true if packet successfully assembled
+bool assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet)
 {
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
@@ -62,14 +63,16 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	active_chunk1 = this->_make_assembled_chunk(active_chunk1->chunk_t1);
     }
 
-    // FIXME bookkeep drops!
-
     if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1))
 	active_chunk0->add_packet(packet);
     else if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1))
 	active_chunk1->add_packet(packet);
     else if ((packet_it0 < active_chunk1->chunk_t1) && (packet_it1 > active_chunk0->chunk_t0))
 	throw runtime_error("DOH");
+    else
+	return false;
+
+    return true;
 }
 
 

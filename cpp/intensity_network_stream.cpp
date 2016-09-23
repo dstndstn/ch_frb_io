@@ -11,29 +11,10 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
-using event_counts = intensity_network_stream::event_counts;
-
-void event_counts::clear()
-{
-    this->num_bad_packets = 0;
-    this->num_good_packets = 0;
-    this->num_beam_id_mismatches = 0;
-    this->num_first_packet_mismatches = 0;
-}
-
-event_counts &event_counts::operator+=(const event_counts &x)
-{
-    this->num_bad_packets += x.num_bad_packets;
-    this->num_good_packets += x.num_good_packets;
-    this->num_beam_id_mismatches += x.num_beam_id_mismatches;
-    this->num_first_packet_mismatches += x.num_first_packet_mismatches;
-    return *this;
-}
-
 
 // -------------------------------------------------------------------------------------------------
 //
-// intensity_network_stream
+// class intensity_network_stream
 
 
 // Static member function (de facto constructor)
@@ -104,6 +85,10 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
 
     this->incoming_packet_list = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
+    this->event_counts = vector<int64_t> (event_type::num_types, 0);
+    this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
+    this->assembler_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
+
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
 }
@@ -139,6 +124,20 @@ void intensity_network_stream::_open_socket()
     err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv_timeout, sizeof(tv_timeout));
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_RCVTIMEO) failed: ") + strerror(errno));
+}
+
+
+void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcounts)
+{
+    if (event_counts.size() != event_subcounts.size())
+	throw runtime_error("ch_frb_io: internal error: vector length mismatch in intensity_network_stream::_add_event_counts()");
+
+    pthread_mutex_lock(&this->lock);
+    for (unsigned int i = 0; i < event_counts.size(); i++)
+	event_counts[i] += event_subcounts[i];
+    pthread_mutex_unlock(&this->lock);
+
+    memset(&event_subcounts[0], 0, event_subcounts.size() * sizeof(event_subcounts[0]));
 }
 
 
@@ -219,11 +218,14 @@ intensity_network_stream::initializer intensity_network_stream::get_initializer(
 }
 
 
-intensity_network_stream::event_counts intensity_network_stream::get_event_counts() const
+vector<int64_t> intensity_network_stream::get_event_counts() const
 {
+    vector<int64_t> ret(event_type::num_types, 0);
+
     pthread_mutex_lock(&this->lock);
-    event_counts ret = this->curr_counts;
+    memcpy(&ret[0], &event_counts[0], ret.size() * sizeof(ret[0]));
     pthread_mutex_unlock(&this->lock);    
+
     return ret;
 }
 
@@ -293,6 +295,8 @@ void intensity_network_stream::_network_thread_start()
 
 void intensity_network_stream::_network_thread_body()
 {
+    int64_t *event_subcounts = &this->network_thread_event_subcounts[0];
+
     // Start listening on socket 
 
     struct sockaddr_in server_address;
@@ -333,7 +337,7 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
 	if (curr_timestamp > packet_list_start_timestamp + constants::unassembled_ringbuf_timeout_usec)
-	    this->_put_unassembled_packets();
+	    this->_put_unassembled_packets();   // Note: calls _add_event_counts()
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet = incoming_packet_list.data_end;
@@ -346,10 +350,14 @@ void intensity_network_stream::_network_thread_body()
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
+	event_subcounts[event_type::packet_received]++;
+
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-	if (is_end_of_stream_packet(packet, packet_nbytes))
+	if (is_end_of_stream_packet(packet, packet_nbytes)) {
+	    event_subcounts[event_type::packet_end_of_stream]++;
 	    return;
+	}
 
 	if (incoming_packet_list.curr_npackets == 0)
 	    packet_list_start_timestamp = curr_timestamp;
@@ -375,21 +383,25 @@ void intensity_network_stream::_network_thread_exit()
 	close(sockfd);
 	sockfd = -1;
     }
-
+    
+    // Note: calls _add_event_counts()
     this->_put_unassembled_packets();
+
     unassembled_ringbuf->end_stream();
 }
 
 
 void intensity_network_stream::_put_unassembled_packets()
 {
+    this->_add_event_counts(network_thread_event_subcounts);
+
     if (incoming_packet_list.curr_npackets == 0)
 	return;
     
     if (!unassembled_ringbuf->producer_put_packet_list(incoming_packet_list, false))
 	throw runtime_error("ch_frb_io: internal error: couldn't write packets to unassembled_ringbuf");
 
-    // FIXME maintain counts of packets_received, packets_dropped
+    // FIXME maintain count of packets dropped
     // FIXME throw exception if drops_allowed=false and packets were dropped
 }
 
@@ -438,10 +450,10 @@ void intensity_network_stream::_assembler_thread_start()
 void intensity_network_stream::_assembler_thread_body()
 {
     udp_packet_list packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
     bool first_packet = true;
 
     while (unassembled_ringbuf->consumer_get_packet_list(packet_list)) {
-	this->_tmp_counts.clear();
 
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list.data_start + packet_list.packet_offsets[ipacket];
@@ -449,7 +461,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    intensity_packet packet;
 
 	    if (!packet.read(packet_data, packet_nbytes)) {
-		this->_tmp_counts.num_bad_packets++;
+		event_subcounts[event_type::packet_bad]++;
 		continue;
 	    }
 
@@ -472,7 +484,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    bool mismatch = (packet.nupfreq != fp_nupfreq) || (packet.ntsamp != fp_nt_per_packet) || (packet.fpga_counts_per_sample != fp_fpga_counts_per_sample);
 
 	    if (_unlikely(mismatch)) {
-		this->_tmp_counts.num_first_packet_mismatches++;
+		event_subcounts[event_type::first_packet_mismatch]++;
 		continue;
 	    }
 
@@ -490,7 +502,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    // These checks are assumed by assembled_chunk::add_packet(), and mostly aren't rechecked, 
 	    // so it's important that they're done here!
 
-	    this->_tmp_counts.num_good_packets++;
+	    event_subcounts[event_type::packet_good]++;
 	    
 	    int nbeams = packet.nbeams;
 	    int nfreq_coarse = packet.nfreq_coarse;
@@ -511,21 +523,24 @@ void intensity_network_stream::_assembler_thread_body()
 		// Loop over assembler ids, to find a match for the packet_id.
 		int packet_id = packet.beam_ids[0];
 		int assembler_ix = 0;
-		
+
 		for (;;) {
-		    if (assembler_beam_ids[assembler_ix] == packet_id) {
-			// Match found
-			assemblers[assembler_ix]->put_unassembled_packet(packet);
-			break;
-		    }
-		    
-		    assembler_ix++;
-		    
 		    if (assembler_ix >= nassemblers) {
 			// No match found
-			this->_tmp_counts.num_beam_id_mismatches++;
+			event_subcounts[event_type::beam_id_mismatch]++;
 			break;
 		    }
+
+		    if (assembler_beam_ids[assembler_ix] != packet_id) {
+			assembler_ix++;
+			continue;
+		    }
+
+		    // Match found
+		    if (assemblers[assembler_ix]->put_unassembled_packet(packet))
+			event_subcounts[event_type::assembler_hits]++;
+		    else
+			event_subcounts[event_type::assembler_misses]++;
 		}
 		
 		// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
@@ -537,27 +552,14 @@ void intensity_network_stream::_assembler_thread_body()
 		packet.data += new_data_nbytes;
 	    }
 	}
-	    
-	pthread_mutex_lock(&this->lock);
-	this->curr_counts += _tmp_counts;
-	pthread_mutex_unlock(&this->lock);
+
+	this->_add_event_counts(assembler_thread_event_subcounts);
     }
 }
 
 
 void intensity_network_stream::_assembler_thread_exit()
 {
-    event_counts counts = this->get_event_counts();
-
-    stringstream ss;
-    ss << "ch_frb_io: assembler thread exiting:"
-       << " good_packets=" << counts.num_good_packets 
-       << ", bad_packets=" << counts.num_bad_packets 
-       << ", beam_id_mismatches=" << counts.num_beam_id_mismatches 
-       << "\n";
-
-    cerr << ss.str().c_str();
-
     unassembled_ringbuf->end_stream();
 
     // Use assemblers.size() instead of 'nassemblers', to correctly handle a corner case where the stream
@@ -565,6 +567,26 @@ void intensity_network_stream::_assembler_thread_exit()
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
 	assemblers[i]->end_stream();
+
+    this->_add_event_counts(assembler_thread_event_subcounts);
+
+    vector<int64_t> counts = this->get_event_counts();
+
+    stringstream ss;
+    ss << "ch_frb_io: assembler thread exiting:"
+       << "    packets received: " << counts[event_type::packet_received] << "\n"
+       << "    good packets: " << counts[event_type::packet_good] << "\n"
+       << "    bad packets: " << counts[event_type::packet_bad] << "\n"
+       << "    dropped packets: " << counts[event_type::packet_dropped] << "\n"
+       << "    end-of-stream packets: " << counts[event_type::packet_end_of_stream] << "\n"
+       << "    beam id mismatches: " << counts[event_type::beam_id_mismatch] << "\n"
+       << "    first-packet mismatches: " << counts[event_type::first_packet_mismatch] << "\n"
+       << "    assembler hits: " << counts[event_type::assembler_hits] << "\n"
+       << "    assembler misses: " << counts[event_type::assembler_misses] << "\n"
+       << "    assembled chunks dropped: " << counts[event_type::assembled_chunk_dropped] << "\n"
+       << "    assembled chunks processed: " << counts[event_type::assembled_chunk_processed] << "\n";
+
+    cerr << ss.str().c_str();
 }
 
 

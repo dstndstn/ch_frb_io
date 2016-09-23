@@ -109,7 +109,7 @@ public:
     ~assembled_chunk_ringbuf();
 
     // Called by assembler thread
-    void put_unassembled_packet(const intensity_packet &packet);
+    bool put_unassembled_packet(const intensity_packet &packet);
     void end_stream();   // called when assembler thread exits
 
     // Called by "processing" threads, via intensity_network_stream::get_assembled_chunk().
