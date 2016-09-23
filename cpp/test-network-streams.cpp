@@ -375,6 +375,21 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
 
 static void send_data(const shared_ptr<unit_test_instance> &tp)
 {
+    intensity_network_ostream::initializer ini_params;
+    ini_params.dstname = "127.0.0.1";
+    ini_params.beam_ids = tp->send_beam_ids;
+    ini_params.coarse_freq_ids = tp->send_freq_ids;
+    ini_params.nupfreq = tp->nupfreq;
+    ini_params.nt_per_chunk = tp->nt_per_chunk;
+    ini_params.nfreq_coarse_per_packet = tp->nfreq_coarse_per_packet;
+    ini_params.nt_per_packet = tp->nt_per_packet;
+    ini_params.fpga_counts_per_sample = tp->fpga_counts_per_sample;
+    ini_params.wt_cutoff = tp->wt_cutoff;
+    ini_params.target_gbps = ch_frb_io::constants::max_gbps_for_testing;
+    
+    // spawns network thread
+    auto ostream = intensity_network_ostream::make(ini_params);
+
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
 
@@ -385,12 +400,6 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     const int stride = tp->send_stride;
     const int s2 = nupfreq * stride;
     const int s3 = nfreq_coarse_tot * s2;
-
-    // spawns network thread
-    auto ostream = intensity_network_ostream::make("127.0.0.1", tp->send_beam_ids, tp->send_freq_ids, tp->nupfreq,
-						   tp->nt_per_chunk, tp->nfreq_coarse_per_packet, 
-						   tp->nt_per_packet, tp->fpga_counts_per_sample,
-						   tp->wt_cutoff, ch_frb_io::constants::max_gbps_for_testing);
 
     vector<float> intensity(nbeams * s3, 0.0);
     vector<float> weights(nbeams * s3, 0.0);

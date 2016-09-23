@@ -20,17 +20,10 @@ namespace ch_frb_io {
 
 
 // static member function (de facto constructor)
-auto intensity_network_ostream::make(const std::string &dstname_, const std::vector<int> &beam_ids_, 
-				     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
-				     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
-				     float wt_cutoff_, double target_gbps_) 
-    -> std::shared_ptr<intensity_network_ostream>
+shared_ptr<intensity_network_ostream> intensity_network_ostream::make(const initializer &ini_params_)
 {
-    auto p = new intensity_network_ostream(dstname_, beam_ids_, coarse_freq_ids_, nupfreq_, 
-					   nt_per_chunk_, nfreq_coarse_per_packet_, nt_per_packet_, 
-					   fpga_counts_per_sample_, wt_cutoff_, target_gbps_);
-    
-    shared_ptr<intensity_network_ostream> ret(p);
+    intensity_network_ostream *retp = new intensity_network_ostream(ini_params_);
+    shared_ptr<intensity_network_ostream> ret(retp);
 
     ret->_open_socket();
 
@@ -47,32 +40,26 @@ auto intensity_network_ostream::make(const std::string &dstname_, const std::vec
 }
 
     
-intensity_network_ostream::intensity_network_ostream(const std::string &dstname_, const std::vector<int> &beam_ids_, 
-						     const std::vector<int> &coarse_freq_ids_, int nupfreq_, int nt_per_chunk_,
-						     int nfreq_coarse_per_packet_, int nt_per_packet_, int fpga_counts_per_sample_,
-						     float wt_cutoff_, double target_gbps_) :
-    dstname(dstname_),
-    nbeams(beam_ids_.size()),
-    nfreq_coarse_per_chunk(coarse_freq_ids_.size()),
-    nfreq_coarse_per_packet(nfreq_coarse_per_packet_),
-    nupfreq(nupfreq_),
-    nt_per_chunk(nt_per_chunk_),
-    nt_per_packet(nt_per_packet_),
-    fpga_counts_per_sample(fpga_counts_per_sample_),
+intensity_network_ostream::intensity_network_ostream(const initializer &ini_params_) :
+    ini_params(ini_params_),
+    nbeams(ini_params.beam_ids.size()),
+    nfreq_coarse_per_packet(ini_params.nfreq_coarse_per_packet),
+    nfreq_coarse_per_chunk(ini_params.coarse_freq_ids.size()),
+    nupfreq(ini_params.nupfreq),
+    nt_per_packet(ini_params.nt_per_packet),
+    nt_per_chunk(ini_params.nt_per_chunk),
+    fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
     nbytes_per_packet(packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet)),
     npackets_per_chunk((nfreq_coarse_per_chunk / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet)),
     nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
-    wt_cutoff(wt_cutoff_),
-    target_gbps(target_gbps_),
-    beam_ids(beam_ids_),
-    coarse_freq_ids(coarse_freq_ids_)
+    target_gbps(ini_params.target_gbps)
 {
     // Tons of argument checking.
 
-    if ((beam_ids.size() == 0) || (beam_ids.size() >= 65536))
+    if ((ini_params.beam_ids.size() == 0) || (ini_params.beam_ids.size() >= 65536))
 	throw runtime_error("chime intensity_network_ostream constructor: beam_ids vector is empty or too large");
 
-    if ((coarse_freq_ids.size() == 0) || (coarse_freq_ids.size() >= 65536))
+    if ((ini_params.coarse_freq_ids.size() == 0) || (ini_params.coarse_freq_ids.size() >= 65536))
 	throw runtime_error("chime intensity_network_ostream constructor: coarse_freq_ids vector is empty or too large");
     if (nfreq_coarse_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_packet > 0");
@@ -92,57 +79,57 @@ intensity_network_ostream::intensity_network_ostream(const std::string &dstname_
 	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq");
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample");
-    if (wt_cutoff < 0.0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be >= 0.0");
+    if (ini_params.wt_cutoff <= 0.0)
+	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be > 0.0");
     if (target_gbps < 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected target_gbps to be >= 0.0");
 
     if (nbytes_per_packet > constants::max_output_udp_packet_size)
 	throw runtime_error("chime intensity_network_ostream constructor: packet size is too large, you need to decrease nfreq_per_packet or nt_per_packet");
 
-    for (unsigned int i = 0; i < beam_ids.size(); i++) {
-	if ((beam_ids[i] < 0) || (beam_ids[i] > constants::max_allowed_beam_id))
+    for (unsigned int i = 0; i < ini_params.beam_ids.size(); i++) {
+	if ((ini_params.beam_ids[i] < 0) || (ini_params.beam_ids[i] > constants::max_allowed_beam_id))
 	    throw runtime_error("intensity_network_ostream constructor: bad beam_id");
 	for (unsigned int j = 0; j < i; j++)
-	    if (beam_ids[i] == beam_ids[j])
+	    if (ini_params.beam_ids[i] == ini_params.beam_ids[j])
 		throw runtime_error("intensity_network_ostream constructor: duplicate beam_id");
     }
 
-    for (unsigned int i = 0; i < coarse_freq_ids.size(); i++) {
-	if ((coarse_freq_ids[i] < 0) || (coarse_freq_ids[i] >= constants::nfreq_coarse))
+    for (unsigned int i = 0; i < ini_params.coarse_freq_ids.size(); i++) {
+	if ((ini_params.coarse_freq_ids[i] < 0) || (ini_params.coarse_freq_ids[i] >= constants::nfreq_coarse))
 	    throw runtime_error("intensity_network_ostream constructor: bad coarse_freq_id");
 	for (unsigned int j = 0; j < i; j++)
-	    if (coarse_freq_ids[i] == coarse_freq_ids[j])
+	    if (ini_params.coarse_freq_ids[i] == ini_params.coarse_freq_ids[j])
 		throw runtime_error("intensity_network_ostream constructor: duplicate coarse_freq_id");
     }
 
-    // Parse dstname: expect string of the form HOSTNAME[:PORT]
+    // Parse dstname (expect string of the form HOSTNAME[:PORT])
 
-    this->hostname = dstname;
+    this->hostname = ini_params.dstname;
     this->udp_port = constants::default_udp_port;
 
-    size_t i = dstname.find(":");
+    size_t i = ini_params.dstname.find(":");
 
     if (i != std::string::npos) {
-	string portstr = dstname.substr(i+1);
+	string portstr = ini_params.dstname.substr(i+1);
 	try {
 	    this->udp_port = lexical_cast<uint16_t> (portstr);	    
 	} catch (...) {
 	    throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
 	}
 
-	this->hostname = dstname.substr(0,i);
+	this->hostname = ini_params.dstname.substr(0,i);
     }
 
     // Remaining initializations (except socket, which is initialized in intensity_network_ostream::_open_socket())
 
     this->beam_ids_16bit.resize(nbeams, 0);
     for (int i = 0; i < nbeams; i++)
-	beam_ids_16bit[i] = uint16_t(beam_ids[i]);
+	beam_ids_16bit[i] = uint16_t(ini_params.beam_ids[i]);
 
     this->coarse_freq_ids_16bit.resize(nfreq_coarse_per_chunk, 0);
     for (int i = 0; i < nfreq_coarse_per_chunk; i++)
-	coarse_freq_ids_16bit[i] = uint16_t(coarse_freq_ids[i]);
+	coarse_freq_ids_16bit[i] = uint16_t(ini_params.coarse_freq_ids[i]);
     
     xpthread_mutex_init(&this->state_lock);
     xpthread_cond_init(&this->cond_state_changed);
@@ -196,7 +183,7 @@ void intensity_network_ostream::_open_socket()
     // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
 
     if (connect(sockfd, reinterpret_cast<struct sockaddr *> (&saddr), sizeof(saddr)) < 0)
-	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + dstname + "': " + strerror(errno));
+	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + ini_params.dstname + "': " + strerror(errno));
 }
 
 
@@ -234,7 +221,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	    packet.freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
 	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
-	    packet.encode(tmp_packet_list.data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, wt_cutoff);
+	    packet.encode(tmp_packet_list.data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
 	    tmp_packet_list.add_packet(nbytes_per_packet);
 	}
     }

@@ -282,22 +282,18 @@ struct udp_packet_list {
 //  
 class intensity_network_ostream : noncopyable {
 public:
-    const std::string dstname;
-    const int nbeams = 0;
-    const int nfreq_coarse_per_chunk = 0;
-    const int nfreq_coarse_per_packet = 0;
-    const int nupfreq = 0;
-    const int nt_per_chunk = 0;
-    const int nt_per_packet = 0;
-    const int fpga_counts_per_sample = 0;
-    const int nbytes_per_packet = 0;
-    const int npackets_per_chunk = 0;
-    const int nbytes_per_chunk = 0;
-    const float wt_cutoff = 0.0;
-    const double target_gbps = 0.0;
-
-    const std::vector<int> beam_ids;         // length nbeaams
-    const std::vector<int> coarse_freq_ids;  // length nfreq_coarse_per_chunk
+    struct initializer {
+	std::string dstname;
+	std::vector<int> beam_ids;
+	std::vector<int> coarse_freq_ids;
+	int nupfreq = 0;
+	int nt_per_chunk = 0;
+	int nfreq_coarse_per_packet = 0;
+	int nt_per_packet = 0;
+	int fpga_counts_per_sample = 0;
+	float wt_cutoff = 0.5;
+	double target_gbps = 0.0;
+    };
 
     //
     // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
@@ -308,11 +304,7 @@ public:
     // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
     // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
     //
-    static auto make(const std::string &dstname, const std::vector<int> &beam_ids,
-		     const std::vector<int> &coarse_freq_ids, int nupfreq, int nt_per_chunk,
-		     int nfreq_coarse_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-		     float wt_cutoff, double target_gbps) 
-	-> std::shared_ptr<intensity_network_ostream>;
+    static std::shared_ptr<intensity_network_ostream> make(const initializer &ini_params);
 
     //
     // Called from 'external' context (i.e. same context that called make())
@@ -328,16 +320,29 @@ public:
     void end_stream(bool join_network_thread);
 
     ~intensity_network_ostream();
+
     
-
 protected:
-    int sockfd = -1;
+    const initializer ini_params;
 
-    std::string hostname;
-    uint16_t udp_port = constants::default_udp_port;
+    const int nbeams;
+    const int nfreq_coarse_per_packet;
+    const int nfreq_coarse_per_chunk;
+    const int nupfreq;
+    const int nt_per_packet;
+    const int nt_per_chunk;
+    const int fpga_counts_per_sample;
+    const int nbytes_per_packet;
+    const int npackets_per_chunk;
+    const int nbytes_per_chunk;
+    const double target_gbps;
 
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;
+
+    int sockfd = -1;
+    std::string hostname;
+    uint16_t udp_port = constants::default_udp_port;
     
     // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
     // If we want to make this data accessible by other threads, this needs to be changed.
@@ -358,10 +363,7 @@ protected:
     udp_packet_list tmp_packet_list;
 
     // Real constructor is protected
-    intensity_network_ostream(const std::string &dstname, const std::vector<int> &beam_ids, 
-			      const std::vector<int> &coarse_freq_ids, int nupfreq, int nt_per_chunk,
-			      int nfreq_coarse_per_packet, int nt_per_packet, int fpga_counts_per_sample, 
-			      float wt_cutoff, double target_gbps);
+    intensity_network_ostream(const initializer &ini_params);
 
     static void *network_pthread_main(void *opaque_args);
 
@@ -414,7 +416,7 @@ public:
     // but won't listen for packets until start_stream() is called.  Between calling make() and start_stream(),
     // you'll want to spawn "consumer" threads which query the assemblers for intensity and weights arrays.
 
-    static std::shared_ptr<intensity_network_stream> make(const initializer &x);
+    static std::shared_ptr<intensity_network_stream> make(const initializer &ini_params);
 
     // High level control.
     void start_stream();         // tells network thread to start listening for packets
