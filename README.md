@@ -60,9 +60,12 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
   - `make all install`
 
-  - If you want to run the unit test (warning: creates 100MB temp file in current directory):
-    `./test-intensity-hdf5-file`
-
+  - Here are some unit tests which you may or may not want to run:
+    ```
+    ./test-misc                   # no problem
+    ./test-intensity-hdf5-file    # warning: creates 100MB temp file in current directory
+    ./test-network-streams        # warning: takes ~1 hour to run, CPU-intensive
+    ```
 
 INSTALLATION (PYTHON)
 ---------------------
@@ -130,6 +133,9 @@ INSTALLATION (PYTHON)
   - Nuisance issue: if a chime_network_stream is constructed from python, then it doesn't
     respond to control-C (not sure if this is a 'ch_frb_io' loose end, or an 'rf_pipelines' 
     loose end).
+
+  - Minor: implement an optimization to intensity_network_ostream which doesn't send
+    a packet which is entirely masked (i.e. data array is all zeros)
 
   - Open-ended item: there are lots of things that can go wrong in a realtime system,
     such as temporary network failures, and threads running slow so that ring buffers
