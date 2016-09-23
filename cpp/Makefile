@@ -41,7 +41,8 @@ OFILES = assembled_chunk.o \
 	intensity_network_ostream.o \
 	intensity_packet.o \
 	lexical_cast.o \
-	udp_packet_list.o
+	udp_packet_list.o \
+	udp_packet_ringbuf.o
 
 INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
 LIBFILES=libch_frb_io.so
