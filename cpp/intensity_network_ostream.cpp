@@ -329,7 +329,6 @@ void intensity_network_ostream::_network_thread_body()
 	    curr_timestamp = usec_between(tv_ini, xgettimeofday());
 	    
 	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
-	    // FIXME this throttling logic is simplistic and could be improved.
 	    if ((target_gbps > 0.0) && (npackets_sent > 0)) {
 		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
 		if (curr_timestamp < target_timestamp) {
@@ -338,7 +337,6 @@ void intensity_network_ostream::_network_thread_body()
 		}
 	    }
 
-	    // FIXME(?): sendmmsg() may improve performance here, but throttling logic would definitely need update.
 	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
 	    
 	    if (n < 0)

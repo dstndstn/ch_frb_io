@@ -94,6 +94,10 @@ INSTALLATION (PYTHON)
     into a ring buffer which feeds the intensity_network_ostream).  It may also help	
     a little to write an AVX2 packet encoding kernel.
 
+  - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
+    multiple UDP packets, avoiding the overhead of one system call per packet.  Does
+    this help speed things up, or help reduce packet drops?
+
   - When the network stream is running, it maintains "event counts" for many types of
     events, such as packet drops, assembler hits/misses etc.  Right now we don't really
     do anything with this information but it's intended to be a starting point for some
@@ -103,10 +107,8 @@ INSTALLATION (PYTHON)
     Related: we probably want to generalize the event counts (currently cumulative) to
     keep track of the event rate for some choice of timescale (say 10 sec).
 
-  - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
-    to avoid dropping packets.  This means that the unit tests take about an hour to run,
-    which isn't really a problem, but is indicative of deeper performance problems?  It
-    would be nice to understand where the bottleneck is.
+  - In the full CHIME backend, do we want to pin the network and/or assembler threads
+    to specific cores?  Do we want to increase the scheduleing priority of these threads?
 
   - It might be possible to further optimize the assembly-language kernels for packet assembly
     and decoding, using streaming writes.  See Chapter 7 ("optimizing cache usage") of the
@@ -114,16 +116,20 @@ INSTALLATION (PYTHON)
     aligned loads/stores, but this would impose pointer alignment requirements on callers of
     assembled_chunk::decode().
 
-  - It would be great to switch from pthreads to C++11 threads.  (The C++11 API is
-    much nicer but I'm not sure that code written using pthreads and C++11 threads can
-    interoperate.  If not, then we have to make the switch in many libraries at once!)
+  - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
+    to avoid dropping packets.  This means that the unit tests take about an hour to run,
+    which isn't really a problem, but is indicative of deeper performance problems?  It
+    would be nice to understand where the bottleneck is.
+
+  - It would be great to switch from pthreads to C++11 threads, which are much nicer!
+    However, there are some things to check.  First, we want to make sure that the C++11
+    API supports low-level things like setting the scheduling affinity and priority of
+    a thread.  Second, I'm not sure if C++11 threads and pthreads can interoperate.  If
+    not, then we have to make the switch in many libraries at once!
 
   - Nuisance issue: if a chime_network_stream is constructed from python, then it doesn't
     respond to control-C (not sure if this is a 'ch_frb_io' loose end, or an 'rf_pipelines' 
     loose end).
-
-  - We'll probably want a member function of intensity_network_stream which pins the
-    network and assembler threads to specific cores.
 
   - Open-ended item: there are lots of things that can go wrong in a realtime system,
     such as temporary network failures, and threads running slow so that ring buffers
