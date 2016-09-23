@@ -31,10 +31,10 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
     
     // Wait for assembler thread to start
-    pthread_mutex_lock(&ret->lock);
+    pthread_mutex_lock(&ret->state_lock);
     while (!ret->assembler_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->lock);
-    pthread_mutex_unlock(&ret->lock);    
+	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
+    pthread_mutex_unlock(&ret->state_lock);    
 
     // Spawn network thread
     err = pthread_create(&ret->network_thread, NULL, network_pthread_main, (void *) &ret);
@@ -42,10 +42,10 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 	throw runtime_error(string("ch_frb_io: pthread_create() failed in intensity_network_stream constructor: ") + strerror(errno));
     
     // Wait for network thread to start
-    pthread_mutex_lock(&ret->lock);
+    pthread_mutex_lock(&ret->state_lock);
     while (!ret->network_thread_started)
-	pthread_cond_wait(&ret->cond_state_changed, &ret->lock);
-    pthread_mutex_unlock(&ret->lock);    
+	pthread_cond_wait(&ret->cond_state_changed, &ret->state_lock);
+    pthread_mutex_unlock(&ret->state_lock);    
 
     return ret;
 }
@@ -89,7 +89,8 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
     this->assembler_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
 
-    pthread_mutex_init(&lock, NULL);
+    pthread_mutex_init(&state_lock, NULL);
+    pthread_mutex_init(&event_lock, NULL);
     pthread_cond_init(&cond_state_changed, NULL);
 }
 
@@ -97,7 +98,8 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
 intensity_network_stream::~intensity_network_stream()
 {
     pthread_cond_destroy(&cond_state_changed);
-    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&state_lock);
+    pthread_mutex_destroy(&event_lock);
 
     if (sockfd >= 0) {
 	close(sockfd);
@@ -132,10 +134,10 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
     if (event_counts.size() != event_subcounts.size())
 	throw runtime_error("ch_frb_io: internal error: vector length mismatch in intensity_network_stream::_add_event_counts()");
 
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->event_lock);
     for (unsigned int i = 0; i < event_counts.size(); i++)
 	event_counts[i] += event_subcounts[i];
-    pthread_mutex_unlock(&this->lock);
+    pthread_mutex_unlock(&this->event_lock);
 
     memset(&event_subcounts[0], 0, event_subcounts.size() * sizeof(event_subcounts[0]));
 }
@@ -143,16 +145,16 @@ void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcount
 
 void intensity_network_stream::start_stream()
 {
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
 
     if (stream_started) {
-	pthread_mutex_unlock(&this->lock);
+	pthread_mutex_unlock(&this->state_lock);
 	throw runtime_error("ch_frb_io: intensity_network_stream::start_stream() called on running, completed, or cancelled stream");
     }
 
     this->stream_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
+    pthread_mutex_unlock(&this->state_lock);
 }
 
 
@@ -161,31 +163,31 @@ void intensity_network_stream::start_stream()
 // The assembler thread will see that the ringbuf has ended, flush buffers to the processing threads, and exit.
 void intensity_network_stream::end_stream()
 {
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
     this->stream_started = true;
     this->first_packet_received = true;
     this->stream_ended = true;    
     pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
+    pthread_mutex_unlock(&this->state_lock);
 }
 
 
 void intensity_network_stream::join_threads()
 {
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
     
     if (!stream_started) {
-	pthread_mutex_unlock(&this->lock);
+	pthread_mutex_unlock(&this->state_lock);
 	throw runtime_error("ch_frb_io: intensity_network_stream::join_network_thread() was called with no prior call to start_stream()");
     }
 
     if (join_called) {
-	pthread_mutex_unlock(&this->lock);
+	pthread_mutex_unlock(&this->state_lock);
 	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_network_thread()");
     }
 
     this->join_called = true;
-    pthread_mutex_unlock(&this->lock);
+    pthread_mutex_unlock(&this->state_lock);
 
     pthread_join(network_thread, NULL);
     pthread_join(assembler_thread, NULL);
@@ -198,10 +200,10 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
 	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
 
     // Wait for first_packet_received flag to be set.
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
     while (!first_packet_received)
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
-    pthread_mutex_unlock(&this->lock);
+	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+    pthread_mutex_unlock(&this->state_lock);
 
     // There is a corner case where the vector is still length-zero after the flag gets set.
     // This happens if the stream was asynchronous cancelled before receiving the first packet.
@@ -212,19 +214,19 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
 }
 
 
-intensity_network_stream::initializer intensity_network_stream::get_initializer() const
+intensity_network_stream::initializer intensity_network_stream::get_initializer()
 {
     return this->_initializer;
 }
 
 
-vector<int64_t> intensity_network_stream::get_event_counts() const
+vector<int64_t> intensity_network_stream::get_event_counts()
 {
     vector<int64_t> ret(event_type::num_types, 0);
 
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->event_lock);
     memcpy(&ret[0], &event_counts[0], ret.size() * sizeof(ret[0]));
-    pthread_mutex_unlock(&this->lock);    
+    pthread_mutex_unlock(&this->event_lock);    
 
     return ret;
 }
@@ -274,21 +276,21 @@ void intensity_network_stream::_network_thread_start()
     // Advance stream state to "network_thread_started" state,
     // and wait for another thread to advance it to "stream_started" state.
 
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
 
     this->network_thread_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
 
     for (;;) {
 	if (this->stream_ended) {
-	    pthread_mutex_unlock(&this->lock);
+	    pthread_mutex_unlock(&this->state_lock);
 	    return;
 	}
 	if (this->stream_started) {
-	    pthread_mutex_unlock(&this->lock);
+	    pthread_mutex_unlock(&this->state_lock);
 	    break;
 	}
-	pthread_cond_wait(&this->cond_state_changed, &this->lock);
+	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     }
 }
 
@@ -324,14 +326,14 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically check whether stream has been cancelled by end_stream().
 	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
-	    pthread_mutex_lock(&this->lock);
+	    pthread_mutex_lock(&this->state_lock);
 
 	    if (this->stream_ended) {
-		pthread_mutex_unlock(&this->lock);    
+		pthread_mutex_unlock(&this->state_lock);    
 		return;
 	    }
 
-	    pthread_mutex_unlock(&this->lock);
+	    pthread_mutex_unlock(&this->state_lock);
 	    cancellation_check_timestamp = curr_timestamp;
 	}
 
@@ -440,10 +442,10 @@ void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
 
 void intensity_network_stream::_assembler_thread_start()
 {
-    pthread_mutex_lock(&this->lock);
+    pthread_mutex_lock(&this->state_lock);
     this->assembler_thread_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
-    pthread_mutex_unlock(&this->lock);
+    pthread_mutex_unlock(&this->state_lock);
 }
 
 
@@ -456,8 +458,8 @@ void intensity_network_stream::_assembler_thread_body()
     while (unassembled_ringbuf->consumer_get_packet_list(packet_list)) {
 
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
-            uint8_t *packet_data = packet_list.data_start + packet_list.packet_offsets[ipacket];
-            int packet_nbytes = packet_list.packet_offsets[ipacket+1] - packet_list.packet_offsets[ipacket];
+            uint8_t *packet_data = packet_list.get_packet_data(ipacket);
+            int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
 	    intensity_packet packet;
 
 	    if (!packet.read(packet_data, packet_nbytes)) {
@@ -475,10 +477,10 @@ void intensity_network_stream::_assembler_thread_body()
 		for (int ix = 0; ix < nassemblers; ix++)
 		    this->assemblers.push_back(make_shared<assembled_chunk_ringbuf>(*this, ix));
 
-		pthread_mutex_lock(&this->lock);
+		pthread_mutex_lock(&this->state_lock);
 		this->first_packet_received = true;
 		pthread_cond_broadcast(&this->cond_state_changed);
-		pthread_mutex_unlock(&this->lock);
+		pthread_mutex_unlock(&this->state_lock);
 	    }
 
 	    bool mismatch = (packet.nupfreq != fp_nupfreq) || (packet.ntsamp != fp_nt_per_packet) || (packet.fpga_counts_per_sample != fp_fpga_counts_per_sample);

@@ -259,6 +259,10 @@ struct udp_packet_list {
     udp_packet_list() { }   // default constructor makes a dummy udp_packet_list with max_npackets=max_nbytes=0.
     udp_packet_list(int max_npackets, int max_nbytes);
 
+    // Accessors (not range-checked)
+    inline uint8_t *get_packet_data(int i)  { return data_start + packet_offsets[i]; }
+    inline int get_packet_nbytes(int i)     { return packet_offsets[i+1] - packet_offsets[i]; }
+
     // To add a packet, first add data by hand at 'data_end', then call add_packet().
     void add_packet(int packet_nbytes);
 
@@ -404,8 +408,8 @@ public:
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
     
     // Can be called at any time, from any thread.
-    initializer get_initializer() const;
-    std::vector<int64_t> get_event_counts() const;
+    initializer get_initializer();
+    std::vector<int64_t> get_event_counts();
 
     enum event_type {
 	packet_received = 0,
@@ -455,24 +459,26 @@ private:
     // Used only by the network thread (not protected by lock)
     int sockfd = -1;
     udp_packet_list incoming_packet_list;
+    std::vector<int64_t> network_thread_event_subcounts;
+
+    // Used only by the assembler thread
+    std::vector<int64_t> assembler_thread_event_subcounts;
 
     pthread_t network_thread;
     pthread_t assembler_thread;
 
-    mutable pthread_mutex_t lock;
-
     // State model.  [ XXX comment on meaning of stream_ended ]
+    pthread_mutex_t state_lock;
+    pthread_cond_t cond_state_changed;
     bool assembler_thread_started = false;
     bool network_thread_started = false;
     bool stream_started = false;
     bool first_packet_received = false;
     bool stream_ended = false;
     bool join_called = false;
-    pthread_cond_t cond_state_changed;
 
+    pthread_mutex_t event_lock;
     std::vector<int64_t> event_counts;
-    std::vector<int64_t> network_thread_event_subcounts;
-    std::vector<int64_t> assembler_thread_event_subcounts;
 
     // The actual constructor is private, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
