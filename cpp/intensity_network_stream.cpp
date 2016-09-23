@@ -589,7 +589,7 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    assembler hits: " << counts[event_type::assembler_hits] << "\n"
        << "    assembler misses: " << counts[event_type::assembler_misses] << "\n"
        << "    assembled chunks dropped: " << counts[event_type::assembled_chunk_dropped] << "\n"
-       << "    assembled chunks processed: " << counts[event_type::assembled_chunk_processed] << "\n";
+       << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
 
     cerr << ss.str().c_str();
 }

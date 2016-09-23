@@ -422,7 +422,7 @@ public:
 	assembler_hits = 7,
 	assembler_misses = 8,
 	assembled_chunk_dropped = 9,
-	assembled_chunk_processed = 10,
+	assembled_chunk_queued = 10,
 	num_types = 11
     };
 
