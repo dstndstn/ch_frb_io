@@ -91,6 +91,15 @@ INSTALLATION (PYTHON)
     single core is too slow to even generate a stream of Gaussian random numbers at
     full CHIME bandwidth!
 
+  - When the network stream is running, it maintains "event counts" for many types of
+    events, such as packet drops, assembler hits/misses etc.  Right now we don't really
+    do anything with this information but it's intended to be a starting point for some
+    sort of RPC-driven dashboard which can give a visual summary of how the backend is
+    performing.
+
+    Related: we probably want to generalize the event counts (currently cumulative) to
+    keep track of the event rate for some choice of timescale (say 10 sec).
+
   - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
     to avoid dropping packets.  This means that the unit tests take about an hour to run,
     which isn't really a problem, but is indicative of deeper performance problems?  It
