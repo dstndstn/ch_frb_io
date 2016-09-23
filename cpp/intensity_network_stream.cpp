@@ -537,10 +537,10 @@ void intensity_network_stream::_assembler_thread_body()
 		    }
 
 		    // Match found
-		    if (assemblers[assembler_ix]->put_unassembled_packet(packet))
-			event_subcounts[event_type::assembler_hits]++;
-		    else
-			event_subcounts[event_type::assembler_misses]++;
+		    bool is_hit = assemblers[assembler_ix]->put_unassembled_packet(packet);
+		    int ev_type = is_hit ? event_type::assembler_hits : event_type::assembler_misses;
+		    event_subcounts[ev_type]++;
+		    break;
 		}
 		
 		// Danger zone: we do some pointer arithmetic, to modify the packet so that it now
@@ -573,7 +573,7 @@ void intensity_network_stream::_assembler_thread_exit()
     vector<int64_t> counts = this->get_event_counts();
 
     stringstream ss;
-    ss << "ch_frb_io: assembler thread exiting:"
+    ss << "ch_frb_io: assembler thread exiting\n"
        << "    packets received: " << counts[event_type::packet_received] << "\n"
        << "    good packets: " << counts[event_type::packet_good] << "\n"
        << "    bad packets: " << counts[event_type::packet_bad] << "\n"
