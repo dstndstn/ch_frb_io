@@ -170,10 +170,12 @@ protected:
     const int nt_per_packet;
     const uint64_t fpga_counts_per_sample;
 
-    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
     void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
+    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
+
     // This data is not protected by the lock, but is only accessed by the assembler thread.
+    // Note: active_chunk0->ichunk is always equal to (assembled_ringbuf_pos + assembled_ringbuf_size).
     std::shared_ptr<assembled_chunk> active_chunk0;
     std::shared_ptr<assembled_chunk> active_chunk1;
 

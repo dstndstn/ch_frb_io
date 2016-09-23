@@ -17,13 +17,22 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
     nt_per_packet(nt_per_packet_),
     fpga_counts_per_sample(fpga_counts_per_sample_)
 {
-    // FIXME I suppose we should do some parameter checking
+    if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
+	throw runtime_error("ch_frb_io: bad beam_id passed to assembled_chunk_ringbuf constructor");
+    if ((nupfreq < 0) || (nupfreq > constants::max_allowed_nupfreq))
+	throw runtime_error("ch_frb_io: bad nupfreq value passed to assembled_chunk_ringbuf constructor");
+    if ((nt_per_packet <= 0) || (constants::nt_per_assembled_chunk % nt_per_packet != 0))
+	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::nt_per_packet must be a divisor of constants::nt_per_assembled_chunk");
+    if (fpga_counts_per_sample <= 0)
+	throw runtime_error("ch_frb_io: bad fpga_counts_per_sample value passed to assembled_chunk_ringbuf constructor");
 
-    uint64_t packet_it0 = fpga_count0 / fpga_counts_per_sample;
-    uint64_t assembler_it0 = (packet_it0 / constants::nt_per_assembled_chunk) * constants::nt_per_assembled_chunk;
+    uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
+    uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
-    this->active_chunk0 = this->_make_assembled_chunk(assembler_it0);
-    this->active_chunk1 = this->_make_assembled_chunk(active_chunk0->chunk_t1);
+    this->active_chunk0 = this->_make_assembled_chunk(ichunk);
+    this->active_chunk1 = this->_make_assembled_chunk(ichunk+1);
+    this->assembled_ringbuf_pos = ichunk;
+    this->assembled_ringbuf_size = 0;
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
@@ -40,13 +49,14 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 // Returns true if packet successfully assembled
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
-    if (!active_chunk0 || !active_chunk1)
+    if (_unlikely(!active_chunk0 || !active_chunk1))
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
 
-    uint64_t packet_it0 = packet.fpga_count / packet.fpga_counts_per_sample;
-    uint64_t packet_it1 = packet_it0 + packet.ntsamp;
+    uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
+    uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
+    uint64_t active_ichunk = assembled_ringbuf_pos + assembled_ringbuf_size;
 
-    if (packet_it1 > active_chunk1->chunk_t1) {
+    if (packet_ichunk >= active_ichunk + 2) {
 	//
 	// If we receive a packet whose timestamps extend past the range of our current
 	// assembly buffer, then we advance the buffer and send an assembled_chunk to the
@@ -59,21 +69,23 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	//
 	this->_put_assembled_chunk(active_chunk0, event_counts);
 	active_chunk0 = active_chunk1;
-	active_chunk1 = this->_make_assembled_chunk(active_chunk1->chunk_t1);
+	active_chunk1 = this->_make_assembled_chunk(active_ichunk+2);
+	active_ichunk++;
     }
 
-    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1)) {
+    if (packet_ichunk == active_ichunk) {
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk0->add_packet(packet);
     }
-    else if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1)) {
+    else if (packet_ichunk == active_ichunk+1) {
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk1->add_packet(packet);
     }
-    else if ((packet_it1 <= active_chunk0->chunk_t0) || (packet_it0 >= active_chunk1->chunk_t1))
+    else {
 	event_counts[intensity_network_stream::event_type::assembler_miss]++;
-    else
-	throw runtime_error("ch_frb_io: internal error: bad packet alignment in assembled_chunk_ringbuf::put_unassembled_packet()");
+	if (_unlikely(ini_params.throw_exception_on_assembler_miss))
+	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
+    }
 }
 
 
@@ -93,10 +105,10 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 	pthread_mutex_unlock(&this->lock);
 	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
 
-	if (ini_params.warn_if_packets_dropped)
-	    cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
-	if (ini_params.throw_exception_if_packets_dropped)
-	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_if_packets_dropped' flag");
+	if (ini_params.emit_warning_on_buffer_drop)
+	    cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
+	if (ini_params.throw_exception_on_buffer_drop)
+	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
 
 	return;
     }
@@ -163,14 +175,14 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 }
 
 
-std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t chunk_t0)
+std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
 {
     if (ini_params.mandate_fast_kernels)
-	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
     else if (ini_params.mandate_reference_kernels)
-	return make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	return make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
     else
-	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
 }
 
 

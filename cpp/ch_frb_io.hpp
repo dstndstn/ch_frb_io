@@ -387,8 +387,9 @@ public:
 	int udp_port = constants::default_udp_port;
 	bool mandate_reference_kernels = false;
 	bool mandate_fast_kernels = false;
-	bool warn_if_packets_dropped = true;
-	bool throw_exception_if_packets_dropped = false;
+	bool emit_warning_on_buffer_drop = true;
+	bool throw_exception_on_buffer_drop = false;
+	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
     };
 
@@ -518,15 +519,21 @@ struct assembled_chunk : noncopyable {
     const int nscales = 0;     // equal to (constants::nfreq_coarse * nt_coarse)
     const int ndata = 0;       // equal to (constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk)
 
-    // Time index of first sample in chunk.
-    uint64_t chunk_t0 = 0;
-    uint64_t chunk_t1 = 0;
+    // Chunks are indexed by 'ichunk', which differs by 1 in adjacent chunks.
+    //
+    // Reminder: there are several units of time used in different parts of the CHIME backend!
+    //   1 assembled_chunk = constants::nt_per_assembled_chunk * (1 intensity sample)
+    //   1 intensity sample = assembled_chunk::fpga_counts_per_sample * (1 fpga count)
+    //   1 fpga count = 2.56e-6 seconds    (approx)
+
+    uint64_t ichunk;
+    uint64_t isample;   // always equal to ichunk * constants::nt_per_assembled_chunk
 
     float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
-    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+    assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
     
     // These are virtual so that subclasses can be written with optimized implementations 
@@ -534,8 +541,8 @@ struct assembled_chunk : noncopyable {
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
 
-    // Factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
-    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+    // Static factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
+    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
@@ -546,7 +553,7 @@ struct assembled_chunk : noncopyable {
 // Special case nt_per_packet=16 optimized with avx2 kernels, used in full CHIME
 struct fast_assembled_chunk : public assembled_chunk
 {
-    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t chunk_t0);
+    fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
 
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;

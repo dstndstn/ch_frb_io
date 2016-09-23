@@ -454,10 +454,10 @@ void intensity_network_stream::_put_unassembled_packets()
     if (!success) {
 	network_thread_event_subcounts[event_type::packet_dropped] += npackets;
 
-	if (ini_params.warn_if_packets_dropped)
+	if (ini_params.emit_warning_on_buffer_drop)
 	    cerr << "ch_frb_io: assembler thread crashed or is running slow, dropping packets\n";
-	if (ini_params.throw_exception_if_packets_dropped)
-	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_if_packets_dropped' flag");
+	if (ini_params.throw_exception_on_buffer_drop)
+	    throw runtime_error("ch_frb_io: packets were dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
     }
 
     this->_add_event_counts(network_thread_event_subcounts);

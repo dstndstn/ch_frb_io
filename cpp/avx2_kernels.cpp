@@ -239,8 +239,8 @@ inline void _decode_kernel(float *intp, float *wtp, const uint8_t *src, const fl
 // class fast_assembled_chunk
 
 
-fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_) :
-    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_)
+fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
+    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
 {
     if (nt_per_packet_ != 16)
 	throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called with nt_per_packet != 16");
@@ -253,7 +253,7 @@ fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_pe
 void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 {
     // Offset relative to beginning of packet
-    int t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - chunk_t0;
+    uint64_t t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - isample;
 
     for (int f = 0; f < packet.nfreq_coarse; f++) {
 	int coarse_freq_id = packet.freq_ids[f];
@@ -334,7 +334,7 @@ void test_fast_decode_kernel(std::mt19937 &rng)
     // Initialized arbitrarily, since decode() doesn't use them.
     const int beam_id = 0;
     const int fpga_counts_per_sample = 384;
-    const uint64_t chunk_t0 = 0;
+    const uint64_t ichunk = 0;
 
     for (int iouter = 0; iouter < 128; iouter++) {
 	cerr << ".";
@@ -387,8 +387,8 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 
 	// Test 1: Equivalence of assembled_chunk::add_packet() and fast_assembled_chunk::add_packet()
 	
-	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
-	auto chunk1 = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, chunk_t0);
+	auto chunk0 = make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+	auto chunk1 = make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
 
 	for (int ipacket = 0; ipacket < npackets; ipacket++) {
 	    // Simulate random packet

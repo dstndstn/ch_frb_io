@@ -270,12 +270,12 @@ static void *consumer_thread_main(void *opaque_arg)
 	assert(chunk->beam_id == beam_id);
 
 	if (tpos_initialized)
-	    assert(chunk->chunk_t0 == tpos);
+	    assert(chunk->isample == tpos);
 	else
-	    assert(chunk->chunk_t0 <= tp->initial_t0);
+	    assert(chunk->isample <= tp->initial_t0);
 
-	// tpos = expected chunk_t0 in the next assembled_chunk.
-	tpos = chunk->chunk_t0 + ch_frb_io::constants::nt_per_assembled_chunk;
+	// tpos = expected isample in the next assembled_chunk.
+	tpos = chunk->isample + ch_frb_io::constants::nt_per_assembled_chunk;
 	tpos_initialized = true;
 
 	pthread_mutex_lock(&tp->tpos_lock);
@@ -283,7 +283,7 @@ static void *consumer_thread_main(void *opaque_arg)
 	pthread_cond_broadcast(&tp->cond_tpos_changed);
 	pthread_mutex_unlock(&tp->tpos_lock);
 
-	int chunk_t0 = chunk->chunk_t0;
+	int chunk_t0 = chunk->isample;
 
 	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse * tp->nupfreq; ifreq++) {
 	    const float *int_row = &all_intensities[0] + ifreq * tp->recv_stride;
@@ -360,7 +360,8 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
     initializer.beam_ids = tp->recv_beam_ids;
     initializer.mandate_reference_kernels = !tp->use_fast_kernels;
     initializer.mandate_fast_kernels = tp->use_fast_kernels;
-    initializer.throw_exception_if_packets_dropped = true;
+    initializer.throw_exception_on_buffer_drop = true;
+    initializer.throw_exception_on_assembler_miss = true;
 
     tp->istream = intensity_network_stream::make(initializer);
     

@@ -10,7 +10,7 @@ namespace ch_frb_io {
 #endif
 
 
-assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_)
+assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
     : beam_id(beam_id_), 
       nupfreq(nupfreq_), 
       nt_per_packet(nt_per_packet_),
@@ -18,8 +18,8 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
       nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
       nscales(constants::nfreq_coarse * nt_coarse),
       ndata(constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk),
-      chunk_t0(chunk_t0_),
-      chunk_t1(chunk_t0_ + constants::nt_per_assembled_chunk)
+      ichunk(ichunk_),
+      isample(ichunk * constants::nt_per_assembled_chunk)
 {
     if ((beam_id < 0) || (beam_id > constants::max_allowed_beam_id))
 	throw runtime_error("assembled_chunk constructor: bad beam_id argument");
@@ -77,8 +77,10 @@ void assembled_chunk::randomize(std::mt19937 &rng)
 
 void assembled_chunk::add_packet(const intensity_packet &packet)
 {
+    uint64_t packet_t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample);
+
     // Offset relative to beginning of packet
-    int t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - chunk_t0;
+    uint64_t t0 = packet_t0 - isample;
     
     // The runtime checks in intensity_network_stream::_process_packet() should
     // ensure that the following checks are redundant.  I decided to include the 
@@ -91,8 +93,8 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 		(packet.fpga_counts_per_sample != this->fpga_counts_per_sample) ||
 		(packet.fpga_count % (fpga_counts_per_sample * nt_per_packet)) ||
 		(packet.beam_ids[0] != this->beam_id) ||
-		(t0 < 0) ||
-		(t0 + nt_per_packet > constants::nt_per_assembled_chunk));
+		(packet_t0 < isample) ||
+		(packet_t0 + nt_per_packet > isample + constants::nt_per_assembled_chunk));
 
     if (_unlikely(bad))
 	throw runtime_error("ch_frb_io: internal error in assembled_chunk::add_packet()");
@@ -142,12 +144,12 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 }
 
 
-shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t chunk_t0_)
+shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
 {
     if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
-	return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_);
+	return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
 
-    return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, chunk_t0_);
+    return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
 }
 
 
