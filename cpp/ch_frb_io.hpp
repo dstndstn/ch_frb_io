@@ -286,13 +286,18 @@ public:
 	std::string dstname;
 	std::vector<int> beam_ids;
 	std::vector<int> coarse_freq_ids;
+
 	int nupfreq = 0;
 	int nt_per_chunk = 0;
 	int nfreq_coarse_per_packet = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
 	float wt_cutoff = 0.5;
-	double target_gbps = 0.0;
+	double target_gbps = 1.0;   // if 0.0, then data will be written as quickly as possible!
+
+	bool is_blocking = true;
+	bool emit_warning_on_buffer_drop = true;
+	bool throw_exception_on_buffer_drop = false;
     };
 
     //
@@ -314,7 +319,7 @@ public:
     //
     // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
     //
-    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking=true);
+    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
     
     // Can be called from either external context or network thread
     void end_stream(bool join_network_thread);

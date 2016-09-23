@@ -188,7 +188,7 @@ void intensity_network_ostream::_open_socket()
 
 
 // The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
-void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, bool is_blocking)
+void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
 {
     if (fpga_count % (fpga_counts_per_sample * nt_per_packet) != 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
@@ -227,9 +227,15 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	}
     }
 
-    // FIXME should count dropped packets here
-    // FIXME should have boolean drops_allowed
-    ringbuf->put_packet_list(tmp_packet_list, is_blocking);
+    if (ringbuf->put_packet_list(tmp_packet_list, ini_params.is_blocking))
+	return;
+
+    // If we get here, then packet list was dropped!
+    if (ini_params.emit_warning_on_buffer_drop)
+	cerr << "ch_frb_io: network write thread crashed or is running slow, dropping packets\n";
+    if (ini_params.throw_exception_on_buffer_drop)
+	throw runtime_error("ch_frb_io: packets were dropped and output stream was constructed with 'throw_exception_on_buffer_drop' flag");
+
 }
 
 

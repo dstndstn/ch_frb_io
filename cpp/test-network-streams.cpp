@@ -438,7 +438,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	pthread_mutex_unlock(&tp->tpos_lock);
 
 	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
-	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count, true);
+	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count);
 	cout << "sent chunk " << ichunk << "/" << nchunks << endl;
     }
 
