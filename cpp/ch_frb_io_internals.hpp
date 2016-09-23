@@ -154,8 +154,8 @@ public:
     ~assembled_chunk_ringbuf();
 
     // Called by assembler thread
-    bool put_unassembled_packet(const intensity_packet &packet);
-    void end_stream();   // called when assembler thread exits
+    void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
+    void end_stream(int64_t *event_counts);   // called when assembler thread exits
 
     // Called by "processing" threads, via intensity_network_stream::get_assembled_chunk().
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
@@ -171,7 +171,7 @@ protected:
     int fpga_counts_per_sample = 0;
 
     std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t chunk_t0);
-    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk);
+    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
     // This data is not protected by the lock, but is only accessed by the assembler thread.
     std::shared_ptr<assembled_chunk> active_chunk0;

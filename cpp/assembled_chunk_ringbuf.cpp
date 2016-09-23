@@ -39,7 +39,7 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 
 
 // Returns true if packet successfully assembled
-bool assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet)
+void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
@@ -58,25 +58,27 @@ bool assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// needed.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
-	this->_put_assembled_chunk(active_chunk0);
+	this->_put_assembled_chunk(active_chunk0, event_counts);
 	active_chunk0 = active_chunk1;
 	active_chunk1 = this->_make_assembled_chunk(active_chunk1->chunk_t1);
     }
 
-    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1))
+    if ((packet_it0 >= active_chunk0->chunk_t0) && (packet_it1 <= active_chunk0->chunk_t1)) {
+	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk0->add_packet(packet);
-    else if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1))
+    }
+    else if ((packet_it0 >= active_chunk1->chunk_t0) && (packet_it1 <= active_chunk1->chunk_t1)) {
+	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk1->add_packet(packet);
-    else if ((packet_it0 < active_chunk1->chunk_t1) && (packet_it1 > active_chunk0->chunk_t0))
-	throw runtime_error("DOH");
+    }
+    else if ((packet_it1 <= active_chunk0->chunk_t0) || (packet_it0 >= active_chunk1->chunk_t1))
+	event_counts[intensity_network_stream::event_type::assembler_miss]++;
     else
-	return false;
-
-    return true;
+	throw runtime_error("ch_frb_io: internal error: bad packet alignment in assembled_chunk_ringbuf::put_unassembled_packet()");
 }
 
 
-void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk)
+void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
@@ -90,6 +92,8 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 
     if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
 	pthread_mutex_unlock(&this->lock);
+	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
+
 	cerr << "ch_frb_io: warning: assembler's \"downstream\" thread is running too slow, dropping assembled_chunk\n";
 	
 	if (!_initializer.drops_allowed)
@@ -104,6 +108,7 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
     pthread_mutex_unlock(&this->lock);
+    event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
 }
 
 
@@ -137,13 +142,13 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 }
 
 
-void assembled_chunk_ringbuf::end_stream()
+void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 {
     if (!active_chunk0 || !active_chunk1)
 	throw runtime_error("ch_frb_io: internal error: empty pointers in assembled_chunk_ringbuf::end_stream(), this can happen if end_stream() is called twice");
 
-    this->_put_assembled_chunk(active_chunk0);
-    this->_put_assembled_chunk(active_chunk1);
+    this->_put_assembled_chunk(active_chunk0, event_counts);
+    this->_put_assembled_chunk(active_chunk1, event_counts);
     this->active_chunk0 = this->active_chunk1 = shared_ptr<assembled_chunk> ();
 
     pthread_mutex_lock(&this->lock);

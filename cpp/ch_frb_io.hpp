@@ -419,8 +419,8 @@ public:
 	packet_end_of_stream = 4,
 	beam_id_mismatch = 5,
 	first_packet_mismatch = 6,
-	assembler_hits = 7,
-	assembler_misses = 8,
+	assembler_hit = 7,
+	assembler_miss = 8,
 	assembled_chunk_dropped = 9,
 	assembled_chunk_queued = 10,
 	num_types = 11
@@ -428,7 +428,7 @@ public:
 
     ~intensity_network_stream();
 
-private:
+protected:
     // FIXME do we need this?
     friend class assembled_chunk_ringbuf;
 
@@ -467,7 +467,7 @@ private:
     pthread_t network_thread;
     pthread_t assembler_thread;
 
-    // State model.  [ XXX comment on meaning of stream_ended ]
+    // State model.  [ FIXME be sure to comment on meaning of stream_ended ]
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;
     bool assembler_thread_started = false;
@@ -480,7 +480,7 @@ private:
     pthread_mutex_t event_lock;
     std::vector<int64_t> event_counts;
 
-    // The actual constructor is private, so it can be a helper function 
+    // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
 

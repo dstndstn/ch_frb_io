@@ -542,9 +542,7 @@ void intensity_network_stream::_assembler_thread_body()
 		    }
 
 		    // Match found
-		    bool is_hit = assemblers[assembler_ix]->put_unassembled_packet(packet);
-		    int ev_type = is_hit ? event_type::assembler_hits : event_type::assembler_misses;
-		    event_subcounts[ev_type]++;
+		    assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
 		    break;
 		}
 		
@@ -571,7 +569,7 @@ void intensity_network_stream::_assembler_thread_exit()
     // is asynchronously cancelled before receiving the first packet, and the vector never gets allocated.
 
     for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->end_stream();
+	assemblers[i]->end_stream(&assembler_thread_event_subcounts[0]);
 
     this->_add_event_counts(assembler_thread_event_subcounts);
 
@@ -586,8 +584,8 @@ void intensity_network_stream::_assembler_thread_exit()
        << "    end-of-stream packets: " << counts[event_type::packet_end_of_stream] << "\n"
        << "    beam id mismatches: " << counts[event_type::beam_id_mismatch] << "\n"
        << "    first-packet mismatches: " << counts[event_type::first_packet_mismatch] << "\n"
-       << "    assembler hits: " << counts[event_type::assembler_hits] << "\n"
-       << "    assembler misses: " << counts[event_type::assembler_misses] << "\n"
+       << "    assembler hits: " << counts[event_type::assembler_hit] << "\n"
+       << "    assembler misses: " << counts[event_type::assembler_miss] << "\n"
        << "    assembled chunks dropped: " << counts[event_type::assembled_chunk_dropped] << "\n"
        << "    assembled chunks queued: " << counts[event_type::assembled_chunk_queued] << "\n";
 
