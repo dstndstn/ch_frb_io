@@ -253,7 +253,7 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
     shared_ptr<intensity_network_stream> stream = *arg;
 
     if (!stream)
-	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_thread_main()");
+	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
 
     stream->_network_thread_start();
 
@@ -296,8 +296,6 @@ void intensity_network_stream::_network_thread_start()
 
 void intensity_network_stream::_network_thread_body()
 {
-    int64_t *event_subcounts = &this->network_thread_event_subcounts[0];
-
     // Start listening on socket 
 
     struct sockaddr_in server_address;
@@ -315,9 +313,11 @@ void intensity_network_stream::_network_thread_body()
 
     // Main packet loop
 
+    int64_t *event_subcounts = &this->network_thread_event_subcounts[0];
     struct timeval tv_ini = xgettimeofday();
-    uint64_t packet_list_start_timestamp = 0;
+    uint64_t incoming_packet_list_timestamp = 0;
     uint64_t cancellation_check_timestamp = 0;
+    bool is_first_packet = true;
 
     for (;;) {
 	// All timestamps are in microseconds relative to tv_ini.
@@ -337,12 +337,12 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
-	if (curr_timestamp > packet_list_start_timestamp + constants::unassembled_ringbuf_timeout_usec)
+	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec)
 	    this->_put_unassembled_packets();   // Note: calls _add_event_counts()
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
-	uint8_t *packet = incoming_packet_list.data_end;
-	int packet_nbytes = read(sockfd, packet, constants::max_input_udp_packet_size + 1);
+	uint8_t *packet_data = incoming_packet_list.data_end;
+	int packet_nbytes = read(sockfd, packet_data, constants::max_input_udp_packet_size + 1);
 
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
@@ -356,16 +356,42 @@ void intensity_network_stream::_network_thread_body()
 
 	// If we receive a special "short" packet (length 24), it indicates end-of-stream.
 	// FIXME is this a temporary kludge or something which should be documented in the packet protocol?
-	if (is_end_of_stream_packet(packet, packet_nbytes)) {
+	if (is_end_of_stream_packet(packet_data, packet_nbytes)) {
 	    event_subcounts[event_type::packet_end_of_stream]++;
 	    return;
 	}
 
-	if (incoming_packet_list.curr_npackets == 0)
-	    packet_list_start_timestamp = curr_timestamp;
+	// Special logic for processing first packet, which triggers some initializations.
+	if (is_first_packet) {
+	    intensity_packet packet;
 
-	// Add packet to list.  Note that there is no way that _put_unassembled_packets() can get called
-	// between the read() call and here (this would be a bug).
+	    if (!packet.read(packet_data, packet_nbytes)) {
+		event_subcounts[event_type::packet_bad]++;
+		continue;
+	    }
+
+	    this->fp_nupfreq = packet.nupfreq;
+	    this->fp_nt_per_packet = packet.ntsamp;
+	    this->fp_fpga_counts_per_sample = packet.fpga_counts_per_sample;
+	    this->fp_fpga_count = packet.fpga_count;
+	    is_first_packet = false;
+
+	    // Now that we know the first packet params, we can initialize the assemblers
+	    for (int ix = 0; ix < nassemblers; ix++)
+		this->assemblers.push_back(make_shared<assembled_chunk_ringbuf>(*this, ix));
+
+	    // This will unblock the assembler thread, which waits for the first_packet_received
+	    // flag as soon as it is spawned.
+	    pthread_mutex_lock(&this->state_lock);
+	    this->first_packet_received = true;
+	    pthread_cond_broadcast(&this->cond_state_changed);
+	    pthread_mutex_unlock(&this->state_lock);
+	}
+
+	// The incoming_packet_list is timestamped with the arrival time of its first packet.
+	if (incoming_packet_list.curr_npackets == 0)
+	    incoming_packet_list_timestamp = curr_timestamp;
+
 	incoming_packet_list.add_packet(packet_nbytes);
 
 	if (incoming_packet_list.is_full)
@@ -446,9 +472,16 @@ void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
 
 void intensity_network_stream::_assembler_thread_start()
 {
+    // Set the assembler_thread_started flag (this unblocks the thread which spawned the assembler thread)
     pthread_mutex_lock(&this->state_lock);
     this->assembler_thread_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);
+
+    // Wait for first_packet_received flag to be set.
+    pthread_mutex_lock(&this->state_lock);
+    while (!first_packet_received)
+	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     pthread_mutex_unlock(&this->state_lock);
 }
 
@@ -457,10 +490,8 @@ void intensity_network_stream::_assembler_thread_body()
 {
     udp_packet_list packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
-    bool first_packet = true;
 
     while (unassembled_ringbuf->get_packet_list(packet_list)) {
-
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list.get_packet_data(ipacket);
             int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
@@ -469,22 +500,6 @@ void intensity_network_stream::_assembler_thread_body()
 	    if (!packet.read(packet_data, packet_nbytes)) {
 		event_subcounts[event_type::packet_bad]++;
 		continue;
-	    }
-
-	    if (first_packet) {
-		this->fp_nupfreq = packet.nupfreq;
-		this->fp_nt_per_packet = packet.ntsamp;
-		this->fp_fpga_counts_per_sample = packet.fpga_counts_per_sample;
-		this->fp_fpga_count = packet.fpga_count;
-		first_packet = false;
-
-		for (int ix = 0; ix < nassemblers; ix++)
-		    this->assemblers.push_back(make_shared<assembled_chunk_ringbuf>(*this, ix));
-
-		pthread_mutex_lock(&this->state_lock);
-		this->first_packet_received = true;
-		pthread_cond_broadcast(&this->cond_state_changed);
-		pthread_mutex_unlock(&this->state_lock);
 	    }
 
 	    bool mismatch = (packet.nupfreq != fp_nupfreq) || (packet.ntsamp != fp_nt_per_packet) || (packet.fpga_counts_per_sample != fp_fpga_counts_per_sample);
