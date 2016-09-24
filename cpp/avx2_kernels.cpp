@@ -1,7 +1,6 @@
 #include <cassert>
 #include <iomanip>
 #include <algorithm>
-#include <immintrin.h>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -11,6 +10,33 @@ namespace ch_frb_io {
 };  // pacify emacs c-mode!
 #endif
 
+#ifndef __AVX2__
+
+// If compiling on a machine without the AVX2 instruction set, we include some placeholder routines
+
+fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
+{
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called on a non-AVX2 machine");
+}
+
+void fast_assembled_chunk::add_packet(const intensity_packet &packet)
+{
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::add_packet() called on a non-AVX2 machine");
+}
+
+void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
+{
+    throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk::decode() called on a non-AVX2 machine");
+}
+
+void test_avx2_kernels(std::mt19937 &rng)
+{
+    cerr << "test_avx2_kernels(): this machine does not have the AVX2 instruction set, nothing to do\n";
+}
+
+#else  // __AVX2__
+
+#include <immintrin.h>
 
 // -------------------------------------------------------------------------------------------------
 //
@@ -296,7 +322,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 // Testing
 
 
-// helper function used by test_fast_decode_kernel()
+// helper function used by test_avx2_kernels()
 static vector<float> randvec(std::mt19937 &rng, ssize_t n)
 {
     vector<float> ret(n);
@@ -324,9 +350,9 @@ void peek_at_unpack_kernel()
 }
 
 
-void test_fast_decode_kernel(std::mt19937 &rng)
+void test_avx2_kernels(std::mt19937 &rng)
 {
-    cerr << "test_fast_decode_kernel()";
+    cerr << "test_avx2_kernels()";
 
     // Required by fast decode kernel
     const int nt_per_packet = 16;
@@ -447,14 +473,14 @@ void test_fast_decode_kernel(std::mt19937 &rng)
 		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
 			 << " " << intensity0[i] << " " << intensity1[i] << endl;
-		    throw runtime_error("test_fast_decode_kernel: intensity mismatch");
+		    throw runtime_error("test_avx2_kernels: intensity mismatch");
 		}
 
 		if (weights0[i] != weights1[i]) {
 		    cerr << "\n " << nupfreq << " " << ifreq << " " << it 
 			 << " " << int32_t(chunk0->data[j]) << " " << int32_t(chunk1->data[j])
 			 << " " << weights0[i] << " " << weights1[i] << endl;
-		    throw runtime_error("test_fast_decode_kernel: weights mismatch");
+		    throw runtime_error("test_avx2_kernels: weights mismatch");
 		}
 	    }
 	}
@@ -463,5 +489,6 @@ void test_fast_decode_kernel(std::mt19937 &rng)
     cerr << "success\n";
 }
 
+#endif  // __AVX2__
 
 }  // namespace ch_frb_io

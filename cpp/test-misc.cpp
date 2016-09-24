@@ -9,7 +9,7 @@ int main(int argc, char **argv)
 
     test_lexical_cast();
     test_packet_encoding();
-    test_fast_decode_kernel(rng);
+    test_avx2_kernels(rng);
 
     return 0;
 }
