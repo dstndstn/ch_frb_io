@@ -17,14 +17,14 @@ inline bool array_contains(const int *arr, int len, int x)
 
 inline double intval(int beam_id, int ifreq, int it)
 {
-    return sin(0.823*beam_id + 1.319*ifreq + 1.023*it);
+    return fmod(0.823*beam_id + 1.319*ifreq + 1.023*it, 1.0);
 }
 
 
 // weights are between 0.2 and 1
 inline double wtval(int beam_id, int ifreq, int it)
 {
-    return 0.6 + 0.4 * sin(1.328*beam_id + 2.382*ifreq + 0.883*it);
+    return 0.2 + 0.8 * fmod(1.328*beam_id + 2.382*ifreq + 0.883*it, 1.0);
 }
 
 
