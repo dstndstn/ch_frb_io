@@ -1,3 +1,12 @@
+// This file contains assembly language kernels for packet assembly and decoding.
+// These kernels improve bottom-line performance of the network front end by ~30%.  
+// It might be possible to improve further, using memory access optimizations such
+// as streaming writes and aligned loads/stores (reference: chapter 7 of the Intel 
+// optimization manual).
+//
+// I didn't bother writing assembly language kernels for packet _encoding_, since
+// this code is used only for testing and performance isn't as critical.
+
 #include <cassert>
 #include <iomanip>
 #include <algorithm>

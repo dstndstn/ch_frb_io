@@ -20,7 +20,11 @@
 #include "ch_frb_io.hpp"
 
 
-// Branch predictor hint
+// This will compile to a "hint" for CPU branch prediction.  We use it mainly for error detection 
+// in critical paths (e.g. packet parsing, where there are many possible ways a packet can be bad,
+// leading to many unlikely branches in the code).  I found that it gives a few-percent speedup
+// if used consistently, so it's not important, but seems worth doing anyway since it's so easy.
+
 #ifndef _unlikely
 #define _unlikely(cond)  (__builtin_expect(cond,0))
 #endif

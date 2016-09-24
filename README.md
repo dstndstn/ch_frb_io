@@ -124,6 +124,14 @@ INSTALLATION (PYTHON)
     which isn't really a problem, but is indicative of deeper performance problems?  It
     would be nice to understand where the bottleneck is.
 
+  - Unit testing feels incomplete without a standalone test of intensity_packet::encode().
+
+  - The assembler should handle packets which arrive in an arbitrary order, but our
+    unit test doesn't fully test this.  (It does permute the coarse frequencies, since
+    this was easy to implement, but this isn't as general as an arbitrary packet permutation.)
+    It would be great to strengthen the unit tests, by putting a flag in the network_ostream
+    which randomly reorders packets prior to sending.
+
   - It would be great to switch from pthreads to C++11 threads, which are much nicer!
     However, there are some things to check.  First, we want to make sure that the C++11
     API supports low-level things like setting the scheduling affinity and priority of
