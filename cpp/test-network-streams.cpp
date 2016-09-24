@@ -322,7 +322,7 @@ static void *consumer_thread_main(void *opaque_arg)
 
 		if ((wt_row[it] == 0.0) && (wval > wt_cutoff))
 		    ss << "A probable reason for this failure is that the receive threads can't keep up with the sender.\n"
-		       << "Try decreasing ch_frb_io::constants::max_gbps_for_testing (in ch_frb_io.hpp), recompiling and trying again.\n";
+		       << "Try decreasing target_gbps (in test_network-streams.cpp:send_data()), recompiling and trying again.\n";
 
 		cerr << ss.str();
 		exit(1);
@@ -385,8 +385,16 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     ini_params.nt_per_packet = tp->nt_per_packet;
     ini_params.fpga_counts_per_sample = tp->fpga_counts_per_sample;
     ini_params.wt_cutoff = tp->wt_cutoff;
-    ini_params.target_gbps = ch_frb_io::constants::max_gbps_for_testing;
+
+    // FIXME: currently we have to run test-network-streams.cpp at very low throughput (0.1 Gbps)
+    // to avoid dropping packets.  This means that the unit tests take about an hour to run,
+    // which isn't really a problem, but is indicative of deeper performance problems?  It
+    // would be nice to understand where the bottleneck is.
+
+    ini_params.target_gbps = 0.1;
     
+    cout << "\nNote: target_gbps = " << ini_params.target_gbps << "\n";
+
     // spawns network thread
     auto ostream = intensity_network_ostream::make(ini_params);
 
@@ -469,8 +477,6 @@ int main(int argc, char **argv)
 
     string dummy;
     getline(cin, dummy);
-
-    cout << "\nNote: ch_frb_io::constants::max_gbps_for_testing = " << ch_frb_io::constants::max_gbps_for_testing << "\n";
 
     for (int irun = 0; irun < nrun; irun++) {
 	auto tp = make_shared<unit_test_instance> (rng, irun, nrun);

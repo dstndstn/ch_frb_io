@@ -43,6 +43,9 @@ namespace constants {
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse = 1024;
 
+    // FIXME what value makes most sense here?
+    static constexpr double default_wt_cutoff = 0.3;
+
     //
     // Network parameters.
     //
@@ -64,7 +67,7 @@ namespace constants {
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
     static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
-    static constexpr double max_gbps_for_testing = 0.1;
+    static constexpr double default_gbps = 1.0;
     static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
 
     // Parameters of ring buffer between output stream object and network output thread
@@ -292,8 +295,8 @@ public:
 	int nfreq_coarse_per_packet = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
-	float wt_cutoff = 0.5;
-	double target_gbps = 1.0;   // if 0.0, then data will be written as quickly as possible!
+	float wt_cutoff = 0.3;                          // FIXME what value makes most sense here?  this should probably be in constants
+	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
 
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
