@@ -58,6 +58,7 @@ struct unit_test_instance {
     // not protected by lock
     pthread_t consumer_threads[maxbeams];    
     shared_ptr<ch_frb_io::intensity_network_stream> istream;
+    shared_ptr<ch_frb_io::intensity_network_ostream> ostream;
 
     pthread_mutex_t tpos_lock;
     pthread_cond_t cond_tpos_changed;
@@ -396,7 +397,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     cout << "\nNote: target_gbps = " << ini_params.target_gbps << "\n";
 
     // spawns network thread
-    auto ostream = intensity_network_ostream::make(ini_params);
+    tp->ostream = intensity_network_ostream::make(ini_params);
 
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
@@ -446,12 +447,12 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	pthread_mutex_unlock(&tp->tpos_lock);
 
 	uint64_t fpga_count = (tp->initial_t0 + ichunk * nt_chunk) * tp->fpga_counts_per_sample;
-	ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count);
+	tp->ostream->send_chunk(&intensity[0], &weights[0], stride, fpga_count);
 	cout << "sent chunk " << ichunk << "/" << nchunks << endl;
     }
 
     // joins network thread
-    ostream->end_stream(true);
+    tp->ostream->end_stream(true);
 }
 
 
@@ -503,6 +504,9 @@ int main(int argc, char **argv)
 	assert(counts[ev_type::first_packet_mismatch] == 0);
 	assert(counts[ev_type::assembler_miss] == 0);
 	assert(counts[ev_type::assembled_chunk_dropped] == 0);
+
+	int expected_npackets = (tp->nt_tot / tp->nt_per_chunk) * tp->npackets_per_chunk;
+	assert(counts[ev_type::packet_received] - counts[ev_type::packet_end_of_stream] == expected_npackets);
     }
 
     cout << "\n    ****  network test passed!! ****\n\n";
