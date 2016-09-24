@@ -51,9 +51,9 @@ shared_ptr<intensity_network_stream> intensity_network_stream::make(const initia
 }
 
 
-intensity_network_stream::intensity_network_stream(const initializer &x) :
-    ini_params(x),
-    nassemblers(x.beam_ids.size())
+intensity_network_stream::intensity_network_stream(const initializer &ini_params_) :
+    ini_params(ini_params_),
+    nassemblers(ini_params_.beam_ids.size())
 {
     // Argument checking
 
@@ -61,18 +61,23 @@ intensity_network_stream::intensity_network_stream(const initializer &x) :
 	throw runtime_error("ch_frb_io: length-zero beam_id vector passed to intensity_network_stream constructor");
 
     for (int i = 0; i < nassemblers; i++) {
-	if ((x.beam_ids[i] < 0) || (x.beam_ids[i] > constants::max_allowed_beam_id))
+	if ((ini_params.beam_ids[i] < 0) || (ini_params.beam_ids[i] > constants::max_allowed_beam_id))
 	    throw runtime_error("ch_frb_io: bad beam_id passed to intensity_network_stream constructor");
 	for (int j = 0; j < i; j++)
-	    if (x.beam_ids[i] == x.beam_ids[j])
+	    if (ini_params.beam_ids[i] == ini_params.beam_ids[j])
 		throw runtime_error("ch_frb_io: duplicate beam_ids passed to intensity_network_stream constructor");
     }
 
-    if ((x.udp_port <= 0) || (x.udp_port >= 65536))
-	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(x.udp_port));
+    if ((ini_params.udp_port <= 0) || (ini_params.udp_port >= 65536))
+	throw runtime_error("ch_frb_io: intensity_network_stream constructor: bad udp port " + to_string(ini_params.udp_port));
 
-    if (x.mandate_fast_kernels && x.mandate_reference_kernels)
+    if (ini_params.mandate_fast_kernels && ini_params.mandate_reference_kernels)
 	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
+
+#ifndef __AVX2__
+    if (ini_params.mandate_fast_kernels)
+	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
+#endif
 
     // All initializations except the socket (which is initialized in _open_socket()),
     // and the assemblers (which are initalized when the first packet is received).

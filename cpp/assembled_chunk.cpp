@@ -146,10 +146,12 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 
 shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
 {
+#ifdef __AVX2__
     if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
-	return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+	return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+#endif
 
-    return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
 }
 
 

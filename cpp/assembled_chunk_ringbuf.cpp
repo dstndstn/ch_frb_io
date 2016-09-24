@@ -25,6 +25,13 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::nt_per_packet must be a divisor of constants::nt_per_assembled_chunk");
     if (fpga_counts_per_sample <= 0)
 	throw runtime_error("ch_frb_io: bad fpga_counts_per_sample value passed to assembled_chunk_ringbuf constructor");
+    if (ini_params.mandate_fast_kernels && ini_params.mandate_reference_kernels)
+	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
+
+#ifndef __AVX2__
+    if (ini_params.mandate_fast_kernels)
+	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
+#endif
 
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
     uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
