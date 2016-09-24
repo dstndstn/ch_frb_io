@@ -170,6 +170,7 @@ void intensity_network_stream::end_stream()
     pthread_mutex_lock(&this->state_lock);
     this->stream_started = true;
     this->first_packet_received = true;
+    this->assemblers_initialized = true;
     this->stream_ended = true;    
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
@@ -203,14 +204,14 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     if ((assembler_index < 0) || (assembler_index >= nassemblers))
 	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
 
-    // Wait for first_packet_received flag to be set.
+    // Wait for assemblers_initialized flag to be set.
+    // After this, it's OK to access 'assemblers' without holding the lock.
     pthread_mutex_lock(&this->state_lock);
-    while (!first_packet_received)
+    while (!this->assemblers_initialized)
 	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     pthread_mutex_unlock(&this->state_lock);
 
-    // There is a corner case where the vector is still length-zero after the flag gets set.
-    // This happens if the stream was asynchronous cancelled before receiving the first packet.
+    // This can happen if end_stream() was called asynchronously, before the assemblers were initialized.
     if (assemblers.size() == 0)
 	return shared_ptr<assembled_chunk> ();
 
@@ -297,14 +298,13 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 
 void intensity_network_stream::_network_thread_start()
 {
-    // Advance stream state to "network_thread_started" state,
-    // and wait for another thread to advance it to "stream_started" state.
-
     pthread_mutex_lock(&this->state_lock);
 
+    // Advance stream state to "network_thread_started"...
     this->network_thread_started = true;
     pthread_cond_broadcast(&this->cond_state_changed);
 
+    // ...and wait for it to advance to "stream_started"
     for (;;) {
 	if (this->stream_ended) {
 	    pthread_mutex_unlock(&this->state_lock);
@@ -403,14 +403,8 @@ void intensity_network_stream::_network_thread_body()
 	    this->fp_fpga_count = packet.fpga_count;
 	    is_first_packet = false;
 
-	    // Now that we know the first packet params, we can initialize the assemblers
-	    this->assemblers.resize(nassemblers);
-	    for (int ix = 0; ix < nassemblers; ix++)
-		assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], fp_nupfreq, 
-								      fp_nt_per_packet, fp_fpga_counts_per_sample, fp_fpga_count);
-
-	    // This will unblock the assembler thread, which waits for the first_packet_received
-	    // flag as soon as it is spawned.
+	    // This will unblock the assembler thread.  (After being spawned, the assembler thread
+	    // waits for the first_packet_received flag before doing anything else.)
 	    pthread_mutex_lock(&this->state_lock);
 	    this->first_packet_received = true;
 	    pthread_cond_broadcast(&this->cond_state_changed);
@@ -519,6 +513,19 @@ void intensity_network_stream::_assembler_thread_start()
 
 void intensity_network_stream::_assembler_thread_body()
 {
+    uint16_t nupfreq = this->fp_nupfreq;
+    uint16_t nt_per_packet = this->fp_nt_per_packet;
+    uint16_t fpga_counts_per_sample = fp_fpga_counts_per_sample;
+
+    this->assemblers.resize(nassemblers);
+    for (int ix = 0; ix < nassemblers; ix++)
+	assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], nupfreq, nt_per_packet, fpga_counts_per_sample, this->fp_fpga_count);
+    
+    pthread_mutex_lock(&this->state_lock);
+    this->assemblers_initialized = true;
+    pthread_cond_broadcast(&this->cond_state_changed);
+    pthread_mutex_unlock(&this->state_lock);
+
     udp_packet_list packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
@@ -533,7 +540,7 @@ void intensity_network_stream::_assembler_thread_body()
 		continue;
 	    }
 
-	    bool mismatch = (packet.nupfreq != fp_nupfreq) || (packet.ntsamp != fp_nt_per_packet) || (packet.fpga_counts_per_sample != fp_fpga_counts_per_sample);
+	    bool mismatch = (packet.nupfreq != nupfreq) || (packet.ntsamp != nt_per_packet) || (packet.fpga_counts_per_sample != fpga_counts_per_sample);
 
 	    if (_unlikely(mismatch)) {
 		event_subcounts[event_type::first_packet_mismatch]++;

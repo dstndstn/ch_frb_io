@@ -493,6 +493,7 @@ protected:
     bool network_thread_started = false;
     bool stream_started = false;
     bool first_packet_received = false;
+    bool assemblers_initialized = false;
     bool stream_ended = false;
     bool join_called = false;
 
