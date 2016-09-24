@@ -136,7 +136,7 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 		for (int it_fine = it_coarse*nt_per_packet; it_fine < (it_coarse+1)*nt_per_packet; it_fine++) {
 		    float x = float(src_f[it_fine]);
 		    int_f[it_fine] = scale*x + offset;
-		    wt_f[it_fine] = ((x*(255.-x)) > 0.5) ? 1.0 : 0.0;  // FIXME ugh
+		    wt_f[it_fine] = ((x==0) || (x==255)) ? 0.0 : 1.0;
 		}
 	    }
 	}
