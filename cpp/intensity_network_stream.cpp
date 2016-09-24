@@ -182,12 +182,12 @@ void intensity_network_stream::join_threads()
     
     if (!stream_started) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: intensity_network_stream::join_network_thread() was called with no prior call to start_stream()");
+	throw runtime_error("ch_frb_io: intensity_network_stream::join_threads() was called with no prior call to start_stream()");
     }
 
     if (join_called) {
 	pthread_mutex_unlock(&this->state_lock);
-	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_network_thread()");
+	throw runtime_error("ch_frb_io: double call to intensity_network_stream::join_threads()");
     }
 
     this->join_called = true;
