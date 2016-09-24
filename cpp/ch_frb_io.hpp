@@ -303,6 +303,24 @@ public:
 	bool throw_exception_on_buffer_drop = false;
     };
 
+    const initializer ini_params;
+    
+    // Some of these fields are redundant with ini_params
+    const int nbeams;
+    const int nfreq_coarse_per_packet;
+    const int nfreq_coarse_per_chunk;
+    const int nupfreq;
+    const int nt_per_packet;
+    const int nt_per_chunk;
+    const int nbytes_per_packet;
+    const int npackets_per_chunk;
+    const int nbytes_per_chunk;
+    const int elts_per_chunk;
+    const uint64_t fpga_counts_per_sample;
+    const uint64_t fpga_counts_per_packet;
+    const uint64_t fpga_counts_per_chunk;
+    const double target_gbps;
+
     //
     // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
     // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
@@ -331,20 +349,6 @@ public:
 
     
 protected:
-    const initializer ini_params;
-
-    const int nbeams;
-    const int nfreq_coarse_per_packet;
-    const int nfreq_coarse_per_chunk;
-    const int nupfreq;
-    const int nt_per_packet;
-    const int nt_per_chunk;
-    const int fpga_counts_per_sample;
-    const int nbytes_per_packet;
-    const int npackets_per_chunk;
-    const int nbytes_per_chunk;
-    const double target_gbps;
-
     std::vector<uint16_t> beam_ids_16bit;
     std::vector<uint16_t> coarse_freq_ids_16bit;
 

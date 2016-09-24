@@ -48,10 +48,13 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     nupfreq(ini_params.nupfreq),
     nt_per_packet(ini_params.nt_per_packet),
     nt_per_chunk(ini_params.nt_per_chunk),
-    fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
     nbytes_per_packet(packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet)),
     npackets_per_chunk((nfreq_coarse_per_chunk / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet)),
     nbytes_per_chunk(nbytes_per_packet * npackets_per_chunk),
+    elts_per_chunk(nbeams * nfreq_coarse_per_chunk * nupfreq * nt_per_chunk),
+    fpga_counts_per_sample(ini_params.fpga_counts_per_sample),
+    fpga_counts_per_packet(fpga_counts_per_sample * nt_per_packet),
+    fpga_counts_per_chunk(fpga_counts_per_sample * nt_per_chunk),
     target_gbps(ini_params.target_gbps)
 {
     // Tons of argument checking.
