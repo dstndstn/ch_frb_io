@@ -40,7 +40,8 @@ namespace ch_frb_io {
 
 
 struct intensity_packet {
-    // "Header" fields
+    // These 24 bytes should have the same ordering and byte count as the "wire" packet format,
+    // since we use memcpy(24) to initialize them from the raw packet buffer.
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
@@ -61,9 +62,6 @@ struct intensity_packet {
 
     // Returns true if packet is good, false if bad
     bool read(const uint8_t *src, int src_nbytes);
-
-    // Returns packet_nbytes (not data_nbytes)
-    int write(uint8_t *dst) const;
 
     // The semantics of encode() aren't particularly intuitive, so we document it carefully here!
     //

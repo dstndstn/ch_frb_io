@@ -70,23 +70,6 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 }
 
 
-// No checking of the input is performed!
-int intensity_packet::write(uint8_t *dst) const
-{
-    int nb = this->nbeams;
-    int nf = this->nfreq_coarse;
-
-    memcpy(dst, this, 24);
-    memcpy(dst + 24, this->beam_ids, 2*nb);
-    memcpy(dst + 24 + 2*nb, this->freq_ids, 2*nf);
-    memcpy(dst + 24 + 2*nb + 2*nf, this->scales, 4*nb*nf);
-    memcpy(dst + 24 + 2*nb + 2*nf + 4*nb*nf, this->offsets, 4*nb*nf);
-    memcpy(dst + 24 + 2*nb + 2*nf + 8*nb*nf, this->data, this->data_nbytes);
-
-    return 24 + 2*nb + 2*nf + 8*nb*nf + this->data_nbytes;
-}
-
-
 void intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
 {
     int nb = this->nbeams;
