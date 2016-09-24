@@ -111,14 +111,9 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     size_t i = ini_params.dstname.find(":");
 
     if (i != std::string::npos) {
-	string portstr = ini_params.dstname.substr(i+1);
-	try {
-	    this->udp_port = lexical_cast<uint16_t> (portstr);	    
-	} catch (...) {
-	    throw runtime_error("ch_frb_io: couldn't convert string '" + portstr + "' to 16-bit udp port number");
-	}
-
 	this->hostname = ini_params.dstname.substr(0,i);
+	if (!lexical_cast(ini_params.dstname.substr(i+1), this->udp_port))
+	    throw runtime_error("ch_frb_io: couldn't convert string '" + ini_params.dstname.substr(i+1) + "' to 16-bit udp port number");
     }
 
     // Remaining initializations (except socket, which is initialized in intensity_network_ostream::_open_socket())

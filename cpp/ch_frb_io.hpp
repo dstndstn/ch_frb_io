@@ -574,7 +574,20 @@ struct fast_assembled_chunk : public assembled_chunk
 
 
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)
-template<typename T> extern T lexical_cast(const std::string &x);
+// Returns true on success, false on failure
+template<typename T> extern bool lexical_cast(const std::string &x, T &ret);
+
+// Also defined in lexical_cast.cpp (for the same values of T)
+template<typename T> extern const char *typestr();
+
+// Version of lexical_cast() which throws exception on failure.
+template<typename T> inline T lexical_cast(const std::string &x)
+{
+    T ret;
+    if (lexical_cast(x, ret))
+	return ret;
+    throw std::runtime_error("couldn't convert string '" + x + "' to " + typestr<T>());
+}
 
 // Unit tests
 extern void test_lexical_cast();

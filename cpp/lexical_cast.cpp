@@ -9,6 +9,7 @@
 //   long
 //   int
 //   double
+//   float
 //   uint16_t
 //
 // Note that a more general implementation of lexical_cast is already defined in boost, and considered 
@@ -29,8 +30,16 @@ namespace ch_frb_io {
 #endif
 
 
+template<> const char *typestr<string>()    { return "string"; }
+template<> const char *typestr<long>()      { return "long"; }
+template<> const char *typestr<int>()       { return "int"; }
+template<> const char *typestr<double>()    { return "double"; }
+template<> const char *typestr<float>()     { return "float"; }
+template<> const char *typestr<uint16_t>()  { return "uint16_t"; }
+
+
 // trivial case: convert string -> string
-template<> string lexical_cast<string> (const string &x) { return x; }
+template<> bool lexical_cast(const string &x, string &ret) { ret = x; return true;}
 
 
 inline bool is_all_spaces(const char *s)
@@ -48,68 +57,61 @@ inline bool is_all_spaces(const char *s)
 }
 
 
-template<> long lexical_cast<long> (const string &x)
+template<> bool lexical_cast(const string &x, long &ret)
 { 
     const char *ptr = x.c_str();
     char *endptr = NULL;
 
-    long ret = strtol(ptr, &endptr, 10);
-
-    if (endptr == ptr)
-	throw runtime_error(string("lexical_cast<long> failed: arg=\"") + x + "\"");
-    if ((ret == LONG_MIN) || (ret == LONG_MAX))
-	throw runtime_error(string("lexical_cast<long> failed: arg=\"") + x + "\"");
-    if (!is_all_spaces(endptr))
-	throw runtime_error(string("lexical_cast<long> failed: arg=\"") + x + "\"");
-    
-    return ret;
+    ret = strtol(ptr, &endptr, 10);
+    return (endptr != ptr) && (ret != LONG_MIN) && (ret != LONG_MAX) && is_all_spaces(endptr);
 }
 
 
-template<> int lexical_cast<int> (const string &x)
+template<> bool lexical_cast(const string &x, int &ret)
 {
-    long ret = lexical_cast<long> (x);
+    long retl;
 
-    if ((sizeof(int) != sizeof(long)) && ((ret < INT_MIN) || (ret > INT_MAX)))
-	throw runtime_error(string("lexical_cast<int> failed: arg=\"") + x + "\"");
+    if (!lexical_cast(x, retl))
+	return false;
+    if ((sizeof(int) != sizeof(long)) && ((retl < INT_MIN) || (retl > INT_MAX)))
+	return false;
 
-    return ret;
+    ret = retl;
+    return true;
 }
 
 
-template<> uint16_t lexical_cast<uint16_t> (const string &x)
+template<> bool lexical_cast(const string &x, uint16_t &ret)
 {
-    long ret = lexical_cast<long> (x);
-    
-    if ((ret < 0) || (ret > 65535))
-	throw runtime_error(string("lexical_cast<uint16_t> failed: arg=\"" ) + x + "\"");
+    long retl;
 
-    return ret;
+    if (!lexical_cast(x, retl))
+	return false;
+    if ((retl < 0) || (retl > 65535))
+	return false;
+
+    ret = retl;
+    return true;
 }
 
 
-template<> double lexical_cast<double> (const string &x)
+template<> bool lexical_cast(const string &x, double &ret)
 { 
     const char *ptr = x.c_str();
     char *endptr = NULL;
 
-    double ret = strtod(ptr, &endptr);
-
-    if (endptr == ptr)
-	throw runtime_error(string("lexical_cast<double> failed: arg=\"") + x + "\"");
-    if ((ret == LONG_MIN) || (ret == LONG_MAX))
-	throw runtime_error(string("lexical_cast<double> failed: arg=\"") + x + "\"");
-    if (!is_all_spaces(endptr))
-	throw runtime_error(string("lexical_cast<double> failed: arg=\"") + x + "\"");
-    
-    return ret;
+    ret = strtod(ptr, &endptr);
+    return (endptr != ptr) && (ret != -HUGE_VAL) && (ret != HUGE_VAL) && is_all_spaces(endptr);
 }
 
 
-template<> float lexical_cast<float> (const string &x)
-{
-    // FIXME very minor loose end: check for overflow converting double->float
-    return lexical_cast<double> (x);
+template<> bool lexical_cast(const string &x, float &ret)
+{ 
+    const char *ptr = x.c_str();
+    char *endptr = NULL;
+
+    ret = strtof(ptr, &endptr);
+    return (endptr != ptr) && (ret != -HUGE_VALF) && (ret != HUGE_VALF) && is_all_spaces(endptr);
 }
 
 
@@ -122,34 +124,19 @@ template<typename T>
 static void check_convert(const string &x, T y)
 {
     T ret;
-
-    try {
-	ret = lexical_cast<T> (x);
-    }
-    catch (...) {
-	cerr << "test_lexical_cast(): threw unexpected exception\n";
-	exit(1);
-    }
-
-    if (fabs(double(ret) - double(y)) > 1.0e-5) {
-	cerr << "test_lexical_cast(): didn't correctly convert\n";
-	exit(1);
-    }
+    if (!lexical_cast(x, ret))
+	throw runtime_error("test_lexical_cast(): didn't successfully convert");
+    if (fabs(double(ret) - double(y)) > 1.0e-5)
+	throw runtime_error("test_lexical_cast(): didn't correctly convert");
 }
 
 
 template<typename T> 
-static void check_convert_throws(const string &x)
+static void check_convert_fails(const string &x)
 {
-    try {
-	lexical_cast<T> (x);
-    }
-    catch (...) {
-	return;
-    }
-
-    cerr << "test_lexical_cast(): didn't throw an exception as expected\n";
-    exit(1);
+    T ret;
+    if (lexical_cast(x, ret))
+	throw runtime_error("test_lexical_cast(): conversion succeeded where it was expected to fail");
 }
 
 
@@ -161,18 +148,18 @@ void test_lexical_cast()
     check_convert<int>("-123", -123);
     check_convert<int>(" \t 1234  \n\t", 1234);
 
-    check_convert_throws<int>("");
-    check_convert_throws<int>("  ");
-    check_convert_throws<int>("oops");
-    check_convert_throws<int>(" oops ");
-    check_convert_throws<int>("1234abc");
-    check_convert_throws<int>("1234 abc");
-    check_convert_throws<int>("0.1");
+    check_convert_fails<int>("");
+    check_convert_fails<int>("  ");
+    check_convert_fails<int>("oops");
+    check_convert_fails<int>(" oops ");
+    check_convert_fails<int>("1234abc");
+    check_convert_fails<int>("1234 abc");
+    check_convert_fails<int>("0.1");
 
     check_convert<uint16_t>("0", 0);
     check_convert<uint16_t> ("65535", 65535);
-    check_convert_throws<uint16_t> ("-1");
-    check_convert_throws<uint16_t> ("65536");
+    check_convert_fails<uint16_t> ("-1");
+    check_convert_fails<uint16_t> ("65536");
 
     check_convert<double>("1.23", 1.23);
     check_convert<double>("-1.23e-5", -1.23e-5);
@@ -181,12 +168,12 @@ void test_lexical_cast()
     check_convert<double>("-.034e3", -0.034e3);
     check_convert<double>("  0.03e20  ", 0.03e20);
 
-    check_convert_throws<double>("");
-    check_convert_throws<double>("  ");
-    check_convert_throws<double>("oops");
-    check_convert_throws<double>(" oops ");
-    check_convert_throws<double>("5x");
-    check_convert_throws<double>("-1.3e20x");
+    check_convert_fails<double>("");
+    check_convert_fails<double>("  ");
+    check_convert_fails<double>("oops");
+    check_convert_fails<double>(" oops ");
+    check_convert_fails<double>("5x");
+    check_convert_fails<double>("-1.3e20x");
 
     cerr << "test_lexical_cast(): success\n";
 }
