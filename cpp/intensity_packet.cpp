@@ -17,7 +17,7 @@ namespace ch_frb_io {
 //   - dimensions (nbeams, nfreq_coarse, nupfreq, ntsamp) are not large enough to lead to integer overflows
 //   - packet and data byte counts are correct
 //   - coarse_freq_ids are in range
-//   - ntsamp is a power of two
+//   - ntsamp is a power of two, and in the range (0,max_allowed_nt_per_packet].
 //   - nbeams, nfreq_coarse, nupfreq, ntsamp, fpga_counts_per_sample are all > 0
 //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
 
@@ -32,7 +32,7 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 
     if (_unlikely(protocol_version != 1))
 	return false;
-    if (_unlikely(!is_power_of_two(ntsamp)))
+    if (_unlikely((ntsamp > constants::max_allowed_nt_per_packet) || ((ntsamp & (ntsamp-1)) != 0)))
 	return false;
     if (_unlikely(fpga_counts_per_sample == 0))
 	return false;

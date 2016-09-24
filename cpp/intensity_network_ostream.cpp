@@ -63,27 +63,27 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 	throw runtime_error("chime intensity_network_ostream constructor: beam_ids vector is empty or too large");
 
     if ((ini_params.coarse_freq_ids.size() == 0) || (ini_params.coarse_freq_ids.size() >= 65536))
-	throw runtime_error("chime intensity_network_ostream constructor: coarse_freq_ids vector is empty or too large");
+	throw runtime_error("chime intensity_network_ostream constructor: coarse_freq_ids vector is uninitialized or too large");
     if (nfreq_coarse_per_packet <= 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_packet > 0");
+	throw runtime_error("chime intensity_network_ostream constructor: nfreq_coarse_per_packet was negative or uninitialized");
     if (nfreq_coarse_per_chunk % nfreq_coarse_per_packet != 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_chunk to be a multiple of nfreq_per_packet");
 
     if (nt_per_chunk <= 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk > 0");
-    if (nt_per_packet <= 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_packet > 0");
+	throw runtime_error("chime intensity_network_ostream constructor: nt_per_chunk was negative or uninitialized");
+    if ((nt_per_packet <= 0) || (nt_per_packet > constants::max_allowed_nt_per_packet))
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of nt_per_packet (or uninitialized)");
     if (!is_power_of_two(nt_per_packet))
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_packet to be a power of two");
     if (nt_per_chunk % nt_per_packet != 0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected nt_per_chunk to be a multiple of nt_per_packet");
 
     if ((nupfreq <= 0) || (nupfreq > constants::max_allowed_nupfreq))
-	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq");
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of nupfreq (or uninitalized)");
     if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
-	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample");
+	throw runtime_error("chime intensity_network_ostream constructor: bad value of fpga_counts_per_sample (or uninitialized)");
     if (ini_params.wt_cutoff <= 0.0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be > 0.0");
+	throw runtime_error("chime intensity_network_ostream constructor: expected wt_cutoff to be > 0");
     if (target_gbps < 0.0)
 	throw runtime_error("chime intensity_network_ostream constructor: expected target_gbps to be >= 0.0");
 
