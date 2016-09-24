@@ -161,20 +161,48 @@ bool intensity_packet::contains_freq_id(int freq_id) const
 }
 
 
-void test_packet_encoding()
+// This paranoid test checks that the byte alignment of the intensity_packet header fields
+// is what I think it is.  (Just worried that the compiler might insert some padding bytes.)
+void test_packet_offsets(std::mt19937 &rng)
 {
-    intensity_packet p;
+    cerr << "test_packet_offsets()...";
+    vector<uint8_t> buf(24, 0);
 
-    char *p0 = (char *) &p;
-    assert((char *) &p.data_nbytes == p0+4);
-    assert((char *) &p.fpga_counts_per_sample == p0+6);
-    assert((char *) &p.fpga_count == p0+8);
-    assert((char *) &p.nbeams == p0+16);
-    assert((char *) &p.nfreq_coarse == p0+18);
-    assert((char *) &p.nupfreq == p0+20);
-    assert((char *) &p.ntsamp == p0+22);
+    for (int iouter = 0; iouter < 1000; iouter++) {
+	intensity_packet p;
 
-    cerr << "test_packet_encoding(): success\n";
+	// Randomized header fields
+	uint32_t protocol_version = std::uniform_int_distribution<uint32_t>()(rng);
+	int16_t data_nbytes = std::uniform_int_distribution<int16_t>()(rng);
+	uint16_t fpga_counts_per_sample = std::uniform_int_distribution<uint16_t>()(rng);
+	uint64_t fpga_count = std::uniform_int_distribution<uint64_t>()(rng);
+	uint16_t nbeams = std::uniform_int_distribution<uint16_t>()(rng);
+	uint16_t nfreq_coarse = std::uniform_int_distribution<uint16_t>()(rng);
+	uint16_t nupfreq = std::uniform_int_distribution<uint16_t>()(rng);
+	uint16_t ntsamp = std::uniform_int_distribution<uint16_t>()(rng);
+
+	*((uint32_t *) &buf[0]) = protocol_version;
+	*((int16_t *) &buf[4]) = data_nbytes;
+	*((uint16_t *) &buf[6]) = fpga_counts_per_sample;
+	*((uint64_t *) &buf[8]) = fpga_count;
+	*((uint16_t *) &buf[16]) = nbeams;
+	*((uint16_t *) &buf[18]) = nfreq_coarse;
+	*((uint16_t *) &buf[20]) = nupfreq;
+	*((uint16_t *) &buf[22]) = ntsamp;
+
+	memcpy(&p, &buf[0], 24);
+
+	assert(p.protocol_version == protocol_version);
+	assert(p.data_nbytes == data_nbytes);
+	assert(p.fpga_counts_per_sample == fpga_counts_per_sample);
+	assert(p.fpga_count == fpga_count);
+	assert(p.nbeams == nbeams);
+	assert(p.nfreq_coarse == nfreq_coarse);
+	assert(p.nupfreq == nupfreq);
+	assert(p.ntsamp == ntsamp);
+    }
+
+    cerr << "success\n";
 }
 
 

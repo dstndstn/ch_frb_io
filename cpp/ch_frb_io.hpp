@@ -595,7 +595,7 @@ template<typename T> inline T lexical_cast(const std::string &x)
 
 // Unit tests
 extern void test_lexical_cast();
-extern void test_packet_encoding();
+extern void test_packet_offsets(std::mt19937 &rng);
 extern void test_avx2_kernels(std::mt19937 &rng);
 extern void peek_at_unpack_kernel();
 

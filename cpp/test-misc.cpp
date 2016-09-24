@@ -8,7 +8,7 @@ int main(int argc, char **argv)
     std::mt19937 rng(rd());
 
     test_lexical_cast();
-    test_packet_encoding();
+    test_packet_offsets(rng);
     test_avx2_kernels(rng);
 
     return 0;
