@@ -89,7 +89,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
 
     this->incoming_packet_list = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
-    this->event_counts = vector<int64_t> (event_type::num_types, 0);
+    this->cumulative_event_counts = vector<int64_t> (event_type::num_types, 0);
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
     this->assembler_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
 
@@ -135,12 +135,12 @@ void intensity_network_stream::_open_socket()
 
 void intensity_network_stream::_add_event_counts(vector<int64_t> &event_subcounts)
 {
-    if (event_counts.size() != event_subcounts.size())
+    if (cumulative_event_counts.size() != event_subcounts.size())
 	throw runtime_error("ch_frb_io: internal error: vector length mismatch in intensity_network_stream::_add_event_counts()");
 
     pthread_mutex_lock(&this->event_lock);
-    for (unsigned int i = 0; i < event_counts.size(); i++)
-	event_counts[i] += event_subcounts[i];
+    for (unsigned int i = 0; i < cumulative_event_counts.size(); i++)
+	this->cumulative_event_counts[i] += event_subcounts[i];
     pthread_mutex_unlock(&this->event_lock);
 
     memset(&event_subcounts[0], 0, event_subcounts.size() * sizeof(event_subcounts[0]));
@@ -229,7 +229,7 @@ vector<int64_t> intensity_network_stream::get_event_counts()
     vector<int64_t> ret(event_type::num_types, 0);
 
     pthread_mutex_lock(&this->event_lock);
-    memcpy(&ret[0], &event_counts[0], ret.size() * sizeof(ret[0]));
+    memcpy(&ret[0], &this->cumulative_event_counts[0], ret.size() * sizeof(ret[0]));
     pthread_mutex_unlock(&this->event_lock);    
 
     return ret;

@@ -496,7 +496,7 @@ protected:
     bool join_called = false;
 
     pthread_mutex_t event_lock;
-    std::vector<int64_t> event_counts;
+    std::vector<int64_t> cumulative_event_counts;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
