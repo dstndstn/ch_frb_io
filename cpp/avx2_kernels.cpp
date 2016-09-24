@@ -308,8 +308,10 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
 // virtual override
 void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
+    if (!intensity || !weights)
+	throw runtime_error("ch_frb_io: null pointer passed to fast_assembled_chunk::decode()");
     if (stride < constants::nt_per_assembled_chunk)
-	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode()");
+	throw runtime_error("ch_frb_io: bad stride passed to fast_assembled_chunk::decode()");
 
     for (int if_coarse = 0; if_coarse < constants::nfreq_coarse; if_coarse++) {
 	const float *scales_f = this->scales + if_coarse * nt_coarse;
