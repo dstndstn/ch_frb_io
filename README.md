@@ -119,11 +119,6 @@ INSTALLATION (PYTHON)
     aligned loads/stores, but this would impose pointer alignment requirements on callers of
     assembled_chunk::decode().
 
-  - Currently, we have to run `test-network-streams.cpp` at very low throughput (0.1 Gbps)
-    to avoid dropping packets.  This means that the unit tests take about an hour to run,
-    which isn't really a problem, but is indicative of deeper performance problems?  It
-    would be nice to understand where the bottleneck is.
-
   - Unit testing feels incomplete without a standalone test of intensity_packet::encode().
 
   - The assembler should handle packets which arrive in an arbitrary order, but our

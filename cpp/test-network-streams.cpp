@@ -44,6 +44,7 @@ struct unit_test_instance {
     int fpga_counts_per_sample = 0;
     uint64_t initial_t0 = 0;
     float wt_cutoff = 0.0;
+    double target_gbps = 0.0;
 
     vector<int> recv_beam_ids;
     vector<int> send_beam_ids;
@@ -64,12 +65,12 @@ struct unit_test_instance {
     pthread_cond_t cond_tpos_changed;
     uint64_t consumer_tpos[maxbeams];
 
-    unit_test_instance(std::mt19937 &rng, int irun, int nrun);
+    unit_test_instance(std::mt19937 &rng, int irun, int nrun, double target_gbps);
     ~unit_test_instance();
 };
 
 
-unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
+unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, double target_gbps_)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
@@ -106,6 +107,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->initial_t0 = randint(rng, 0, 4097) * nt_per_packet;
     this->fpga_counts_per_sample = randint(rng, 1, 1025);
     this->wt_cutoff = uniform_rand(rng, 0.3, 0.7);
+    this->target_gbps = target_gbps_;
 
     this->send_stride = randint(rng, nt_per_chunk, 2*nt_per_chunk+1);
     this->recv_stride = randint(rng, constants::nt_per_assembled_chunk, 2 * constants::nt_per_assembled_chunk);
@@ -122,6 +124,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     this->initial_t0 = 4282;
     this->fpga_counts_per_sample = 244;
     this->wt_cutoff = 0.63584;
+    this->target_gbps = 0.1;
     this->send_stride = 445;
     this->recv_stride = 1455;
 #endif
@@ -165,6 +168,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 	 << "    initial_t0=" << initial_t0 << endl
 	 << "    fpga_counts_per_sample=" << fpga_counts_per_sample << endl
 	 << "    wt_cutoff=" << wt_cutoff << endl
+	 << "    target_gbps=" << target_gbps << endl
 	 << "    send_stride=" << send_stride << endl
 	 << "    recv_stride=" << recv_stride << endl
 	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
@@ -321,9 +325,15 @@ static void *consumer_thread_main(void *opaque_arg)
 		ss << "Test failure in weights array: beam_id=" << beam_id << ", ifreq=" << ifreq << ", it=" << (it+chunk_t0) << "\n"
 		   << "   wtval(...)=" << wval << ", wt_cutoff=" << wt_cutoff << ", wt_received=" << wt_row[it] << "\n";
 
-		if ((wt_row[it] == 0.0) && (wval > wt_cutoff))
-		    ss << "A probable reason for this failure is that the receive threads can't keep up with the sender.\n"
-		       << "Try decreasing target_gbps (in test_network-streams.cpp:send_data()), recompiling and trying again.\n";
+		if ((wt_row[it] == 0.0) && (wval > wt_cutoff)) {
+		    ss << "A possible reason for this failure is that some packet loss occurred.\n"
+		       << "This unit test fails if there is any packet loss at all!\n"
+		       << "This assumption is too extreme for the CHIME realtime environment, but it's useful in unit\n"
+		       << "tests for sniffing out bugs.  However, it requires running the test at low throughput.\n"
+		       << "By default, the tests run at 0.1 Gbps, but the -t command-line flag overrides the default.\n"
+		       << "Suggest rerunning at lower throughput, to see whether the unit test failure is a \"true\"\n"
+		       << "failure or an artifact of packet loss.\n";
+		}
 
 		cerr << ss.str();
 		exit(1);
@@ -386,15 +396,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     ini_params.nt_per_packet = tp->nt_per_packet;
     ini_params.fpga_counts_per_sample = tp->fpga_counts_per_sample;
     ini_params.wt_cutoff = tp->wt_cutoff;
-
-    // FIXME: currently we have to run test-network-streams.cpp at very low throughput (0.1 Gbps)
-    // to avoid dropping packets.  This means that the unit tests take about an hour to run,
-    // which isn't really a problem, but is indicative of deeper performance problems?  It
-    // would be nice to understand where the bottleneck is.
-
-    ini_params.target_gbps = 0.1;
-    
-    cout << "\nNote: target_gbps = " << ini_params.target_gbps << "\n";
+    ini_params.target_gbps = tp->target_gbps;
 
     // spawns network thread
     tp->ostream = intensity_network_ostream::make(ini_params);
@@ -459,9 +461,48 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 // -------------------------------------------------------------------------------------------------
 
 
+// This unit test fails if there is any packet loss at all!
+// This assumption is too extreme for the CHIME realtime environment, but it's useful in unit
+// tests for sniffing out bugs.  However, it requires running the test at low throughput
+// (~0.1 Gbps).  The -t command-line flag can override this default.
+//
+// Note that on linux, an alternative to a low throughput would be to use a local unix socket
+// with SOCK_SEQPACKET.  I didn't implement this because it's not supported in osx, and I like
+// to run the unit tests on my laptop.
+
+static const double default_target_gbps = 0.1;
+
+
+static void usage(const char *extra=nullptr)
+{
+    cerr << "usage: ./test-network-streams [-t TARGET_GBPS]\n"
+	 << "   if -t is unspecified, then target_gbps defaults to " << default_target_gbps << "\n";
+
+    if (extra != nullptr)
+	cerr << extra << "\n";
+
+    exit(2);
+}
+
+
 int main(int argc, char **argv)
 {
     const int nrun = 100;
+    double target_gbps = default_target_gbps;
+
+    // Low-budget command-line parsing.
+    int iarg = 1;
+    while (iarg < argc) {
+	if ((iarg < argc-1) && !strcmp(argv[iarg], "-t")) {
+	    if (!lexical_cast(argv[iarg+1], target_gbps))
+		usage();
+	    if (target_gbps <= 0.0)
+		usage("Fatal: expected target_gbps > 0");
+	    iarg += 2;
+	}
+	else
+	    usage();
+    }
 
 #if 1
     std::random_device rd;
@@ -480,7 +521,7 @@ int main(int argc, char **argv)
     getline(cin, dummy);
 
     for (int irun = 0; irun < nrun; irun++) {
-	auto tp = make_shared<unit_test_instance> (rng, irun, nrun);
+	auto tp = make_shared<unit_test_instance> (rng, irun, nrun, target_gbps);
 
 	spawn_all_receive_threads(tp);
 	tp->istream->start_stream();
