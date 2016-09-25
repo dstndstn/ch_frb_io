@@ -16,8 +16,8 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
       nt_per_packet(nt_per_packet_),
       fpga_counts_per_sample(fpga_counts_per_sample_), 
       nt_coarse(constants::nt_per_assembled_chunk / nt_per_packet),
-      nscales(constants::nfreq_coarse * nt_coarse),
-      ndata(constants::nfreq_coarse * nupfreq * constants::nt_per_assembled_chunk),
+      nscales(constants::nfreq_coarse_tot * nt_coarse),
+      ndata(constants::nfreq_coarse_tot * nupfreq * constants::nt_per_assembled_chunk),
       ichunk(ichunk_),
       isample(ichunk * constants::nt_per_assembled_chunk)
 {
@@ -100,7 +100,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 	throw runtime_error("ch_frb_io: internal error in assembled_chunk::add_packet()");
 
     for (int f = 0; f < packet.nfreq_coarse; f++) {
-	int coarse_freq_id = packet.freq_ids[f];
+	int coarse_freq_id = packet.coarse_freq_ids[f];
 
 	this->scales[coarse_freq_id*nt_coarse + (t0/nt_per_packet)] = packet.scales[f];
 	this->offsets[coarse_freq_id*nt_coarse + (t0/nt_per_packet)] = packet.offsets[f];
@@ -122,7 +122,7 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
     if (stride < constants::nt_per_assembled_chunk)
 	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode()");
 
-    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse; if_coarse++) {
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
 	const float *scales_f = this->scales + if_coarse * nt_coarse;
 	const float *offsets_f = this->offsets + if_coarse * nt_coarse;
 	

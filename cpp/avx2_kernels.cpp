@@ -291,7 +291,7 @@ void fast_assembled_chunk::add_packet(const intensity_packet &packet)
     uint64_t t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample) - isample;
 
     for (int f = 0; f < packet.nfreq_coarse; f++) {
-	int coarse_freq_id = packet.freq_ids[f];
+	int coarse_freq_id = packet.coarse_freq_ids[f];
 
 	int d = coarse_freq_id*nt_coarse + (t0/nt_per_packet);
 	this->scales[d] = packet.scales[f];
@@ -313,7 +313,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
     if (stride < constants::nt_per_assembled_chunk)
 	throw runtime_error("ch_frb_io: bad stride passed to fast_assembled_chunk::decode()");
 
-    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse; if_coarse++) {
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
 	const float *scales_f = this->scales + if_coarse * nt_coarse;
 	const float *offsets_f = this->offsets + if_coarse * nt_coarse;
 	
@@ -384,7 +384,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 	// Set up intensity_packet
 
 	vector<uint16_t> beam_ids = { beam_id };
-	vector<uint16_t> freq_ids(nfreq_coarse_per_packet, 0);
+	vector<uint16_t> coarse_freq_ids(nfreq_coarse_per_packet, 0);
 	vector<float> scales(nfreq_coarse_per_packet, 0.0);
 	vector<float> offsets(nfreq_coarse_per_packet, 0.0);
 	vector<uint8_t> packet_data(nfreq_coarse_per_packet * nupfreq * nt_per_packet, 0);
@@ -399,7 +399,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 	p.nupfreq = nupfreq;
 	p.ntsamp = nt_per_packet;
 	p.beam_ids = &beam_ids[0];
-	p.freq_ids = &freq_ids[0];
+	p.coarse_freq_ids = &coarse_freq_ids[0];
 	p.scales = &scales[0];
 	p.offsets = &offsets[0];
 	p.data = &packet_data[0];
@@ -407,18 +407,18 @@ void test_avx2_kernels(std::mt19937 &rng)
 	// Some auxiliary data which is useful when simulating random packets
 	
 	const int nt_coarse = constants::nt_per_assembled_chunk / nt_per_packet;
-	const int npacket_max = (constants::nfreq_coarse / nfreq_coarse_per_packet) * nt_coarse;
+	const int npacket_max = (constants::nfreq_coarse_tot / nfreq_coarse_per_packet) * nt_coarse;
 	const int npackets = randint(rng, npacket_max/2, npacket_max+1);
 
-	vector<int> freq_ids_remaining(nt_coarse, constants::nfreq_coarse);
-	vector<uint16_t> freq_id_pool(nt_coarse * constants::nfreq_coarse);
+	vector<int> coarse_freq_ids_remaining(nt_coarse, constants::nfreq_coarse_tot);
+	vector<uint16_t> coarse_freq_id_pool(nt_coarse * constants::nfreq_coarse_tot);
 
 	for (int i = 0; i < nt_coarse; i++) {
-	    for (int j = 0; j < constants::nfreq_coarse; j++)
-		freq_id_pool[i*constants::nfreq_coarse + j] = j;
+	    for (int j = 0; j < constants::nfreq_coarse_tot; j++)
+		coarse_freq_id_pool[i*constants::nfreq_coarse_tot + j] = j;
 
-	    std::shuffle(freq_id_pool.begin() + i*constants::nfreq_coarse,
-			 freq_id_pool.begin() + (i+1)*constants::nfreq_coarse,
+	    std::shuffle(coarse_freq_id_pool.begin() + i*constants::nfreq_coarse_tot,
+			 coarse_freq_id_pool.begin() + (i+1)*constants::nfreq_coarse_tot,
 			 rng);
 	}
 
@@ -433,10 +433,12 @@ void test_avx2_kernels(std::mt19937 &rng)
 
 	    do {
 		it_coarse = randint(rng, 0, nt_coarse);
-	    } while (freq_ids_remaining[it_coarse] < nfreq_coarse_per_packet);
+	    } while (coarse_freq_ids_remaining[it_coarse] < nfreq_coarse_per_packet);
 
-	    freq_ids_remaining[it_coarse] -= nfreq_coarse_per_packet;
-	    memcpy(p.freq_ids, &freq_id_pool[0] + it_coarse*constants::nfreq_coarse + freq_ids_remaining[it_coarse], nfreq_coarse_per_packet * sizeof(uint16_t));
+	    coarse_freq_ids_remaining[it_coarse] -= nfreq_coarse_per_packet;
+
+	    const uint16_t *src_ids = &coarse_freq_id_pool[0] + it_coarse*constants::nfreq_coarse_tot + coarse_freq_ids_remaining[it_coarse];
+	    memcpy(p.coarse_freq_ids, src_ids, nfreq_coarse_per_packet * sizeof(uint16_t));
 	    
 	    uniform_rand(rng, p.scales, nfreq_coarse_per_packet);
 	    uniform_rand(rng, p.offsets, nfreq_coarse_per_packet);
@@ -466,7 +468,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 	chunk0->randomize(rng);
 	chunk1->fill_with_copy(chunk0);
 
-	int nfreq_fine = constants::nfreq_coarse * nupfreq;
+	int nfreq_fine = constants::nfreq_coarse_tot * nupfreq;
 	vector<float> intensity0 = randvec(rng, nfreq_fine * stride);
 	vector<float> intensity1 = randvec(rng, nfreq_fine * stride);
 	vector<float> weights0 = randvec(rng, nfreq_fine * stride);

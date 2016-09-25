@@ -71,7 +71,7 @@ struct unit_test_instance {
 
 unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 {
-    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
+    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
@@ -86,7 +86,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
     int c1 = 2 + 8*nbeams + nbeams*nupfreq*nt_per_packet;
 
     this->nfreq_coarse_per_packet = (ch_frb_io::constants::max_output_udp_packet_size - c0) / c1;
-    this->nfreq_coarse_per_packet = min(nfreq_coarse_per_packet, ch_frb_io::constants::nfreq_coarse);
+    this->nfreq_coarse_per_packet = min(nfreq_coarse_per_packet, ch_frb_io::constants::nfreq_coarse_tot);
     this->nfreq_coarse_per_packet = round_down_to_power_of_two(nfreq_coarse_per_packet);
 
     assert(nfreq_coarse_per_packet >= 4);
@@ -245,7 +245,7 @@ static void *consumer_thread_main(void *opaque_arg)
     pthread_cond_broadcast(&context->cond_running);
     pthread_mutex_unlock(&context->lock);
 
-    int nalloc = ch_frb_io::constants::nfreq_coarse * tp->nupfreq * tp->recv_stride;
+    int nalloc = ch_frb_io::constants::nfreq_coarse_tot * tp->nupfreq * tp->recv_stride;
     vector<float> all_intensities(nalloc, 0.0);
     vector<float> all_weights(nalloc, 0.0);
 
@@ -286,7 +286,7 @@ static void *consumer_thread_main(void *opaque_arg)
 
 	int chunk_t0 = chunk->isample;
 
-	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse * tp->nupfreq; ifreq++) {
+	for (int ifreq = 0; ifreq < ch_frb_io::constants::nfreq_coarse_tot * tp->nupfreq; ifreq++) {
 	    const float *int_row = &all_intensities[0] + ifreq * tp->recv_stride;
 	    const float *wt_row = &all_weights[0] + ifreq * tp->recv_stride;
 
@@ -400,7 +400,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     tp->ostream = intensity_network_ostream::make(ini_params);
 
     const int nt_assembler = ch_frb_io::constants::nt_assembler;
-    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse;
+    const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
 
     const int nbeams = tp->nbeams;
     const int nupfreq = tp->nupfreq;
