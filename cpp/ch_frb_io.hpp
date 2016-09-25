@@ -65,10 +65,17 @@ namespace constants {
     static constexpr int max_input_udp_packet_size = 9000;
     static constexpr int max_output_udp_packet_size = 8910;
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
-    static constexpr int recv_socket_bufsize = (1 << 22);   // 4 MB
-    static constexpr int send_socket_bufsize = (1 << 22);   // 4 MB
     static constexpr double default_gbps = 1.0;
     static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
+
+#ifdef __APPLE__
+    // osx seems to have very small limits on socket buffer size
+    static constexpr int recv_socket_bufsize = 4 * 1024 * 1024;
+    static constexpr int send_socket_bufsize = 4 * 1024 * 1024;
+#else
+    static constexpr int recv_socket_bufsize = 128 * 1024 * 1024;
+    static constexpr int send_socket_bufsize = 128 * 1024 * 1024;
+#endif
 
     // Parameters of ring buffer between output stream object and network output thread
     static constexpr int output_ringbuf_capacity = 16;
