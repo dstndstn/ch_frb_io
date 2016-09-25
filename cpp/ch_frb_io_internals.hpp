@@ -335,18 +335,6 @@ inline void xusleep(useconds_t usec)
 	throw std::runtime_error("usleep failed");
 }
 
-inline void xpthread_mutex_init(pthread_mutex_t *lock)
-{
-    if (pthread_mutex_init(lock, NULL) != 0)
-        throw std::runtime_error("pthread_mutex_init() failed?!");    	    
-}
-
-inline void xpthread_cond_init(pthread_cond_t *cond)
-{
-    if (pthread_cond_init(cond, NULL) != 0)
-        throw std::runtime_error("pthread_cond_init() failed?!");    	    
-}
-
 
 // -------------------------------------------------------------------------------------------------
 //

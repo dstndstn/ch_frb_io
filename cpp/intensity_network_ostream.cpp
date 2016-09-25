@@ -129,8 +129,8 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     for (int i = 0; i < nfreq_coarse_per_chunk; i++)
 	coarse_freq_ids_16bit[i] = uint16_t(ini_params.coarse_freq_ids[i]);
     
-    xpthread_mutex_init(&this->state_lock);
-    xpthread_cond_init(&this->cond_state_changed);
+    pthread_mutex_init(&this->state_lock, NULL);
+    pthread_cond_init(&this->cond_state_changed, NULL);
 
     int capacity = constants::output_ringbuf_capacity;
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk);
@@ -257,7 +257,9 @@ void intensity_network_ostream::end_stream(bool join_network_thread)
     }
     
     pthread_mutex_unlock(&this->state_lock);
-    pthread_join(network_thread, NULL);
+
+    if (pthread_join(network_thread, NULL))
+	throw runtime_error("ch_frb_io: couldn't join network thread [output]");
 }
 
 

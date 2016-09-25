@@ -150,8 +150,8 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->nbytes_per_packet = intensity_packet::packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     this->npackets_per_chunk = (nt_per_chunk / nt_per_packet) * (nfreq_coarse_tot / nfreq_coarse_per_packet);
 
-    xpthread_mutex_init(&this->tpos_lock);
-    xpthread_cond_init(&this->cond_tpos_changed);
+    pthread_mutex_init(&this->tpos_lock, NULL);
+    pthread_cond_init(&this->cond_tpos_changed, NULL);
     
     for (int ithread = 0; ithread < nbeams; ithread++)
 	this->consumer_tpos[ithread] = initial_t0;
@@ -218,8 +218,8 @@ struct consumer_thread_context {
     consumer_thread_context(const shared_ptr<unit_test_instance> &tp_, int ithread_)
 	: tp(tp_), ithread(ithread_)
     {
-	xpthread_mutex_init(&lock);
-	xpthread_cond_init(&cond_running);
+	pthread_mutex_init(&lock, NULL);
+	pthread_cond_init(&cond_running, NULL);
     }
 };
 

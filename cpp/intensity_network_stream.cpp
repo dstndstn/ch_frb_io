@@ -194,8 +194,13 @@ void intensity_network_stream::join_threads()
     this->join_called = true;
     pthread_mutex_unlock(&this->state_lock);
 
-    pthread_join(network_thread, NULL);
-    pthread_join(assembler_thread, NULL);
+    int err = pthread_join(network_thread, NULL);
+    if (err)
+	throw runtime_error("ch_frb_io: couldn't join network thread [input]");
+
+    err = pthread_join(assembler_thread, NULL);
+    if (err)
+	throw runtime_error("ch_frb_io: couldn't join assembler thread");
 }
 
 

@@ -24,9 +24,9 @@ udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_p
 	std::swap(this->ringbuf[i], l);
     }
 
-    xpthread_mutex_init(&this->lock);
-    xpthread_cond_init(&this->cond_packets_added);
-    xpthread_cond_init(&this->cond_packets_removed);
+    pthread_mutex_init(&this->lock, NULL);
+    pthread_cond_init(&this->cond_packets_added, NULL);
+    pthread_cond_init(&this->cond_packets_removed, NULL);
 }
 
 
