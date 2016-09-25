@@ -15,16 +15,16 @@ inline bool array_contains(const int *arr, int len, int x)
 }
 
 
-inline double intval(int beam_id, int ifreq, int it)
+inline float intval(int beam_id, int ifreq, int it)
 {
-    return fmod(0.823*beam_id + 1.319*ifreq + 1.023*it, 1.0);
+    return sin(0.823*beam_id + 1.319*ifreq + 1.023*it);
 }
 
 
 // weights are between 0.2 and 1
-inline double wtval(int beam_id, int ifreq, int it)
+inline float wtval(int beam_id, int ifreq, int it)
 {
-    return 0.2 + 0.8 * fmod(1.328*beam_id + 2.382*ifreq + 0.883*it, 1.0);
+    return 0.6 + 0.4 * sin(1.328*beam_id + 2.382*ifreq + 0.883*it);
 }
 
 
@@ -112,18 +112,18 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun)
 
 #if 0
     // Sometimes it's convenient to debug a specific test case...
-    this->use_fast_kernels = false;
-    this->nbeams = 8;
-    this->nupfreq = 4;
-    this->nfreq_coarse_per_packet = 8;
-    this->nt_per_packet = 8;
-    this->nt_per_chunk = 488;
-    this->nt_tot = 6344;
-    this->initial_t0 = 15840;
-    this->fpga_counts_per_sample = 862;
-    this->wt_cutoff = 0.565123;
-    this->send_stride = 646;
-    this->recv_stride = 1424;
+    this->use_fast_kernels = 0;
+    this->nbeams = 6;
+    this->nupfreq = 2;
+    this->nfreq_coarse_per_packet = 16;
+    this->nt_per_packet = 2;
+    this->nt_per_chunk = 236;
+    this->nt_tot = 8968;
+    this->initial_t0 = 4282;
+    this->fpga_counts_per_sample = 244;
+    this->wt_cutoff = 0.63584;
+    this->send_stride = 445;
+    this->recv_stride = 1455;
 #endif
 
     // Clunky way of generating random beam_ids
@@ -297,8 +297,8 @@ static void *consumer_thread_main(void *opaque_arg)
 		    continue;
 		}
 
-		double ival = intval(beam_id, ifreq, it+chunk_t0);
-		double wval = wtval(beam_id, ifreq, it+chunk_t0);
+		float ival = intval(beam_id, ifreq, it+chunk_t0);
+		float wval = wtval(beam_id, ifreq, it+chunk_t0);
 
 		// Check intensity
 		if ((wt_row[it] > 0.0) && fabs(int_row[it] - ival) > 0.021) {
