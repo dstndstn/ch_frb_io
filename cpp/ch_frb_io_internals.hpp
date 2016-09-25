@@ -52,11 +52,11 @@ struct intensity_packet {
     uint16_t  ntsamp;
 
     // "Data" fields
-    uint16_t  *beam_ids;   // 1D array of length nbeams
-    uint16_t  *freq_ids;   // 1D array of length nfreq_coarse
-    float     *scales;     // 2D array of shape (nbeam, nfreq_coarse)
-    float     *offsets;    // 2D array of shape (nbeam, nfreq_coarse)
-    uint8_t   *data;       // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
+    uint16_t  *beam_ids;          // 1D array of length nbeams
+    uint16_t  *coarse_freq_ids;   // 1D array of length nfreq_coarse
+    float     *scales;            // 2D array of shape (nbeam, nfreq_coarse)
+    float     *offsets;           // 2D array of shape (nbeam, nfreq_coarse)
+    uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
     // FIXME rethink the member function names below, since they're not very intuitive
 
@@ -84,8 +84,8 @@ struct intensity_packet {
     void encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
 
     // Currently used only for debugging
-    int find_freq_id(int freq_id) const;
-    bool contains_freq_id(int freq_id) const;
+    int find_coarse_freq_id(int id) const;
+    bool contains_coarse_freq_id(int id) const;
 };
 
 

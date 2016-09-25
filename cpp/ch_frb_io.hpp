@@ -41,7 +41,7 @@ class assembled_chunk_ringbuf;
 
 namespace constants {
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
-    static constexpr int nfreq_coarse = 1024;
+    static constexpr int nfreq_coarse_tot = 1024;
 
     // FIXME what value makes most sense here?
     static constexpr double default_wt_cutoff = 0.3;
@@ -337,7 +337,7 @@ public:
     // Called from 'external' context (i.e. same context that called make())
     // 
     // The 'intensity' and 'weights' arrays have logical shape
-    //   (nbeam, nfreq_per_chunk, nupfreq, nt_per_chunk).
+    //   (nbeam, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
     //
     // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
     //

@@ -57,13 +57,13 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 	return false;
 
     this->beam_ids = (uint16_t *) (src + 24);
-    this->freq_ids = (uint16_t *) (src + 24 + 2*n1);
+    this->coarse_freq_ids = (uint16_t *) (src + 24 + 2*n1);
     this->scales = (float *) (src + 24 + 2*n1 + 2*n2);
     this->offsets = (float *) (src + 24 + 2*n1 + 2*n2 + 4*n1*n2);
     this->data = (uint8_t *) (src + nh);
 
     for (int i = 0; i < nfreq_coarse; i++)
-	if (_unlikely(freq_ids[i] >= constants::nfreq_coarse))
+	if (_unlikely(coarse_freq_ids[i] >= constants::nfreq_coarse_tot))
 	    return false;
 
     return true;
@@ -79,7 +79,7 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
 
     memcpy(dst, this, 24);
     memcpy(dst + 24, this->beam_ids, 2*nb);
-    memcpy(dst + 24 + 2*nb, this->freq_ids, 2*nf);
+    memcpy(dst + 24 + 2*nb, this->coarse_freq_ids, 2*nf);
 
     scales = (float *) (dst + 24 + 2*nb + 2*nf);
     offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
@@ -145,18 +145,18 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
 }
 
 
-int intensity_packet::find_freq_id(int freq_id) const
+int intensity_packet::find_coarse_freq_id(int id) const
 {
     for (int i = 0; i < this->nfreq_coarse; i++)
-	if (this->freq_ids[i] == freq_id)
+	if (this->coarse_freq_ids[i] == id)
 	    return i;
     return -1;
 }
 
 
-bool intensity_packet::contains_freq_id(int freq_id) const
+bool intensity_packet::contains_coarse_freq_id(int id) const
 {
-    int i = this->find_freq_id(freq_id);
+    int i = this->find_coarse_freq_id(id);
     return (i >= 0);
 }
 

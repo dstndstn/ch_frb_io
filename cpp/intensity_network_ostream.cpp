@@ -67,7 +67,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     if (nfreq_coarse_per_packet <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: nfreq_coarse_per_packet was negative or uninitialized");
     if (nfreq_coarse_per_chunk % nfreq_coarse_per_packet != 0)
-	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_per_chunk to be a multiple of nfreq_per_packet");
+	throw runtime_error("chime intensity_network_ostream constructor: expected nfreq_coarse_per_chunk to be a multiple of nfreq_coarse_per_packet");
 
     if (nt_per_chunk <= 0)
 	throw runtime_error("chime intensity_network_ostream constructor: nt_per_chunk was negative or uninitialized");
@@ -99,7 +99,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     }
 
     for (unsigned int i = 0; i < ini_params.coarse_freq_ids.size(); i++) {
-	if ((ini_params.coarse_freq_ids[i] < 0) || (ini_params.coarse_freq_ids[i] >= constants::nfreq_coarse))
+	if ((ini_params.coarse_freq_ids[i] < 0) || (ini_params.coarse_freq_ids[i] >= constants::nfreq_coarse_tot))
 	    throw runtime_error("intensity_network_ostream constructor: bad coarse_freq_id");
 	for (unsigned int j = 0; j < i; j++)
 	    if (ini_params.coarse_freq_ids[i] == ini_params.coarse_freq_ids[j])
@@ -217,7 +217,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	    int data_offset = (if_outer * nfreq_coarse_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
 
 	    // Some intensity_packet fields are packet-dependent; these are initialized here.
-	    packet.freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
+	    packet.coarse_freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
 	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
 	    packet.encode(tmp_packet_list.data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
