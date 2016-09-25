@@ -129,8 +129,8 @@ struct intensity_packet {
 struct udp_packet_ringbuf : noncopyable {
     // Specified at construction, used when new udp_packet_list objects are allocated
     const int ringbuf_capacity;
-    const int max_npackets_per_list = 0;
-    const int max_nbytes_per_list = 0;
+    const int max_npackets_per_list;
+    const int max_nbytes_per_list;
 
     pthread_mutex_t lock;
     pthread_cond_t cond_packets_added;

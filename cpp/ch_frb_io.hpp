@@ -549,8 +549,8 @@ struct assembled_chunk : noncopyable {
     //   1 intensity sample = assembled_chunk::fpga_counts_per_sample * (1 fpga count)
     //   1 fpga count = 2.56e-6 seconds    (approx)
 
-    uint64_t ichunk;
-    uint64_t isample;   // always equal to ichunk * constants::nt_per_assembled_chunk
+    uint64_t ichunk = 0;
+    uint64_t isample = 0;   // always equal to ichunk * constants::nt_per_assembled_chunk
 
     float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
