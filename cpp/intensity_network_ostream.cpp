@@ -316,8 +316,8 @@ void intensity_network_ostream::_network_thread_body()
 	
 	// Loop over packets
 	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
-	    const uint8_t *packet = packet_list.data_start + packet_list.packet_offsets[ipacket];
-	    const int packet_nbytes = packet_list.packet_offsets[ipacket+1] - packet_list.packet_offsets[ipacket];
+	    const uint8_t *packet = packet_list.get_packet_data(ipacket);
+	    const int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
 
 	    if (npackets_sent == 0)
 		tv_ini = xgettimeofday();
