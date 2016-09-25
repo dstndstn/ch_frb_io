@@ -97,6 +97,15 @@ INSTALLATION (PYTHON)
     into a ring buffer which feeds the intensity_network_ostream).  It may also help	
     a little to write an AVX2 packet encoding kernel.
 
+  - It would also be nice to include event counting / logging in the packet output stream,
+    along the lines of what has already been implemented for the input stream.  For example,
+    we could count
+       - dropped packets
+       - intensity samples which are assigned weight zero in the input
+       - intensity samples which are assigned weight zero because they're below the wt_cutoff
+       - intensity samples which are assigned weight zero because they're 5 sigma outliers
+    This would be nontrival to implement since the actual encode kernels need to be modified.
+
   - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
     multiple UDP packets, avoiding the overhead of one system call per packet.  Does
     this help speed things up, or help reduce packet drops?
@@ -118,8 +127,6 @@ INSTALLATION (PYTHON)
     intel optimization manual.  We also might be able to improve performance a little using
     aligned loads/stores, but this would impose pointer alignment requirements on callers of
     assembled_chunk::decode().
-
-  - Unit testing feels incomplete without a standalone test of intensity_packet::encode().
 
   - The assembler should handle packets which arrive in an arbitrary order, but our
     unit test doesn't fully test this.  (It does permute the coarse frequencies, since

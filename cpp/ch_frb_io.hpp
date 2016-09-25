@@ -43,7 +43,10 @@ namespace constants {
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse_tot = 1024;
 
-    // FIXME what value makes most sense here?
+    // The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
+    // over the network.  Because the packet protocol only allows a boolean mask, rather than a
+    // floating-point weight, the packet encoding logic masks all values whose weight is below
+    // a chosen cutoff.
     static constexpr double default_wt_cutoff = 0.3;
 
     //
