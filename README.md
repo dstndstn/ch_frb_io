@@ -145,9 +145,10 @@ INSTALLATION (PYTHON)
   - Minor: implement an optimization to intensity_network_ostream which doesn't send
     a packet which is entirely masked (i.e. data array is all zeros)
 
+  - It would probably be a good idea to implement more argument checking in 
+    intensity_packet::encode().
+
   - Open-ended item: there are lots of things that can go wrong in a realtime system,
     such as temporary network failures, and threads running slow so that ring buffers
     overfill.  We need to think carefully about different failure modes and figure out
     how best to handle them.
-
-

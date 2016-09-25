@@ -40,8 +40,8 @@ namespace ch_frb_io {
 
 
 struct intensity_packet {
-    // These 24 bytes should have the same ordering and byte count as the "wire" packet format,
-    // since we use memcpy(24) to initialize them from the raw packet buffer.
+    // "Header fields".   These 24 bytes should have the same ordering and byte count as the 
+    // "on-wire" packet, since we use memcpy(24) to initialize them from the raw packet data.
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
@@ -51,54 +51,76 @@ struct intensity_packet {
     uint16_t  nupfreq;
     uint16_t  ntsamp;
 
-    // "Data" fields
+    // "Pointer" fields
     uint16_t  *beam_ids;          // 1D array of length nbeams
     uint16_t  *coarse_freq_ids;   // 1D array of length nfreq_coarse
     float     *scales;            // 2D array of shape (nbeam, nfreq_coarse)
     float     *offsets;           // 2D array of shape (nbeam, nfreq_coarse)
     uint8_t   *data;              // array of shape (nbeam, nfreq_coarse, nupfreq, ntsamp)
 
-    // FIXME rethink the member function names below, since they're not very intuitive
 
-    // Returns true if packet is good, false if bad
-    bool read(const uint8_t *src, int src_nbytes);
+    static inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
+    {
+	int header_size = 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
+	int data_size = nbeams * nfreq_coarse * nupfreq * nt_per_packet;
+	return header_size + data_size;
+    }
 
-    // The semantics of encode() aren't particularly intuitive, so we document it carefully here!
-    //
-    // It is assumed that the caller has initialized the "header" fields and the data pointers 'beam_ids', 'freq_ids'.
-    // The other three data pointers (scales, offsets, data) are not assumed initialized, and encode() will initialize them
-    // to point to subregions of the 'dst' array.
-    //
-    // The 'dst' array should point to an allocated but uninitialized memory region which will be filled by encode_packet().
-    // Note that encode_packet() doesn't check for overflows (or do any arugment checking at all!)
-    //
-    // The 'intensity' and 'weights' pointers should point to arrays of logical shape (nbeams, nfreq_coarse, nupfreq, ntsamp).
-    //
-    // The stride arguments are defined so that the intensity array element with logical indices (b,f,u,t) is stored at
-    // memory location
-    //
-    //    intensity + b*beam_stride + (f*nupfreq+u)*freq_stride + t
-    //
-    // and likewise for the weights.
 
-    void encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
+    // Initializes a 'struct intensity_packet' from raw packet data.  The "pointer" fields of the
+    // struct intensity_packet are initialized to pointers into the 'src' buffer, so the caller is
+    // responsible for ensuring that this buffer doesn't get freed while the struct intensity_packet 
+    // is in scope.
+    //
+    // Does a bunch of sanity checks and returns 'true' if packet is good, 'false' if bad.
+    // (See extended comment in intensity_packet.cpp for a complete list of checks performed.)
+
+    bool decode(const uint8_t *src, int src_nbytes);
+
+    
+    // Encodes a floating-point array of intensities into raw packet data, before sending packet.
+    // The semantics of encode() aren't very intuitive, so we document it carefully here!
+    //
+    //    - Caller should initialize the "header" fields of the struct intensity packet.
+    //
+    //    - Caller should initialize the pointer fields 'beam_ids' and 'coarse_freq_ids' to 
+    //      point to arrays of appropriate size.
+    //
+    //    - Caller should initialize the 'intensity' and 'weights' arrays to point to logical arrays 
+    //      of shape (nbeams, nfreq_coarse, nupfreq, ntsamp).  This is the data that will be encoded 
+    //      into the packet.  The stride arguments are defined so that the intensity array element with 
+    //      logical indices (b,f,u,t) has memory location
+    //
+    //          intensity + b*beam_stride + (f*nupfreq+u)*freq_stride + t
+    //
+    //      and likewise for the weights.
+    //
+    //    - Since the binary packet format doesn't support weights but does support a boolean mask,
+    //      encode() simply masksdata whose weight is below the 'wt_cutoff' argument.
+    //
+    //    - Caller must ensure that 'dst' points to a large enough buffer to encode the packet.
+    //      For example, in intensity_network_ostream.cpp, we compute the buffer size ahead of
+    //      time using intensity_packet::packet_size().
+    //
+    //    - Caller doesn't need to initialize the pointer fields 'scales', 'offsets', 'data'.
+    //      These pointers are initialized in encode(), to point into the appropriate locations
+    //      in the 'dst' buffer.  The actual scales and offsets are computed in encode() based
+    //      on the mean and variance of the data.  The scales are chosen so that the intensities
+    //      are masked if they deviate from the mean by approx 5 sigma.
+    //
+    // Returns size of the encoded packet in bytes.
+    //
+    // Caveat emptor: encode() doesn't do any argument checking at all, e.g. it's easy to segfault
+    // by calling it wrong!
+
+    int encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff);
+
 
     // Currently used only for debugging
     int find_coarse_freq_id(int id) const;
     bool contains_coarse_freq_id(int id) const;
 };
 
-
-// FIXME make these static member functions of intensity_packet?
-inline int header_size(int nbeams, int nfreq_coarse)
-{
-    return 24 + 2*nbeams + 2*nfreq_coarse + 8*nbeams*nfreq_coarse;
-}
-
-inline int packet_size(int nbeams, int nfreq_coarse, int nupfreq, int nt_per_packet)
-{
-    return header_size(nbeams, nfreq_coarse) + (nbeams * nfreq_coarse * nupfreq * nt_per_packet);
-}
 
 
 // -------------------------------------------------------------------------------------------------

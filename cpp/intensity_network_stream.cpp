@@ -392,7 +392,7 @@ void intensity_network_stream::_network_thread_body()
 	if (is_first_packet) {
 	    intensity_packet packet;
 
-	    if (!packet.read(packet_data, packet_nbytes)) {
+	    if (!packet.decode(packet_data, packet_nbytes)) {
 		event_subcounts[event_type::packet_bad]++;
 		continue;
 	    }
@@ -535,7 +535,7 @@ void intensity_network_stream::_assembler_thread_body()
             int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
 	    intensity_packet packet;
 
-	    if (!packet.read(packet_data, packet_nbytes)) {
+	    if (!packet.decode(packet_data, packet_nbytes)) {
 		event_subcounts[event_type::packet_bad]++;
 		continue;
 	    }

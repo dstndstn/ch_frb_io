@@ -10,7 +10,13 @@ namespace ch_frb_io {
 #endif
 
 
-// Returns true if packet is good, false if bad.
+
+// Initializes a 'struct intensity_packet' from raw packet data.  The "pointer" fields of the
+// struct intensity_packet are initialized to pointers into the 'src' buffer, so the caller is
+// responsible for ensuring that this buffer doesn't get freed while the struct intensity_packet 
+// is in scope.
+//
+// Does a bunch of sanity checks and returns 'true' if packet is good, 'false' if bad.
 //
 // Explicitly, the following checks are performed:
 //   - protocol version == 1
@@ -21,7 +27,7 @@ namespace ch_frb_io {
 //   - nbeams, nfreq_coarse, nupfreq, ntsamp, fpga_counts_per_sample are all > 0
 //   - fpga_count is a multiple of (fpga_counts_per_sample * ntsamp)
 
-bool intensity_packet::read(const uint8_t *src, int src_nbytes)
+bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
 {
     if (_unlikely(src_nbytes < 24))
 	return false;
@@ -70,7 +76,11 @@ bool intensity_packet::read(const uint8_t *src, int src_nbytes)
 }
 
 
-void intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
+// Encodes a floating-point array of intensities into raw packet data, before sending packet.
+// The precise semantics aren't very intuitive, see extended comment in ch_frb_io_internals.hpp for details!
+// FIXME: it would probably be a good idea to do more argument checking in intensity_packet::encode().
+
+int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
 {
     int nb = this->nbeams;
     int nf = this->nfreq_coarse;
@@ -81,9 +91,9 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
     memcpy(dst + 24, this->beam_ids, 2*nb);
     memcpy(dst + 24 + 2*nb, this->coarse_freq_ids, 2*nf);
 
-    scales = (float *) (dst + 24 + 2*nb + 2*nf);
-    offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
-    data = dst + 24 + 2*nb + 2*nf + 8*nb*nf;
+    this->scales = (float *) (dst + 24 + 2*nb + 2*nf);
+    this->offsets = (float *) (dst + 24 + 2*nb + 2*nf + 4*nb*nf);
+    this->data = dst + 24 + 2*nb + 2*nf + 8*nb*nf;
 
     for (int b = 0; b < nb; b++) {
 	for (int f = 0; f < nf; f++) {
@@ -142,6 +152,8 @@ void intensity_packet::encode(uint8_t *dst, const float *intensity, const float 
 	    }
 	}
     }
+
+    return 24 + 2*nb + 2*nf + 8*nb*nf + nb*nf*nu*nt;
 }
 
 
