@@ -134,7 +134,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 
     int capacity = constants::output_ringbuf_capacity;
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk);
-    this->tmp_packet_list = udp_packet_list(npackets_per_chunk, nbytes_per_chunk);
+    this->tmp_packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
 }
 
 
@@ -190,7 +190,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 {
     if (fpga_count % (fpga_counts_per_sample * nt_per_packet) != 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
-    if (tmp_packet_list.curr_npackets > 0)
+    if (tmp_packet_list->curr_npackets > 0)
 	throw runtime_error("intensity_network_ostream::send_chunk(): internal error: tmp_packet_list nonempty?!");
 
     intensity_packet packet;
@@ -220,13 +220,13 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	    packet.coarse_freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
 	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
-	    int nbytes_encoded = packet.encode(tmp_packet_list.data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
+	    int nbytes_encoded = packet.encode(tmp_packet_list->data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
 
 	    // A probably-paranoid sanity check
 	    if (_unlikely(nbytes_encoded != nbytes_per_packet))
 		throw runtime_error("ch_frb_io: internal error in network_ostream: nbytes_encoded != nbytes_per_packet");
 
-	    tmp_packet_list.add_packet(nbytes_per_packet);
+	    tmp_packet_list->add_packet(nbytes_per_packet);
 	}
     }
 
@@ -305,7 +305,7 @@ void intensity_network_ostream::_network_thread_start()
 
 void intensity_network_ostream::_network_thread_body()
 {
-    udp_packet_list packet_list(npackets_per_chunk, nbytes_per_chunk);
+    auto packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
     int last_packet_nbytes = 0;
 
     // to be initialized when first packet is sent
@@ -317,9 +317,9 @@ void intensity_network_ostream::_network_thread_body()
 	    break;   // end of stream reached (probably normal termination)
 	
 	// Loop over packets
-	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
-	    const uint8_t *packet = packet_list.get_packet_data(ipacket);
-	    const int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
+	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
+	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
+	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 
 	    if (npackets_sent == 0)
 		tv_ini = xgettimeofday();

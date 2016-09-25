@@ -30,6 +30,7 @@ struct assembled_chunk;
 
 // Defined in ch_frb_io_internals.hpp
 struct intensity_packet;
+struct udp_packet_list;
 struct udp_packet_ringbuf;
 class assembled_chunk_ringbuf;
 
@@ -250,43 +251,6 @@ struct intensity_hdf5_ofile {
 
 // -------------------------------------------------------------------------------------------------
 //
-// Helper classes for network code
-
-
-struct udp_packet_list {
-    // Initialized at construction.
-    int max_npackets = 0;
-    int max_nbytes = 0;
-    std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
-    std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
-
-    // Current state of buffer.
-    int curr_npackets = 0;
-    int curr_nbytes = 0;   // total size of all packets
-    bool is_full = true;
-
-    // Bare pointers.
-    uint8_t *data_start = nullptr;    // points to &buf[0]
-    uint8_t *data_end = nullptr;      // points to &buf[nbyes]
-    int *packet_offsets = nullptr;    // points to &off_buf[0].  Note that packet_offsets[npackets] is always equal to 'nbytes'.
-
-    udp_packet_list() { }   // default constructor makes a dummy udp_packet_list with max_npackets=max_nbytes=0.
-    udp_packet_list(int max_npackets, int max_nbytes);
-
-    // Accessors (not range-checked)
-    inline uint8_t *get_packet_data(int i)  { return data_start + packet_offsets[i]; }
-    inline int get_packet_nbytes(int i)     { return packet_offsets[i+1] - packet_offsets[i]; }
-
-    // To add a packet, first add data by hand at 'data_end', then call add_packet().
-    void add_packet(int packet_nbytes);
-
-    // Doesn't deallocate buffers or change the max_* fields, but sets the current packet list to zero.
-    void reset();
-};
-
-
-// -------------------------------------------------------------------------------------------------
-//
 // Network ostream
 
 
@@ -379,11 +343,11 @@ protected:
     bool network_thread_started = false;
     bool network_thread_joined = false;
 
-    // ring buffer used to exchange packets with network thread
+    // Ring buffer used to exchange packets with network thread
     std::unique_ptr<udp_packet_ringbuf> ringbuf;
     
-    // Buffers for packet encoding
-    udp_packet_list tmp_packet_list;
+    // Temp buffers for packet encoding
+    std::unique_ptr<udp_packet_list> tmp_packet_list;
 
     // Real constructor is protected
     intensity_network_ostream(const initializer &ini_params);
@@ -446,17 +410,14 @@ public:
     void end_stream();           // asynchronously stops stream
     void join_threads();         // should only be called once, does not asynchronously stop stream.
 
-    // FIXME Not sure if we really need this.
-    // bool wait_for_first_packet(int &nupfreq, int &nt_per_packet, int &fpga_counts_per_sample);
-
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
+
+    // Will block until first packet is received, or stream ends.  Returns true in former case.
+    bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
     
     // Can be called at any time, from any thread.
     initializer get_initializer();
     std::vector<int64_t> get_event_counts();
-
-    // Will block until first packet is received, or stream ends.  Returns true in former case.
-    bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
 
     ~intensity_network_stream();
 
@@ -487,7 +448,7 @@ protected:
 
     // Used only by the network thread (not protected by lock)
     int sockfd = -1;
-    udp_packet_list incoming_packet_list;
+    std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
 
     // Used only by the assembler thread

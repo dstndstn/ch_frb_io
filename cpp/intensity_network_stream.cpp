@@ -87,7 +87,7 @@ intensity_network_stream::intensity_network_stream(const initializer &ini_params
     int max_nbytes = constants::max_unassembled_nbytes_per_list;
     this->unassembled_ringbuf = make_unique<udp_packet_ringbuf> (capacity, max_npackets, max_nbytes);
 
-    this->incoming_packet_list = udp_packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    this->incoming_packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
 
     this->cumulative_event_counts = vector<int64_t> (event_type::num_types, 0);
     this->network_thread_event_subcounts = vector<int64_t> (event_type::num_types, 0);
@@ -371,7 +371,7 @@ void intensity_network_stream::_network_thread_body()
 	    this->_put_unassembled_packets();   // Note: calls _add_event_counts()
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
-	uint8_t *packet_data = incoming_packet_list.data_end;
+	uint8_t *packet_data = incoming_packet_list->data_end;
 	int packet_nbytes = read(sockfd, packet_data, constants::max_input_udp_packet_size + 1);
 
 	// Check for error or timeout in read()
@@ -417,12 +417,12 @@ void intensity_network_stream::_network_thread_body()
 	}
 
 	// The incoming_packet_list is timestamped with the arrival time of its first packet.
-	if (incoming_packet_list.curr_npackets == 0)
+	if (incoming_packet_list->curr_npackets == 0)
 	    incoming_packet_list_timestamp = curr_timestamp;
 
-	incoming_packet_list.add_packet(packet_nbytes);
+	incoming_packet_list->add_packet(packet_nbytes);
 
-	if (incoming_packet_list.is_full)
+	if (incoming_packet_list->is_full)
 	    this->_put_unassembled_packets();
     }
 }
@@ -449,7 +449,8 @@ void intensity_network_stream::_network_thread_exit()
 
 void intensity_network_stream::_put_unassembled_packets()
 {
-    int npackets = incoming_packet_list.curr_npackets;
+    int npackets = incoming_packet_list->curr_npackets;
+
     if (!npackets)
 	return;
 
@@ -531,13 +532,13 @@ void intensity_network_stream::_assembler_thread_body()
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 
-    udp_packet_list packet_list(constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
+    auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
 
     while (unassembled_ringbuf->get_packet_list(packet_list)) {
-	for (int ipacket = 0; ipacket < packet_list.curr_npackets; ipacket++) {
-            uint8_t *packet_data = packet_list.get_packet_data(ipacket);
-            int packet_nbytes = packet_list.get_packet_nbytes(ipacket);
+	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
+            uint8_t *packet_data = packet_list->get_packet_data(ipacket);
+            int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 	    intensity_packet packet;
 
 	    if (!packet.decode(packet_data, packet_nbytes)) {

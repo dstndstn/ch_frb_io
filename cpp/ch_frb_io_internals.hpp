@@ -126,6 +126,38 @@ struct intensity_packet {
 // -------------------------------------------------------------------------------------------------
 
 
+struct udp_packet_list {
+    // Initialized at construction.
+    int max_npackets = 0;
+    int max_nbytes = 0;
+    std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
+    std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
+
+    // Current state of buffer.
+    int curr_npackets = 0;
+    int curr_nbytes = 0;   // total size of all packets
+    bool is_full = true;
+
+    // Bare pointers.
+    uint8_t *data_start = nullptr;    // points to &buf[0]
+    uint8_t *data_end = nullptr;      // points to &buf[nbyes]
+    int *packet_offsets = nullptr;    // points to &off_buf[0].  Note that packet_offsets[npackets] is always equal to 'nbytes'.
+
+    udp_packet_list() { }   // default constructor makes a dummy udp_packet_list with max_npackets=max_nbytes=0.
+    udp_packet_list(int max_npackets, int max_nbytes);
+
+    // Accessors (not range-checked)
+    inline uint8_t *get_packet_data(int i)  { return data_start + packet_offsets[i]; }
+    inline int get_packet_nbytes(int i)     { return packet_offsets[i+1] - packet_offsets[i]; }
+
+    // To add a packet, first add data by hand at 'data_end', then call add_packet().
+    void add_packet(int packet_nbytes);
+
+    // Doesn't deallocate buffers or change the max_* fields, but sets the current packet count to zero.
+    void reset();
+};
+
+
 struct udp_packet_ringbuf : noncopyable {
     // Specified at construction, used when new udp_packet_list objects are allocated
     const int ringbuf_capacity;
@@ -139,26 +171,21 @@ struct udp_packet_ringbuf : noncopyable {
 
     int ringbuf_size = 0;
     int ringbuf_pos = 0;
-    std::vector<udp_packet_list> ringbuf;
+    std::vector<std::unique_ptr<udp_packet_list> > ringbuf;
 
     udp_packet_ringbuf(int ringbuf_capacity, int max_npackets_per_list, int max_nbytes_per_list);
     ~udp_packet_ringbuf();
     
-    // Important note!  Both put_packet_list() and get_packet_list() _swap_ their udp_packet_list argument with 
-    // a packet_list in the ring buf.
-    //
-    // I.e., put_packet_list() is called with a full packet list, and swaps it for an empty packet list, which the
-    // producer thread can fill with packets.  Similary, get_packet_list() is called with a "junk" packet list (which
-    // may or may not be empty), and swaps it for a full packet list.
-
-    // Returns true on success
-    // Returns false if packets were dropped due to full ring buffer
+    // Note!  The pointer 'p' is _swapped_ with an empty udp_packet_list from the ring buffer.
+    // In other words, when put_packet_list() returns, the argument 'p' points to an empty udp_packet_list.
+    // Returns true on success, returns false if packets were dropped due to full ring buffer.
     // Throws an exception if called after end-of-stream.
-    bool put_packet_list(udp_packet_list &l, bool is_blocking);
+    bool put_packet_list(std::unique_ptr<udp_packet_list> &p, bool is_blocking);
 
+    // Note!  The pointer 'p' is assumed 
     // Returns true on success (possibly after blocking)
     // Returns false if ring buffer is empty and stream has ended.
-    bool get_packet_list(udp_packet_list &l);
+    bool get_packet_list(std::unique_ptr<udp_packet_list> &l);
 
     // Intended to be called by producer thread.
     void end_stream();

@@ -18,11 +18,8 @@ udp_packet_ringbuf::udp_packet_ringbuf(int ringbuf_capacity_, int max_npackets_p
 	throw runtime_error("udp_packet_ringbuf constructor: expected ringbuf_capacity > 0");
 
     this->ringbuf.resize(ringbuf_capacity);
-
-    for (int i = 0; i < ringbuf_capacity; i++) {
-	udp_packet_list l(max_npackets_per_list, max_nbytes_per_list);
-	std::swap(this->ringbuf[i], l);
-    }
+    for (int i = 0; i < ringbuf_capacity; i++)
+	ringbuf[i] = make_unique<udp_packet_list> (this->max_npackets_per_list, this->max_nbytes_per_list);
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_packets_added, NULL);
@@ -38,8 +35,11 @@ udp_packet_ringbuf::~udp_packet_ringbuf()
 }
 
 
-bool udp_packet_ringbuf::put_packet_list(udp_packet_list &packet_list, bool is_blocking)
+bool udp_packet_ringbuf::put_packet_list(unique_ptr<udp_packet_list> &p, bool is_blocking)
 {    
+    if (!p)
+	throw runtime_error("ch_frb_io: udp_packet_ringbuf::put_packet_list() was called with empty pointer");
+
     pthread_mutex_lock(&this->lock);
 
     for (;;) {
@@ -50,18 +50,18 @@ bool udp_packet_ringbuf::put_packet_list(udp_packet_list &packet_list, bool is_b
 
 	if (ringbuf_size < ringbuf_capacity) {
 	    int i = (ringbuf_pos + ringbuf_size) % ringbuf_capacity;
-	    std::swap(this->ringbuf[i], packet_list);
+	    std::swap(this->ringbuf[i], p);
 	    this->ringbuf_size++;
 	
 	    pthread_cond_broadcast(&this->cond_packets_added);
 	    pthread_mutex_unlock(&this->lock);
-	    packet_list.reset();
+	    p->reset();
 	    return true;
 	}
 
 	if (!is_blocking) {
 	    pthread_mutex_unlock(&this->lock);
-	    packet_list.reset();
+	    p->reset();
 	    return false;
 	}
 
@@ -70,15 +70,18 @@ bool udp_packet_ringbuf::put_packet_list(udp_packet_list &packet_list, bool is_b
 }
 
 
-bool udp_packet_ringbuf::get_packet_list(udp_packet_list &packet_list)
+bool udp_packet_ringbuf::get_packet_list(unique_ptr<udp_packet_list> &p)
 {
-    packet_list.reset();
+    if (!p)
+	throw runtime_error("ch_frb_io: udp_packet_ringbuf::get_packet_list() was called with empty pointer");
+
+    p->reset();
     pthread_mutex_lock(&this->lock);
 
     for (;;) {
 	if (ringbuf_size > 0) {
 	    int i = ringbuf_pos % ringbuf_capacity;
-	    std::swap(this->ringbuf[i], packet_list);
+	    std::swap(this->ringbuf[i], p);
 	    this->ringbuf_pos++;
 	    this->ringbuf_size--;
 
