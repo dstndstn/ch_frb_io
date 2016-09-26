@@ -97,6 +97,13 @@ INSTALLATION (PYTHON)
     into a ring buffer which feeds the intensity_network_ostream).  It may also help	
     a little to write an AVX2 packet encoding kernel.
 
+  - There are two ring buffer data structures in the network code, a udp_packet_ringbuf
+    and an assembled_chunk_ringbuf.  The udp_packet_ringbuf has been designed so that a 
+    fixed pool of buffers is recycled throughout the lifetime of the ring buffer, whereas
+    the assembled_chunk_ringbuf continually frees and allocates buffers.  It would be
+    better to change the assembled_chunk_ringbuf to use a fixed pool, in order to avoid
+    the page-faulting cost of Linux malloc.
+
   - It would also be nice to include event counting / logging in the packet output stream,
     along the lines of what has already been implemented for the input stream.  For example,
     we could count

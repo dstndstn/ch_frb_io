@@ -158,6 +158,15 @@ struct udp_packet_list {
 };
 
 
+// High-level comment: the get/put methods of udp_packet_ringbuf have been designed so that a
+// fixed pool of udp_packet_lists is recycled throughout the lifetime of the ringbuf, rather than
+// having buffers which are continually freed and allocated.  This is to avoid the page-faulting
+// cost of Linux malloc.
+//
+// In contrast, the current implementation of assembled_chunk_ringbuf does lead to continually
+// freed/allocated buffers.  It may improve performance to switch to an implementation which 
+// is more similar to udp_packet_ringbuf!  (This loose end is noted in the README.)
+
 struct udp_packet_ringbuf : noncopyable {
     // Specified at construction, used when new udp_packet_list objects are allocated
     const int ringbuf_capacity;
@@ -182,10 +191,10 @@ struct udp_packet_ringbuf : noncopyable {
     // Throws an exception if called after end-of-stream.
     bool put_packet_list(std::unique_ptr<udp_packet_list> &p, bool is_blocking);
 
-    // Note!  The pointer 'p' is assumed 
-    // Returns true on success (possibly after blocking)
-    // Returns false if ring buffer is empty and stream has ended.
-    bool get_packet_list(std::unique_ptr<udp_packet_list> &l);
+    // Note!  The pointer 'p' is _swapped_ with the udp_packet_list which is extracted from the ring buffer.
+    // In other words, when get_packet_list() returns, the original udp_packet_list will be "recycled" (rather than freed).
+    // Returns true on success (possibly after blocking), returns false if ring buffer is empty and stream has ended.
+    bool get_packet_list(std::unique_ptr<udp_packet_list> &p);
 
     // Intended to be called by producer thread.
     void end_stream();
