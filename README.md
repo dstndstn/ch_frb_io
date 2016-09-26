@@ -1,18 +1,20 @@
 ch_frb_io: C++/python library for CHIME-FRB file and network streams.
 
-CHIME FRB data has a similar format to CHIME cosmology data and can be read
-using the tools in 'caput', in particular the caput.tod module
-(https://github.com/radiocosmology/caput).
-This package contains additional tools, such as simple file data streamers and a C
-interface.  
-
-There are now some minimal C++ classes for network input/output streams,
-with a few loose ends which should be improved.
-
 Currently there is no shared code between the C++ and python parts, so this is really two
 independent libraries in the same git repository.  In fact the C++ and python parts use
 different build systems, so you have to build and install them independently.  This is
 something that should probably be fixed later!
+
+CHIME FRB files have a similar format to CHIME cosmology data and can be read
+using the tools in 'caput', in particular the caput.tod module
+(https://github.com/radiocosmology/caput).
+This package contains additional tools, such as simple file data streamers and a C++
+interface.  
+
+Network streams (read/write) are C++-only, but in the single-beam case, python wrappers
+are available in the `rf_pipelines` repository.  The networking code is fairly mature
+and well optimized/tested, but there are some missing features and loose ends noted
+later in this README.
 
 This code is mostly used as a library in other places (e.g. https://github.com/kmsmith137/ch_vdif_assembler
 or https://github.com/kmsmith137/rf_pipelines), but there are a few standalone command-line utilities here:
@@ -88,34 +90,10 @@ INSTALLATION (PYTHON)
   - There is a proposal to bitshuffle-compress the packets, which may reduce bandwidth
     by ~20%, but this is currently unimplemented.
 
-  - Eventually it would be nice to do an end-to-end test of the FRB backend, by having
-    a "simulator" node generate timestreams containing noise + FRB's, and sending them
-    over the network.  However, the current simulation code is too slow to do this!
-
-    The most important thing is to multithread the part of the code which simulates 
-    the timestream (e.g. we could have one rf_pipeline per beam, with outputs combined
-    into a ring buffer which feeds the intensity_network_ostream).  It may also help	
-    a little to write an AVX2 packet encoding kernel.
-
-  - There are two ring buffer data structures in the network code, a udp_packet_ringbuf
-    and an assembled_chunk_ringbuf.  The udp_packet_ringbuf has been designed so that a 
-    fixed pool of buffers is recycled throughout the lifetime of the ring buffer, whereas
-    the assembled_chunk_ringbuf continually frees and allocates buffers.  It would be
-    better to change the assembled_chunk_ringbuf to use a fixed pool, in order to avoid
-    the page-faulting cost of Linux malloc.
-
-  - It would also be nice to include event counting / logging in the packet output stream,
-    along the lines of what has already been implemented for the input stream.  For example,
-    we could count
-       - dropped packets
-       - intensity samples which are assigned weight zero in the input
-       - intensity samples which are assigned weight zero because they're below the wt_cutoff
-       - intensity samples which are assigned weight zero because they're 5 sigma outliers
-    This would be nontrival to implement since the actual encode kernels need to be modified.
-
-  - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
-    multiple UDP packets, avoiding the overhead of one system call per packet.  Does
-    this help speed things up, or help reduce packet drops?
+  - Open-ended item: there are lots of things that can go wrong in a realtime system,
+    such as temporary network failures, and threads running slow so that ring buffers
+    overfill.  We need to think carefully about different failure modes and figure out
+    how best to handle them.
 
   - When the network stream is running, it maintains "event counts" for many types of
     events, such as packet drops, assembler hits/misses etc.  Right now we don't really
@@ -125,6 +103,35 @@ INSTALLATION (PYTHON)
 
     Related: we probably want to generalize the event counts (currently cumulative) to
     keep track of the event rate for some choice of timescale (say 10 sec).
+
+    Another possible improvement: another way of making events more granular is to
+    bin them by source IP address.
+
+    One more!  It would be nice to keep track of the fraction of intensity samples which
+    are masked (either 0x00 or 0xff bytes), or missing.  A natural place to put this counting 
+    is assembled_chunk::add_packet(), but this is a little nontrivial since it involves
+    modifying assembly language kernels, so I haven't done it yet.
+
+  - Eventually it would be nice to do an end-to-end test of the FRB backend, by having
+    a "simulator" node generate timestreams containing noise + FRB's, and sending them
+    over the network.  However, the current simulation code is too slow to do this!
+
+    The most important thing is to multithread the part of the code which simulates 
+    the timestream (e.g. we could have one rf_pipeline per beam, with outputs combined
+    into a ring buffer which feeds the intensity_network_ostream).  It may also help
+    a little to write an assembly language packet encoding kernel (the correlator
+    developers will probably do this eventually, so maybe we can just steal theirs).
+
+  - There are two ring buffer data structures in the network code, a udp_packet_ringbuf
+    and an assembled_chunk_ringbuf.  The udp_packet_ringbuf has been designed so that a 
+    fixed pool of buffers is recycled throughout the lifetime of the ring buffer, whereas
+    the assembled_chunk_ringbuf continually frees and allocates buffers.  It would be
+    better to change the assembled_chunk_ringbuf to use a fixed buffer pool, in order to avoid
+    the page-faulting cost of Linux malloc.
+
+  - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
+    multiple UDP packets, avoiding the overhead of one system call per packet.  Does
+    this help speed things up, or help reduce packet drops?
 
   - In the full CHIME backend, do we want to pin the network and/or assembler threads
     to specific cores?  Do we want to increase the scheduleing priority of these threads?
@@ -157,7 +164,12 @@ INSTALLATION (PYTHON)
   - It would probably be a good idea to implement more argument checking in 
     intensity_packet::encode().
 
-  - Open-ended item: there are lots of things that can go wrong in a realtime system,
-    such as temporary network failures, and threads running slow so that ring buffers
-    overfill.  We need to think carefully about different failure modes and figure out
-    how best to handle them.
+  - It would be natural to include event counting / logging in the packet output stream,
+    along the lines of what has already been implemented for the input stream.  For example,
+    we could count
+       - dropped packets
+       - intensity samples which are assigned weight zero in the input
+       - intensity samples which are assigned weight zero because they're below the wt_cutoff
+       - intensity samples which are assigned weight zero because they're 5 sigma outliers
+
+    This is low priority since we currently only use the output code for testing!

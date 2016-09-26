@@ -39,6 +39,8 @@ namespace ch_frb_io {
 // -------------------------------------------------------------------------------------------------
 
 
+// See L0_L1_packet.hpp for a more verbose description of the intensity packet format.
+
 struct intensity_packet {
     // "Header fields".   These 24 bytes should have the same ordering and byte count as the 
     // "on-wire" packet, since we use memcpy(24) to initialize them from the raw packet data.
