@@ -186,12 +186,21 @@ void intensity_network_ostream::_open_socket()
 
 
 // The 'intensity' and 'weights' arrays have shapes (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk)
-void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
+void intensity_network_ostream::_encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const unique_ptr<udp_packet_list> &out)
 {
+    // The number of packets per chunk is (nf_outer * nt_outer)
+    int beam_stride = nfreq_coarse_per_chunk * nupfreq * stride;
+    int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
+    int nt_outer = nt_per_chunk / nt_per_packet;
+
     if (fpga_count % (fpga_counts_per_sample * nt_per_packet) != 0)
-	throw runtime_error("intensity_network_ostream::send_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
-    if (tmp_packet_list->curr_npackets > 0)
-	throw runtime_error("intensity_network_ostream::send_chunk(): internal error: tmp_packet_list nonempty?!");
+	throw runtime_error("intensity_network_ostream::_encode_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
+    if (out->curr_npackets > 0)
+	throw runtime_error("intensity_network_ostream::_encode_chunk(): internal error: packet_list nonempty");
+    if (out->max_npackets < nt_outer * nf_outer)
+	throw runtime_error("intensity_network_ostream::_encode_chunk(): internal error: packet_list is underallocated");
+    if (out->max_nbytes < nt_outer * nf_outer * nbytes_per_packet)
+	throw runtime_error("intensity_network_ostream::_encode_chunk(): internal error: packet_list is underallocated");
 
     intensity_packet packet;
     
@@ -205,13 +214,7 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
     packet.ntsamp = nt_per_packet;
     packet.beam_ids = &beam_ids_16bit[0];
 
-    // The number of packets per chunk is (nf_outer * nt_outer)
-    int beam_stride = nfreq_coarse_per_chunk * nupfreq * stride;
-    int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
-    int nt_outer = nt_per_chunk / nt_per_packet;
-
     // Loop over packets in chunk.
-    // I decided it made most sense to make (time, frequency) the (outer, inner) loops.
     for (int it_outer = 0; it_outer < nt_outer; it_outer++) {
 	for (int if_outer = 0; if_outer < nf_outer; if_outer++) {
 	    int data_offset = (if_outer * nfreq_coarse_per_packet * nupfreq * stride) + (it_outer * nt_per_packet);
@@ -226,9 +229,15 @@ void intensity_network_ostream::send_chunk(const float *intensity, const float *
 	    if (_unlikely(nbytes_encoded != nbytes_per_packet))
 		throw runtime_error("ch_frb_io: internal error in network_ostream: nbytes_encoded != nbytes_per_packet");
 
-	    tmp_packet_list->add_packet(nbytes_per_packet);
+	    out->add_packet(nbytes_per_packet);
 	}
     }
+}
+
+
+void intensity_network_ostream::send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count)
+{
+    this->_encode_chunk(intensity, weights, stride, fpga_count, this->tmp_packet_list);
 
     if (ringbuf->put_packet_list(tmp_packet_list, ini_params.is_blocking))
 	return;

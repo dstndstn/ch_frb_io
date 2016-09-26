@@ -75,6 +75,7 @@ void assembled_chunk::randomize(std::mt19937 &rng)
 }
 
 
+// virtual member function; any changes made here should be reflected in override fast_assembled_chunk::add_packet().
 void assembled_chunk::add_packet(const intensity_packet &packet)
 {
     uint64_t packet_t0 = packet.fpga_count / uint64_t(fpga_counts_per_sample);
@@ -114,7 +115,7 @@ void assembled_chunk::add_packet(const intensity_packet &packet)
 }
 
 
-// virtual
+// virtual member function; any changes made here should be reflected in override fast_assembled_chunk::decode().
 void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 {
     if (!intensity || !weights)

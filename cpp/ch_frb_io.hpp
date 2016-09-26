@@ -322,6 +322,8 @@ public:
 
     ~intensity_network_ostream();
 
+    // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
+    void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
     
 protected:
     std::vector<uint16_t> beam_ids_16bit;
