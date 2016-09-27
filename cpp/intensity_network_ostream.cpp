@@ -6,6 +6,12 @@
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
+// A linux-osx portability nuisance issue
+#ifndef AI_V4MAPPED_CFG
+#define AI_V4MAPPED_CFG AI_V4MAPPED
+#endif
+
+
 using namespace std;
 
 namespace ch_frb_io {
@@ -166,7 +172,7 @@ void intensity_network_ostream::_open_socket()
 
     struct addrinfo dns_hint;
     memset(&dns_hint, 0, sizeof(dns_hint));
-    dns_hint.ai_flags = AI_DEFAULT;
+    dns_hint.ai_flags = AI_V4MAPPED_CFG | AI_ADDRCONFIG;
     dns_hint.ai_family = AF_INET;   // IPv4
     dns_hint.ai_socktype = SOCK_DGRAM;
     dns_hint.ai_protocol = IPPROTO_UDP;
