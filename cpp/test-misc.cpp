@@ -25,7 +25,7 @@ static void test_encode_decode(std::mt19937 &rng)
 
 	bool use_fast_kernels = (iouter % 2) == 1;    // alternating rather than random
 	int nbeams = randint(rng,1,9);
-	int nfreq_coarse_per_packet = randint(rng,1,5);
+	int nfreq_coarse_per_packet = (1 << randint(rng,0,3));
 	int nupfreq = use_fast_kernels ? (2 * randint(rng,1,9)) : randint(rng,1,17);
 	int nt_per_packet = use_fast_kernels ? 16 : (1 << randint(rng,0,5));
 	int nfreq_coarse_tot = constants::nfreq_coarse_tot;
