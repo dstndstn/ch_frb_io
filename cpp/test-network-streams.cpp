@@ -73,7 +73,6 @@ struct unit_test_instance {
 unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, double target_gbps_)
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
-    const int nt_assembler = ch_frb_io::constants::nt_assembler;
 
     // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
     this->use_fast_kernels = ((irun % 2) == 0);
@@ -174,6 +173,14 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 	 << "    nbytes_per_packet=" << nbytes_per_packet << endl
 	 << "    npackets_per_chunk=" << npackets_per_chunk << endl;
 
+#if 0
+    // In a previous version of this test, we imposed the requirement that the
+    // unassembled_ringbuf be large enough to contain the max allowed number of
+    // in-flight packets.  Given the current level of optimization, this should
+    // be overkill, so I removed the requirement but left it commented out.
+
+    const int nt_assembler = ch_frb_io::constants::nt_assembler;
+
     // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
     int wc_npackets = wc_nchunks * npackets_per_chunk;
@@ -192,6 +199,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 	
 	exit(1);
     }
+#endif
 
     cout << endl;
 }

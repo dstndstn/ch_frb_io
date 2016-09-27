@@ -69,8 +69,8 @@ namespace constants {
     static constexpr int max_input_udp_packet_size = 9000;
     static constexpr int max_output_udp_packet_size = 8910;
     static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
-    static constexpr double default_gbps = 1.0;
     static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
+    static constexpr double default_gbps = 1.0;
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size
@@ -85,8 +85,7 @@ namespace constants {
     static constexpr int output_ringbuf_capacity = 16;
 
     // Parameters of ring buffer between network thread and assembler thread
-    // FIXME this seems excessive.
-    static constexpr int unassembled_ringbuf_capacity = 64;
+    static constexpr int unassembled_ringbuf_capacity = 16;
     static constexpr int max_unassembled_packets_per_list = 16384;
     static constexpr int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
     static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
