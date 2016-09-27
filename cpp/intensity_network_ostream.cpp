@@ -1,6 +1,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
@@ -155,19 +157,33 @@ intensity_network_ostream::~intensity_network_ostream()
 void intensity_network_ostream::_open_socket()
 {
     if (sockfd >= 0)
-	throw runtime_error("double call to intensity_network_ostream::_open_socket()");
+	throw runtime_error("ch_frb_io: double call to intensity_network_ostream::_open_socket()");
 
     struct sockaddr_in saddr;
     memset(&saddr, 0, sizeof(saddr));
     saddr.sin_family = AF_INET;
     saddr.sin_port = htons(this->udp_port);
-    
-    // FIXME need getaddrinfo() here
-    int err = inet_pton(AF_INET, this->hostname.c_str(), &saddr.sin_addr);
-    if (err == 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: general parse error");
-    if (err < 0)
-	throw runtime_error("ch_frb_io: couldn't resolve hostname '" + hostname + "' to an IP address: " + strerror(errno) + "general parse error");
+
+    struct addrinfo dns_hint;
+    memset(&dns_hint, 0, sizeof(dns_hint));
+    dns_hint.ai_flags = AI_DEFAULT;
+    dns_hint.ai_family = AF_INET;   // IPv4
+    dns_hint.ai_socktype = SOCK_DGRAM;
+    dns_hint.ai_protocol = IPPROTO_UDP;
+
+    struct addrinfo *dns_result = nullptr;
+
+    int err = getaddrinfo(this->hostname.c_str(), NULL, &dns_hint, &dns_result);
+    if (err)
+	throw runtime_error("DNS lookup failed for '" + hostname + "': " + string(gai_strerror(err)));
+    if (!dns_result)
+	throw runtime_error("ch_frb_io: internal error: getaddrinfo() returned success, but result pointer is non-NULL");
+
+    // just use first DNS entry returned (rather than traversing addrinfo::ai_next pointers)
+    struct sockaddr_in *p = (struct sockaddr_in *) dns_result->ai_addr;
+    saddr.sin_addr = p->sin_addr;
+
+    freeaddrinfo(dns_result);
 
     this->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0)
