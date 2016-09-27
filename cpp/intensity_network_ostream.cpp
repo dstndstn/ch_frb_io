@@ -223,7 +223,7 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, const floa
 	    packet.coarse_freq_ids = &coarse_freq_ids_16bit[if_outer * nfreq_coarse_per_packet];
 	    packet.fpga_count = fpga_count + it_outer * nt_per_packet * fpga_counts_per_sample;
 
-	    int nbytes_encoded = packet.encode(tmp_packet_list->data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
+	    int nbytes_encoded = packet.encode(out->data_end, intensity + data_offset, weights + data_offset, beam_stride, stride, ini_params.wt_cutoff);
 
 	    // A probably-paranoid sanity check
 	    if (_unlikely(nbytes_encoded != nbytes_per_packet))
