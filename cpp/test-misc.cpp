@@ -18,7 +18,7 @@ static void test_encode_decode(std::mt19937 &rng)
 {
     cerr << "test_encode_decode()";
 
-    for (int iouter = 0; iouter < 10; iouter++) {
+    for (int iouter = 0; iouter < 100; iouter++) {
 	cerr << ".";
 
 	// First, we make a random test instance
@@ -140,6 +140,8 @@ static void test_encode_decode(std::mt19937 &rng)
 	    }
 	}
     }
+
+    cerr << "success\n";
 }
 
 

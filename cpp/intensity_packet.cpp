@@ -173,7 +173,7 @@ bool intensity_packet::contains_coarse_freq_id(int id) const
 }
 
 
-// This paranoid test checks that the byte alignment of the intensity_packet header fields
+// This test is kinda silly, but checks that the byte alignment of the intensity_packet header fields
 // is what I think it is.  (Just worried that the compiler might insert some padding bytes.)
 void test_packet_offsets(std::mt19937 &rng)
 {
