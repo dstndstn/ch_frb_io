@@ -23,10 +23,10 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: bad nupfreq value passed to assembled_chunk_ringbuf constructor");
     if ((nt_per_packet <= 0) || (constants::nt_per_assembled_chunk % nt_per_packet != 0))
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::nt_per_packet must be a divisor of constants::nt_per_assembled_chunk");
-    if (fpga_counts_per_sample <= 0)
+    if ((fpga_counts_per_sample <= 0) || (fpga_counts_per_sample > constants::max_allowed_fpga_counts_per_sample))
 	throw runtime_error("ch_frb_io: bad fpga_counts_per_sample value passed to assembled_chunk_ringbuf constructor");
-    if (ini_params.mandate_fast_kernels && ini_params.mandate_reference_kernels)
-	throw runtime_error("ch_frb_io: both flags mandate_fast_kernels, mandate_reference_kernels were set");
+    if (fpga_count0 % fpga_counts_per_sample != 0)
+	throw runtime_error("ch_frb_io: assembled_chunk_ringbuf constructor: fpga_count0 was not a multiple of fpga_counts_per_sample");
 
 #ifndef __AVX2__
     if (ini_params.mandate_fast_kernels)
@@ -53,9 +53,9 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 }
 
 
-// Returns true if packet successfully assembled
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
+    // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
     if (_unlikely(!active_chunk0 || !active_chunk1))
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
 
@@ -70,8 +70,8 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// "downstream" thread.
 	//
 	// A design decision here: for a packet which is far in the future, we advance the 
-	// buffer by one assembled_chunk, rather than using the minimum number of advances
-	// needed.  This is to avoid a situation where a single rogue packet timestamped
+	// buffer by one assembled_chunk, rather than advancing all the way to the packet
+	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
 	this->_put_assembled_chunk(active_chunk0, event_counts);
@@ -108,25 +108,26 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
     }
 
-    if (assembled_ringbuf_size >= constants::assembled_ringbuf_capacity) {
+    if (assembled_ringbuf_size < constants::assembled_ringbuf_capacity) {
+	// Add chunk to ring buffer
+	int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
+	this->assembled_ringbuf[i] = chunk;
+	this->assembled_ringbuf_size++;
+	
+	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
-	event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
-
-	if (ini_params.emit_warning_on_buffer_drop)
-	    cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
-	if (ini_params.throw_exception_on_buffer_drop)
-	    throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
-
+	event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
 	return;
     }
 
-    int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
-    this->assembled_ringbuf[i] = chunk;
-    this->assembled_ringbuf_size++;
-
-    pthread_cond_broadcast(&this->cond_assembled_chunks_added);
+    // If we get here, the ring buffer was full.
     pthread_mutex_unlock(&this->lock);
-    event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
+    event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
+
+    if (ini_params.emit_warning_on_buffer_drop)
+	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
+    if (ini_params.throw_exception_on_buffer_drop)
+	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
 }
 
 
@@ -137,7 +138,7 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
     for (;;) {
 	if (assembled_ringbuf_size > 0) {
 	    int i = assembled_ringbuf_pos % constants::assembled_ringbuf_capacity;
-	    auto chunk = assembled_ringbuf[i];
+	    shared_ptr<assembled_chunk> chunk = assembled_ringbuf[i];
 	    assembled_ringbuf[i] = shared_ptr<assembled_chunk> ();
 
 	    this->assembled_ringbuf_pos++;
@@ -151,10 +152,12 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 	}
 
 	if (this->doneflag) {
+	    // Ring buffer is empty and end_stream() has been called.
 	    pthread_mutex_unlock(&this->lock);
 	    return shared_ptr<assembled_chunk>();
 	}
-
+	
+	// Wait for chunks to be added to the ring buffer.
 	pthread_cond_wait(&this->cond_assembled_chunks_added, &this->lock);
     }
 }
@@ -176,8 +179,10 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 	throw runtime_error("ch_frb_io: internal error: doneflag already set in assembled_chunk_ringbuf::end_stream()");
     }
 
-    this->doneflag = true;
+    // Wake up processing thread, if it is waiting for data
     pthread_cond_broadcast(&this->cond_assembled_chunks_added);
+
+    this->doneflag = true;
     pthread_mutex_unlock(&this->lock);
 }
 

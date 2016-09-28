@@ -128,7 +128,6 @@ struct intensity_packet {
 // -------------------------------------------------------------------------------------------------
 //
 // udp_packet_list: a buffer containing opaque UDP packets.
-//
 // udp_packet_ringbuf: a thread-safe ring buffer for exchanging udp_packet_lists between threads.
 
 
@@ -209,15 +208,21 @@ struct udp_packet_ringbuf : noncopyable {
     // Returns true on success (possibly after blocking), returns false if ring buffer is empty and stream has ended.
     bool get_packet_list(std::unique_ptr<udp_packet_list> &p);
 
-    // Intended to be called by producer thread.
+    // Called by producer thread, when stream has ended.
     void end_stream();
 
-    // Not used anymore but I left it in anyway.
+    // No longer used, but I left it in anyway.
     bool is_alive();
 };
 
 
 // -------------------------------------------------------------------------------------------------
+//
+// assembled_chunk_ringbuf
+//
+// A thread-safe data structure for exchanging assembled_chunks between the assembler and processing threads.  
+// It also manages the "active" assembled_chunks, which are being filled with data as new packets arrive.
+// There is one assembled_chunk_ringbuf for each beam.
 
 
 class assembled_chunk_ringbuf : noncopyable {
@@ -227,11 +232,28 @@ public:
 
     ~assembled_chunk_ringbuf();
 
-    // Called by assembler thread
-    void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
-    void end_stream(int64_t *event_counts);   // called when assembler thread exits
+    // Called by assembler thread, to "assemble" an intensity_packet into the appropriate assembled_chunk.
+    // The length-(intensity_network_stream::event_type::num_types) event_counts array is incremented 
+    // in the appropriate indices.
+    //
+    // The packet must have nbeams==1.  If the actual packet stream has multiple beams, then each packet
+    // is split into multiple packets (in a zero-copy way, see intensity_network_stream.cpp) which are
+    // passed to different assembled_chunk_ringbufs.
+    //
+    // This routine is nonblocking.  If it would need to block, then it drops data somewhere and
+    // increments the appropriate event_count.  (Depending which flags are set in ini_params, it may
+    // also print a warning or throw an exception.)
 
-    // Called by "processing" threads, via intensity_network_stream::get_assembled_chunk().
+    void put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts);
+    
+    // Called when the assembler thread exits.  
+    // Moves any remaining active chunks into the ring buffer and sets 'doneflag'.
+    void end_stream(int64_t *event_counts);
+
+    // Called by processing threads, via intensity_network_stream::get_assembled_chunk().
+    // Returns the next assembled_chunk from the ring buffer, blocking if necessary to wait for data.
+    // If the ring buffer is empty and end_stream() has been called, it returns an empty pointer
+    // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
 
@@ -243,17 +265,28 @@ protected:
     const int nt_per_packet;
     const uint64_t fpga_counts_per_sample;
 
+    // Helper function: adds assembled chunk to the ring buffer
     void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
+    // Helper function: allocates new assembled chunk
     std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
 
-    // This data is not protected by the lock, but is only accessed by the assembler thread.
+    // The "active" chunks are in the process of being filled with data as packets arrive.
+    // Currently we take the active window to be two assembled_chunks long, but this could be generalized.
+    // When an active chunk is finished, it is added to the ring buffer.
+    // Note: the active_chunk pointers are not protected by a lock, but are only accessed by the assembler thread.
     // Note: active_chunk0->ichunk is always equal to (assembled_ringbuf_pos + assembled_ringbuf_size).
     std::shared_ptr<assembled_chunk> active_chunk0;
     std::shared_ptr<assembled_chunk> active_chunk1;
 
-    // All state below is protected by the lock
+    // Not sure if this really affects bottom-line performance, but thought it would be a good idea
+    // to ensure that the "assembler-only" and "shared" fields were on different cache lines.
+    char pad[constants::cache_line_size];
+
+    // All fields below are protected by the lock
     pthread_mutex_t lock;
+
+    // Processing thread waits here if the ring buffer is empty.
     pthread_cond_t cond_assembled_chunks_added;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
@@ -264,6 +297,8 @@ protected:
 
 
 // -------------------------------------------------------------------------------------------------
+//
+// Miscelleanous inlines
 
 
 inline bool is_power_of_two(int n)

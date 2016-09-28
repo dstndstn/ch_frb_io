@@ -60,6 +60,7 @@ void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
 }
 
 
+// Used in unit tests
 void assembled_chunk::randomize(std::mt19937 &rng)
 {
     for (int i = 0; i < ndata; i++) {

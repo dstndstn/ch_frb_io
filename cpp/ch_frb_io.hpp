@@ -38,39 +38,38 @@ class assembled_chunk_ringbuf;
 // -------------------------------------------------------------------------------------------------
 //
 // Compile-time constants
+//
+// Note: many of these could be 
 
 
 namespace constants {
+    static constexpr int cache_line_size = 64;
+
     // Number of "coarse" (i.e. pre-upchannelized) frequency channels.
     static constexpr int nfreq_coarse_tot = 1024;
 
-    // The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
-    // over the network.  Because the packet protocol only allows a boolean mask, rather than a
-    // floating-point weight, the packet encoding logic masks all values whose weight is below
-    // a chosen cutoff.
+    // For an explanation of this parameter, see class intensity_network_ostream below 
     static constexpr double default_wt_cutoff = 0.3;
 
-    //
     // Network parameters.
     //
-    // The recv_socket_timeout is so we can periodically check for RPC's, flush data to assembler
-    // threads, and notice if intensity_network_ostream::end_stream() is called.
+    // The recv_socket_timeout determines how frequently the network thread wakes up, while blocked waiting
+    // for packets.  The purpose of the periodic wakeup is to check whether intensity_network_stream::end_stream()
+    // has been called, and check the timeout for flushing data to assembler threads.
     //
-    // max_output_udp_packet_size: largest packet the output stream will produce
-    // max_input_udp_packet_size: largest packet the input stream will accept (should be larger of the two)
-    // We choose values around ~9KB, as appropriate for 1 Gbps ethernet with jumbo frames and no fragmentation.
+    // The max packet size params have been chosen around ~9KB, as appropriate for 1 Gbps ethernet
+    // with jumbo frames and no fragmentation.
     //
-    // max_gbps_for_testing: This is a very small value (0.1 Gbps) but seems to be necessary if we want to 
-    // avoid dropping packets in the unit test.  This means that the unit tests take about an hour to run,
-    // which isn't really a problem, but is it indicative of deeper performance problems?  It would be nice
-    // to understand where the bottleneck is.  (FIXME?)
-    //
+    // The stream_cancellation_latency_usec arg determines how frequently the network thread checks whether
+    // intensity_network_stream::end_stream() has been called.  (We don't do this check in every iteration of
+    // the packet read loop, since it requires acquiring a lock.)
+
     static constexpr int default_udp_port = 10252;
-    static constexpr int max_input_udp_packet_size = 9000;
-    static constexpr int max_output_udp_packet_size = 8910;
-    static constexpr int recv_socket_timeout_usec = 10000;  // 0.01 sec
+    static constexpr int max_input_udp_packet_size = 9000;   // largest value the input stream will accept
+    static constexpr int max_output_udp_packet_size = 8910;  // largest value the output stream will produce
+    static constexpr int recv_socket_timeout_usec = 10000;   // 0.01 sec
     static constexpr int stream_cancellation_latency_usec = 10000;    // 0.01 sec
-    static constexpr double default_gbps = 1.0;
+    static constexpr double default_gbps = 1.0;              // default transmit rate for output stream
 
 #ifdef __APPLE__
     // osx seems to have very small limits on socket buffer size
@@ -81,19 +80,19 @@ namespace constants {
     static constexpr int send_socket_bufsize = 128 * 1024 * 1024;
 #endif
 
-    // Parameters of ring buffer between output stream object and network output thread
-    static constexpr int output_ringbuf_capacity = 16;
+    // This applies to the ring buffer between the network _output_ thread, and callers of
+    // intensity_network_ostream::send_chunk().
+    static constexpr int output_ringbuf_capacity = 8;
 
-    // Parameters of ring buffer between network thread and assembler thread
+    // Ring buffer between network _input_ thread and assembler thread.
     static constexpr int unassembled_ringbuf_capacity = 16;
     static constexpr int max_unassembled_packets_per_list = 16384;
     static constexpr int max_unassembled_nbytes_per_list = 8 * 1024 * 1024;
     static constexpr int unassembled_ringbuf_timeout_usec = 250000;   // 0.25 sec
 
-    // Parameters of ring buffers between assembler thread and pipeline threads.
+    // Ring buffers between assembler thread and processing threads.
     static constexpr int assembled_ringbuf_capacity = 8;
     static constexpr int nt_per_assembled_chunk = 1024;
-    static constexpr int nt_assembler = 2 * nt_per_assembled_chunk;
 
     // These parameters don't really affect anything but appear in range-checking asserts.
     static constexpr int max_allowed_beam_id = 65535;
@@ -253,9 +252,14 @@ struct intensity_hdf5_ofile {
 // Network ostream
 
 
-//
 // intensity_network_ostream: this class is used to packetize intensity data and send
 // it over the network.
+//
+// The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
+// over the network.  Because the packet protocol only allows a boolean mask, rather than
+// floating-point weights, the packet encoding logic masks all values whose weight is below
+// a chosen cutoff.  See class intensity_network_
+//
 //  
 class intensity_network_ostream : noncopyable {
 public:
@@ -269,7 +273,7 @@ public:
 	int nfreq_coarse_per_packet = 0;
 	int nt_per_packet = 0;
 	int fpga_counts_per_sample = 0;
-	float wt_cutoff = 0.3;                          // FIXME what value makes most sense here?  this should probably be in constants
+	float wt_cutoff = constants::default_wt_cutoff;
 	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
 
 	bool is_blocking = true;
@@ -365,7 +369,11 @@ protected:
 
 // -------------------------------------------------------------------------------------------------
 //
-// The packet input stream case is more complicated!
+// intensity_network_stream: stream object which receives a packet stream from the network.
+//
+// When the stream object is constructed, threads are automatically spawned to read and process
+// packets.  The stream presents the incoming data to the "outside world" as a per-beam sequence 
+// of regular arrays which are obtained by calling get_assembled_chunk().
 
 
 class intensity_network_stream : noncopyable {
@@ -411,6 +419,7 @@ public:
     void end_stream();           // asynchronously stops stream
     void join_threads();         // should only be called once, does not asynchronously stop stream.
 
+    // Note: struct assembled_chunk is defined below
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
 
     // Will block until first packet is received, or stream ends.  Returns true in former case.
@@ -495,8 +504,20 @@ protected:
 };
 
 
+// -------------------------------------------------------------------------------------------------
+//
+// assembled_chunk
+//
+// This is the data structure which is returned by intensity_network_stream::get_assembled_chunk().
+// It repesents a regular subarray of the intensity data in a single beam.  
+//
+// The data in the assembled_chunk is represented as 8-bit integers, with a coarser array of additive
+// and mutiplicative offsets, but can be "decoded" to a simple floating-point array by calling
+// assembled_chunk::decode().
+
+
 struct assembled_chunk : noncopyable {
-    // Stream parameters
+    // Stream parameters, specified at construction.
     const int beam_id = 0;
     const int nupfreq = 0;
     const int nt_per_packet = 0;

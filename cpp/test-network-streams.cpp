@@ -179,7 +179,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     // in-flight packets.  Given the current level of optimization, this should
     // be overkill, so I removed the requirement but left it commented out.
 
-    const int nt_assembler = ch_frb_io::constants::nt_assembler;
+    const int nt_assembler = 2 * ch_frb_io::constants::nt_per_assembled_chunk;
 
     // Worst-case storage requirements for unassembled ringbuf.
     int wc_nchunks = min(nt_assembler/nt_per_chunk + 1, nt_tot/nt_per_chunk);
@@ -409,7 +409,7 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
     // spawns network thread
     tp->ostream = intensity_network_ostream::make(ini_params);
 
-    const int nt_assembler = ch_frb_io::constants::nt_assembler;
+    const int nt_assembler = 2 * ch_frb_io::constants::nt_per_assembled_chunk;
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
 
     const int nbeams = tp->nbeams;
