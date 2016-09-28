@@ -24,7 +24,6 @@ udp_packet_list::udp_packet_list(int max_npackets_, int max_nbytes_) :
     // Note: this->curr_npackets and this->curr_nbytes are initialized to zero automatically.
     this->buf = unique_ptr<uint8_t[]> (new uint8_t[max_nbytes + constants::max_input_udp_packet_size]);
     this->off_buf = unique_ptr<int[]> (new int[max_npackets + 1]);
-    this->is_full = false;
     this->data_start = buf.get();
     this->data_end = data_start;
     this->packet_offsets = off_buf.get();
@@ -34,9 +33,9 @@ udp_packet_list::udp_packet_list(int max_npackets_, int max_nbytes_) :
 
 void udp_packet_list::add_packet(int packet_nbytes)
 {
-    if ((packet_nbytes <= 0) || (packet_nbytes > constants::max_input_udp_packet_size))
+    if (_unlikely((packet_nbytes <= 0) || (packet_nbytes > constants::max_input_udp_packet_size)))
 	throw runtime_error("udp_packet_list::add_packet(): bad value of 'packet_nbytes'");
-    if (is_full)
+    if (_unlikely(is_full))
 	throw runtime_error("udp_packet_list::add_packet() called on full packet_list");
 
     this->curr_npackets++;

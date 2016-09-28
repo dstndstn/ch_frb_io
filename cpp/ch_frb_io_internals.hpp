@@ -37,13 +37,14 @@ namespace ch_frb_io {
 
 
 // -------------------------------------------------------------------------------------------------
+//
+// struct intensity_packet: a lightweight struct representing one UDP packet.
+// See L0_L1_packet.hpp for a more verbose description of the packet format.
 
-
-// See L0_L1_packet.hpp for a more verbose description of the intensity packet format.
 
 struct intensity_packet {
     // "Header fields".   These 24 bytes should have the same ordering and byte count as the 
-    // "on-wire" packet, since we use memcpy(24) to initialize them from the raw packet data.
+    // "on-wire" packet, since we use memcpy(..., 24) to initialize them from the raw packet data.
     uint32_t  protocol_version;
     int16_t   data_nbytes;
     uint16_t  fpga_counts_per_sample;
@@ -81,7 +82,7 @@ struct intensity_packet {
 
     
     // Encodes a floating-point array of intensities into raw packet data, before sending packet.
-    // The semantics of encode() aren't very intuitive, so we document it carefully here!
+    // The semantics of encode() aren't very intuitive, so we document them carefully here!
     //
     //    - Caller should initialize the "header" fields of the struct intensity packet.
     //
@@ -124,35 +125,45 @@ struct intensity_packet {
 };
 
 
-
 // -------------------------------------------------------------------------------------------------
+//
+// udp_packet_list: a buffer containing opaque UDP packets.
+//
+// udp_packet_ringbuf: a thread-safe ring buffer for exchanging udp_packet_lists between threads.
 
 
 struct udp_packet_list {
-    // Initialized at construction.
-    int max_npackets = 0;
-    int max_nbytes = 0;
+    // Capacity of buffer
+    const int max_npackets;
+    const int max_nbytes;  // summed over all packets
+
+    // Current buffer size
+    int curr_npackets = 0;
+    int curr_nbytes = 0;   // summed over all packets
+    bool is_full = false;
+
+    // Packets are concatenated into the 'buf' array, and off_buf[i] stores the offset
+    // of the i-th packet relative to the start of the buffer.  It's convenient to set
+    // the sentinel value
+    //   off_buf[curr_npackets] = curr_nbytes
+    // so that the i-th packet always has size (off_buf[i+1] - off_buf[i])
+
     std::unique_ptr<uint8_t[]> buf;   // points to an array of length (max_nbytes + max_packet_size).
     std::unique_ptr<int[]> off_buf;   // points to an array of length (max_npackets + 1).
 
-    // Current state of buffer.
-    int curr_npackets = 0;
-    int curr_nbytes = 0;   // total size of all packets
-    bool is_full = true;
-
     // Bare pointers.
     uint8_t *data_start = nullptr;    // points to &buf[0]
-    uint8_t *data_end = nullptr;      // points to &buf[nbyes]
+    uint8_t *data_end = nullptr;      // points to &buf[curr_nbytes]
     int *packet_offsets = nullptr;    // points to &off_buf[0].  Note that packet_offsets[npackets] is always equal to 'nbytes'.
 
-    udp_packet_list() { }   // default constructor makes a dummy udp_packet_list with max_npackets=max_nbytes=0.
     udp_packet_list(int max_npackets, int max_nbytes);
 
     // Accessors (not range-checked)
     inline uint8_t *get_packet_data(int i)  { return data_start + packet_offsets[i]; }
     inline int get_packet_nbytes(int i)     { return packet_offsets[i+1] - packet_offsets[i]; }
 
-    // To add a packet, first add data by hand at 'data_end', then call add_packet().
+    // To add a packet, we copy its data to the udp_packet_list::data_end pointer, then call add_packet()
+    // to update the rest of the udp_packet_list fields consistently.
     void add_packet(int packet_nbytes);
 
     // Doesn't deallocate buffers or change the max_* fields, but sets the current packet count to zero.
