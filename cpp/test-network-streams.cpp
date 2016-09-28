@@ -74,8 +74,13 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
 {
     const int nfreq_coarse_tot = ch_frb_io::constants::nfreq_coarse_tot;
 
+#ifdef __AVX2__
     // In alternating iterations of the test, we choose parameters so that the "fast" kernels are used.
     this->use_fast_kernels = ((irun % 2) == 0);
+#else
+    this->use_fast_kernels = false;
+#endif
+
     this->nbeams = randint(rng, 1, maxbeams+1);
     this->nupfreq = use_fast_kernels ? (2*randint(rng,1,9)) : randint(rng,1,17);
     this->nt_per_packet = use_fast_kernels ? 16 : (1 << randint(rng,0,5));
@@ -227,6 +232,12 @@ struct consumer_thread_context {
     {
 	pthread_mutex_init(&lock, NULL);
 	pthread_cond_init(&cond_running, NULL);
+    }
+
+    ~consumer_thread_context()
+    {
+	pthread_mutex_destroy(&lock);
+	pthread_cond_destroy(&cond_running);
     }
 };
 
