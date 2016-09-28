@@ -266,7 +266,8 @@ public:
     //   - Beams are identified in the packet profile by an opaque uint16_t.  The 'beam_ids' argument
     //     should be the list of beam_ids which we expect to receive.
     //
-    //   - The throw_exception_on_* flags are useful for a unit test, but probably don't make sense otherwise.
+    //   - The throw_exception_on_buffer_drop, throw_exception_on_assembler_miss flags are useful 
+    //     for a unit test, but probably don't make sense otherwise.
     //
     //   - Our network protocol doesn't define any way of indicating end-of-stream.  This makes sense for the
     //     realtime search, but for testing we'd like to have a way of shutting down gracefully.  If the
@@ -279,6 +280,8 @@ public:
 	bool mandate_reference_kernels = false;
 	bool mandate_fast_kernels = false;
 	bool emit_warning_on_buffer_drop = true;
+	bool throw_exception_on_beam_id_mismatch = true;
+	bool throw_exception_on_first_packet_mismatch = true;
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;

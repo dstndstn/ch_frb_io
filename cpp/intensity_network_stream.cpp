@@ -576,6 +576,8 @@ void intensity_network_stream::_assembler_thread_body()
 
 	    if (_unlikely(mismatch)) {
 		event_subcounts[event_type::first_packet_mismatch]++;
+		if (ini_params.throw_exception_on_first_packet_mismatch)
+		    throw runtime_error("ch_frb_io: first-packet mismatch occurred and stream was constructed with 'throw_exception_on_first_packet_mismatch' flag");
 		continue;
 	    }
 
@@ -619,6 +621,8 @@ void intensity_network_stream::_assembler_thread_body()
 		    if (assembler_ix >= nassemblers) {
 			// No match found
 			event_subcounts[event_type::beam_id_mismatch]++;
+			if (ini_params.throw_exception_on_beam_id_mismatch)
+			    throw runtime_error("ch_frb_io: beam_id mismatch occurred and stream was constructed with 'throw_exception_on_beam_id_mismatch' flag");
 			break;
 		    }
 
