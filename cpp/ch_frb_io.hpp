@@ -260,8 +260,19 @@ struct intensity_hdf5_ofile {
 
 class intensity_network_stream : noncopyable {
 public:
-    // Note: If 'drops_allowed' is false, the process will crash if any ring buffer overfills.
-    // This sometimes makes sense during testing but probably not otherwise.
+    
+    // This structure is used to construct the stream object.  A few notes:
+    //
+    //   - Beams are identified in the packet profile by an opaque uint16_t.  The 'beam_ids' argument
+    //     should be the list of beam_ids which we expect to receive.
+    //
+    //   - The throw_exception_on_* flags are useful for a unit test, but probably don't make sense otherwise.
+    //
+    //   - Our network protocol doesn't define any way of indicating end-of-stream.  This makes sense for the
+    //     realtime search, but for testing we'd like to have a way of shutting down gracefully.  If the
+    //     accept_end_of_stream_packets flag is set, then a special packet with nbeams=nupfreq=nt=0 is
+    //     interpreted as an "end of stream" flag, and triggers shutdown of the network_stream.
+
     struct initializer {
 	std::vector<int> beam_ids;
 	int udp_port = constants::default_udp_port;
@@ -273,41 +284,51 @@ public:
 	bool accept_end_of_stream_packets = true;
     };
 
+    // Event counts are kept in an array of the form int64_t[event_type::num_types].
+    // Currently we don't do anything with the event counts besides print them at the end,
+    // but they're intended to be a hook for real-time monitoring via RPC's.
+
     enum event_type {
 	byte_received = 0,
 	packet_received = 1,
 	packet_good = 2,
 	packet_bad = 3,
-	packet_dropped = 4,
+	packet_dropped = 4,            // network thread will drop packets if assembler thread runs slow and ring buffer overfills
 	packet_end_of_stream = 5,
-	beam_id_mismatch = 6,
-	first_packet_mismatch = 7,
+	beam_id_mismatch = 6,          // beam id in packet doesn't match any element of initializer::beam_ids
+	first_packet_mismatch = 7,     // stream params (nupfreq, nt_per_packet, fpga_counts_per_sample) don't match first packet received
 	assembler_hit = 8,
 	assembler_miss = 9,
-	assembled_chunk_dropped = 10,
+	assembled_chunk_dropped = 10,  // assembler thread will drop assembled_chunks if processing thread runs slow
 	assembled_chunk_queued = 11,
-	num_types = 12
+	num_types = 12                 // must be last
     };
     
     // It's convenient to initialize intensity_network_streams using a static factory function make(),
-    // rather than having a public constructor.  Note that make() spawns a network and assembler thread,
+    // rather than having a public constructor.  Note that make() spawns network and assembler threads,
     // but won't listen for packets until start_stream() is called.  Between calling make() and start_stream(),
-    // you'll want to spawn "consumer" threads which query the assemblers for intensity and weights arrays.
+    // you'll want to spawn "consumer" threads which call get_assembled_chunk().
 
     static std::shared_ptr<intensity_network_stream> make(const initializer &ini_params);
 
     // High level control.
     void start_stream();         // tells network thread to start listening for packets
-    void end_stream();           // asynchronously stops stream
-    void join_threads();         // should only be called once, does not asynchronously stop stream.
+    void end_stream();           // requests stream exit (but stream will stop after a few timeouts, not immediately)
+    void join_threads();         // should only be called once, does not request stream exit, blocks until network and assembler threads exit
 
-    // Note: struct assembled_chunk is defined below
+    // This is the main routine called by the processing threads, to read data from one beam
+    // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
+    // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
+
     std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
 
-    // Will block until first packet is received, or stream ends.  Returns true in former case.
+    // Will block until first packet is received, or stream ends.  Returns true if packet was received.
     bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
     
-    // Can be called at any time, from any thread.
+    // Can be called at any time, from any thread.  Note that the event counts returned by get_event_counts()
+    // may slightly lag the real-time event counts (this behavior derives from wanting to avoid acquiring a
+    // lock in every iteration of the packet read loop).
+
     initializer get_initializer();
     std::vector<int64_t> get_event_counts();
 
@@ -339,6 +360,13 @@ protected:
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
     // Used only by the network thread (not protected by lock)
+    //
+    // Note on event counting implementation: on short timescales, the network and assembler 
+    // threads accumulate event counts into "local" arrays 'network_thread_event_subcounts', 
+    // 'assembler_thread_event_subcounts'.  On longer timescales, these local subcounts are 
+    // accumulated into the global 'cumulative_event_counts'.  This two-level accumulation
+    // scheme is designed to avoid excessive contention for the event_count_lock.
+
     int sockfd = -1;
     std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
@@ -349,15 +377,19 @@ protected:
     pthread_t network_thread;
     pthread_t assembler_thread;
 
-    // State model.  [ FIXME be sure to comment on meaning of stream_ended ]
+    // State model.  These flags are protected by the state_lock and are set in sequence.
+    // Note that the 'stream_ended_requested' flag means that the stream shutdown is imminent,
+    // but doesn't mean that it has actually shut down yet, it may still be reading packets.
+    // So far it hasn't been necessary to include a 'stream_ended' flag in the state model.
+
     pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;
+    pthread_cond_t cond_state_changed;     // threads wait here for state to change
     bool assembler_thread_started = false;
     bool network_thread_started = false;
     bool stream_started = false;
     bool first_packet_received = false;
     bool assemblers_initialized = false;
-    bool stream_ended = false;
+    bool stream_end_requested = false;
     bool join_called = false;
 
     pthread_mutex_t event_lock;

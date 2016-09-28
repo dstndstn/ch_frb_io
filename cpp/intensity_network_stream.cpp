@@ -162,7 +162,7 @@ void intensity_network_stream::start_stream()
 }
 
 
-// Just sets the stream_ended flag and returns.
+// Just sets the stream_end_requested flag and returns.
 // The network thread will see that this flag has been set, flush packets to the assembler thread, call unassembled_ringbuf->end_stream(), and exit.
 // The assembler thread will see that the ringbuf has ended, flush buffers to the processing threads, and exit.
 void intensity_network_stream::end_stream()
@@ -171,7 +171,7 @@ void intensity_network_stream::end_stream()
     this->stream_started = true;
     this->first_packet_received = true;
     this->assemblers_initialized = true;
-    this->stream_ended = true;    
+    this->stream_end_requested = true;    
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
 }
@@ -249,7 +249,7 @@ bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per
     while (!this->first_packet_received)
 	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     
-    if (this->stream_ended) {
+    if (this->stream_end_requested) {
 	pthread_mutex_unlock(&this->state_lock);
 	nupfreq = 0;
 	nt_per_packet = 0;
@@ -311,7 +311,7 @@ void intensity_network_stream::_network_thread_start()
 
     // ...and wait for it to advance to "stream_started"
     for (;;) {
-	if (this->stream_ended) {
+	if (this->stream_end_requested) {
 	    pthread_mutex_unlock(&this->state_lock);
 	    return;
 	}
@@ -357,7 +357,7 @@ void intensity_network_stream::_network_thread_body()
 	if (curr_timestamp > cancellation_check_timestamp + constants::stream_cancellation_latency_usec) {
 	    pthread_mutex_lock(&this->state_lock);
 
-	    if (this->stream_ended) {
+	    if (this->stream_end_requested) {
 		pthread_mutex_unlock(&this->state_lock);    
 		return;
 	    }
@@ -432,7 +432,7 @@ void intensity_network_stream::_network_thread_body()
 // because the stream ended or an exception was thrown.
 void intensity_network_stream::_network_thread_exit()
 {
-    // This just sets the stream_ended flag, if it hasn't been set yet.
+    // This just sets the stream_end_requested flag, if it hasn't been set yet.
     this->end_stream();
 
     if (sockfd >= 0) {
