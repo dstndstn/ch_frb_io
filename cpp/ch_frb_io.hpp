@@ -261,7 +261,7 @@ struct intensity_hdf5_ofile {
 class intensity_network_stream : noncopyable {
 public:
     
-    // This structure is used to construct the stream object.  A few notes:
+    // The 'struct initializer' is used to construct the stream object.  A few notes:
     //
     //   - Beams are identified in the packet profile by an opaque uint16_t.  The 'beam_ids' argument
     //     should be the list of beam_ids which we expect to receive.
@@ -383,14 +383,14 @@ protected:
     // So far it hasn't been necessary to include a 'stream_ended' flag in the state model.
 
     pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;     // threads wait here for state to change
-    bool assembler_thread_started = false;
-    bool network_thread_started = false;
-    bool stream_started = false;
-    bool first_packet_received = false;
-    bool assemblers_initialized = false;
-    bool stream_end_requested = false;
-    bool join_called = false;
+    pthread_cond_t cond_state_changed;       // threads wait here for state to change
+    bool assembler_thread_started = false;   // set by assembler thread on startup
+    bool network_thread_started = false;     // set by network thread on startup
+    bool stream_started = false;             // set asynchonously by calling start_stream()
+    bool first_packet_received = false;      // set by network thread
+    bool assemblers_initialized = false;     // set by assembler thread
+    bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
+    bool join_called = false;                // set by calling join_threads()
 
     pthread_mutex_t event_lock;
     std::vector<int64_t> cumulative_event_counts;
@@ -493,18 +493,34 @@ struct fast_assembled_chunk : public assembled_chunk
 // intensity_network_ostream: this class is used to packetize intensity data and send
 // it over the network.
 //
-// The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
-// over the network.  Because the packet protocol only allows a boolean mask, rather than
-// floating-point weights, the packet encoding logic masks all values whose weight is below
-// a chosen cutoff.
+// The stream object presents the "oustide world" with an object which is fed regular
+// chunks of data via a member function send_chunk().  Under the hood, send_chunk() is
+// encoding each chunk as multiple UDP packets, which are handed off to a network
+// thread running in the background.
 
 
 class intensity_network_ostream : noncopyable {
 public:
+
+    // The 'struct initializer' is used to construct the ostream object.  A few notes:
+    //
+    //   - It's convenient for the input to intensity_network_ostream to be a pair of
+    //     floating-point arrays (intensity, weights).  Since the packet protocol allows
+    //     a boolean mask but not floating-point weights, we simply mask all samples
+    //     whose weight is below some cutoff.  This is the 'wt_cutoff' parameter.
+    //
+    //   - Each UDP packet is a 4D logical array of shape 
+    //        (nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet). 
+    //     Each chunk passed to send_chunk() is a 4D logical array of shape
+    //        (nbeams, coarse_freq_ids.size(), nupfreq, nt_per_chunk)
+    //     and will generally correspond to multiple packets.
+    //
+    //   - The target_gbps arg enables throttling of the output to some target bandwidth in Gbps.
+
     struct initializer {
 	std::string dstname;
 	std::vector<int> beam_ids;
-	std::vector<int> coarse_freq_ids;
+	std::vector<int> coarse_freq_ids;   // will usually be [ 0, 1, ..., 1023 ], but reordering is allowed
 
 	int nupfreq = 0;
 	int nt_per_chunk = 0;
@@ -521,7 +537,7 @@ public:
 
     const initializer ini_params;
     
-    // Some of these fields are redundant with ini_params
+    // Some of these fields are redundant with fields in the ini_params, but the redundancy is convenient.
     const int nbeams;
     const int nfreq_coarse_per_packet;
     const int nfreq_coarse_per_chunk;
@@ -537,28 +553,26 @@ public:
     const uint64_t fpga_counts_per_chunk;
     const double target_gbps;
 
-    //
-    // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
-    // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
-    // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
-    // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
-    //
-    // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
-    // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
-    //
+    
+    // It's convenient to initialize intensity_network_ostreams using a static factory function make(),
+    // rather than having a public constructor.  Note that make() spawns a network thread which runs
+    // in the background.
+
     static std::shared_ptr<intensity_network_ostream> make(const initializer &ini_params);
 
+    // Data is added to the network stream by calling send_chunk().  This routine packetizes
+    // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
     //
-    // Called from 'external' context (i.e. same context that called make())
-    // 
     // The 'intensity' and 'weights' arrays have logical shape
-    //   (nbeam, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
+    //   (nbeams, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
     //
-    // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
-    //
+    // The 'stride' arg is the memory offset between time series in the arrays.
+    // To write this out explicitly, the intensity sample with logical indices (b,fcoarse,u,t) has memory location
+    //   intensity + ((b + fcoarse*nupfreq) * nupfreq + u) * stride + t
+
     void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
     
-    // Can be called from either external context or network thread
+    // Called when there is no more data; sends end-of-stream packets.
     void end_stream(bool join_network_thread);
 
     ~intensity_network_ostream();
@@ -580,6 +594,7 @@ protected:
     int64_t npackets_sent = 0;
     int64_t nbytes_sent = 0;
 
+    // State model.
     pthread_t network_thread;
     pthread_mutex_t state_lock;
     pthread_cond_t cond_state_changed;
@@ -589,15 +604,15 @@ protected:
     // Ring buffer used to exchange packets with network thread
     std::unique_ptr<udp_packet_ringbuf> ringbuf;
     
-    // Temp buffers for packet encoding
+    // Temp buffer for packet encoding
     std::unique_ptr<udp_packet_list> tmp_packet_list;
 
-    // Real constructor is protected
+    // The actual constructor is protected, so it can be a helper function 
+    // for intensity_network_ostream::make(), but can't be called otherwise.
     intensity_network_ostream(const initializer &ini_params);
 
     static void *network_pthread_main(void *opaque_args);
 
-    void _network_thread_start();
     void _network_thread_body();
 
     void _open_socket();
@@ -606,6 +621,8 @@ protected:
 
 
 // -------------------------------------------------------------------------------------------------
+//
+// Miscellaneous
 
 
 // Utility routine: converts a string to type T (only a few T's are defined; see lexical_cast.cpp)

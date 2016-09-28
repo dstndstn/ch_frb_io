@@ -6,7 +6,7 @@
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
-// A linux-osx portability nuisance issue
+// linux-osx portability nuisance issue
 #ifndef AI_V4MAPPED_CFG
 #define AI_V4MAPPED_CFG AI_V4MAPPED
 #endif
@@ -26,14 +26,18 @@ namespace ch_frb_io {
 // class intensity_network_ostream
 
 
-
-// static member function (de facto constructor)
+// static member function
 shared_ptr<intensity_network_ostream> intensity_network_ostream::make(const initializer &ini_params_)
 {
     intensity_network_ostream *retp = new intensity_network_ostream(ini_params_);
     shared_ptr<intensity_network_ostream> ret(retp);
 
     ret->_open_socket();
+
+    // Spawn network thread.  Note that we pass a bare pointer to an object ('ret') on our stack
+    // and this pointer will be invalid after make() returns.  Therefore, the network thread only
+    // dereferences the pointer before setting the network_thread_started flag, and make() waits for this
+    // flag to be set before it returns.
 
     int err = pthread_create(&ret->network_thread, NULL, intensity_network_ostream::network_pthread_main, (void *) &ret);
     if (err < 0)
@@ -305,13 +309,12 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_pthread_main()");
 
+    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
     shared_ptr<intensity_network_ostream> *arg = (shared_ptr<intensity_network_ostream> *) opaque_arg;
     shared_ptr<intensity_network_ostream> stream = *arg;
 
     if (!stream)
 	throw runtime_error("ch_frb_io: internal error: empty shared_ptr passed to network_pthread_main()");
-
-    stream->_network_thread_start();
 
     try {
 	stream->_network_thread_body();
@@ -325,17 +328,13 @@ void *intensity_network_ostream::network_pthread_main(void *opaque_arg)
 }
 
 
-void intensity_network_ostream::_network_thread_start()
+void intensity_network_ostream::_network_thread_body()
 {
     pthread_mutex_lock(&state_lock);
     network_thread_started = true;
     pthread_cond_broadcast(&cond_state_changed);
     pthread_mutex_unlock(&state_lock);
-}
 
-
-void intensity_network_ostream::_network_thread_body()
-{
     auto packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
     int last_packet_nbytes = 0;
 

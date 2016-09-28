@@ -290,8 +290,8 @@ void *intensity_network_stream::network_pthread_main(void *opaque_arg)
 {
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to network_pthread_main()");
-
-    // Note that the arg/opaque_arg pointer is only dereferenced here.  (See comment above in make().)
+    
+    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
     shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
     shared_ptr<intensity_network_stream> stream = *arg;
 
@@ -498,7 +498,7 @@ void *intensity_network_stream::assembler_pthread_main(void *opaque_arg)
     if (!opaque_arg)
 	throw runtime_error("ch_frb_io: internal error: NULL opaque pointer passed to assembler_pthread_main()");
 
-    // Note that the arg/opaque_arg pointer is only dereferenced here.  (See comment above in make().)
+    // Note that the arg/opaque_arg pointer is only dereferenced here, for reasons explained in a comment in make() above.
     shared_ptr<intensity_network_stream> *arg = (shared_ptr<intensity_network_stream> *) opaque_arg;
     shared_ptr<intensity_network_stream> stream = *arg;
 
@@ -642,6 +642,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    }
 	}
 
+	// We accumulate event counts once per udp_packet_list.
 	this->_add_event_counts(assembler_thread_event_subcounts);
     }
 }
