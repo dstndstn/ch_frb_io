@@ -6,6 +6,19 @@
 //
 // I didn't bother writing assembly language kernels for packet _encoding_, since
 // this code is used only for testing and performance isn't as critical.
+//
+// The assembly language kernels make assumptions on the packet parameters:
+// nt_per_packet must be equal to 16, and nupfreq must be even.  According to
+// a recent email from Andre, these assumptions may not hold up, in which case
+// we may need to write more kernels!
+//
+// The fast kernels are called using the following mechanism.  The member functions
+// assembled_chunk::add_packet(), assembled_chunk::decode() are virtual.  When an
+// assembled_chunk is allocated, we test whether the packet parameters (nt_per_packet,
+// nupfreq) satisfy the constraints which permit fast kernels.  If so, then we allocate
+// a special subclass fast_assembled_chunk which overrides the virtuals and calls the
+// fast kernels.  Thus, this source file is responsible for defining the functions
+// fast_assembled_chunk::add_packet() and fast_assembled_chunk::decode().
 
 #include <cassert>
 #include <iomanip>
@@ -52,6 +65,7 @@ void test_avx2_kernels(std::mt19937 &rng)
 // Utils
 
 
+// Given 128-bit SIMD register which holds 4 single-precision floats, extract the N-th float
 template<unsigned int N>
 inline float _extract128(__m128 x)
 {
@@ -61,6 +75,7 @@ inline float _extract128(__m128 x)
     return u.x;
 }
 
+// Given 256-bit SIMD register which holds 8 single-precision floats, extract the N-th float
 template<unsigned int N>
 inline float _extract256(__m256 x)
 {
@@ -68,13 +83,18 @@ inline float _extract256(__m256 x)
     return _extract128<N%4> (x2);
 }
 
+// These functions return string representations of SIMD registers, for debugging:
+//   _vstr8_partial:  256-bit SIMD register which holds 32 8-bit integers
+//   _vstr32_partial: 256-bit SIMD register which holds 8 32-bit integers
+//   _vstrps_partial: 256-bit SIMD register which holds 8 single-precision floats
+
 template<unsigned int N> inline void _vstr8_partial(stringstream &ss, __m256i x, bool hexflag);
 template<unsigned int N> inline void _vstr32_partial(stringstream &ss, __m256i x, bool hexflag);
-template<unsigned int N> inline void _vstr_partial(stringstream &ss, __m256 x);
+template<unsigned int N> inline void _vstrps_partial(stringstream &ss, __m256 x);
 
 template<> inline void _vstr8_partial<0>(stringstream &ss, __m256i x, bool hex) { return; }
 template<> inline void _vstr32_partial<0>(stringstream &ss, __m256i x, bool hex) { return; }
-template<> inline void _vstr_partial<0>(stringstream &ss, __m256 x) { return; }
+template<> inline void _vstrps_partial<0>(stringstream &ss, __m256 x) { return; }
 
 template<unsigned int N> 
 inline void _vstr8_partial(stringstream &ss, __m256i x, bool hexflag) 
@@ -97,9 +117,9 @@ inline void _vstr32_partial(stringstream &ss, __m256i x, bool hexflag)
 }
 
 template<unsigned int N>
-inline void _vstr_partial(stringstream &ss, __m256 x)
+inline void _vstrps_partial(stringstream &ss, __m256 x)
 {
-    _vstr_partial<N-1>(ss, x);
+    _vstrps_partial<N-1>(ss, x);
     ss << " " << _extract256<N-1>(x);
 }
 
@@ -126,7 +146,7 @@ inline string _vstr(__m256 x)
 {
     stringstream ss;
     ss << "[";
-    _vstr_partial<8> (ss, x);
+    _vstrps_partial<8> (ss, x);
     ss << " ]";
     return ss.str();
 }
@@ -134,7 +154,12 @@ inline string _vstr(__m256 x)
 
 // -------------------------------------------------------------------------------------------------
 //
-// add_packet_kernel
+// add_packet_kernel()
+//
+// Just copies src -> dst, where both 'src' and 'dst' are logical 2D arrays of shape (nupfreq, 16).
+// The src array has frequency stride 16, as appropriate for a "close-packed" array.
+// The dst array has frequency stride nt_per_assembled_chunk, as appopriate for an assembled_chunk subarray.
+// The kernel assumes nt_per_packet=16, and nupfreq is even.
 
 
 inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
@@ -156,6 +181,13 @@ inline void _add_packet_kernel(uint8_t *dst, const uint8_t *src, int nupfreq)
 //
 // Decode kernels
 
+
+// Input: a 256-bit SIMD register which holds 32 8-bit unsigned integers [ x0, ..., x31 ].
+// Output: four 256-bit SIMD registers which each hold 8 32-bit unsigned integers
+//   out0 = [ x0, ..., x7 ]
+//   out1 = [ x8, ..., x15 ]
+//   out2 = [ x16, ..., x23 ]
+//   out3 = [ x24, ..., x31 ]
 
 inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i &out3, __m256i x)
 {
@@ -181,6 +213,10 @@ inline void _decode_unpack(__m256i &out0, __m256i &out1, __m256i &out2, __m256i 
 }
 
 
+// Input: a 256-bit register which holds 8 32-bit unsigned integers
+// Output: 8 single-precision floating point values.
+// Each output value is 1.0 if the corresponding input satisfies 1 <= x <= 254, or 0.0 otherwise.
+
 inline void _decode_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m256 f0, __m256 f1)
 {
     __m256i gt0 = _mm256_cmpgt_epi32(x, i0);
@@ -191,6 +227,14 @@ inline void _decode_weights(float *wtp, __m256i x, __m256i i0, __m256i i254, __m
     _mm256_storeu_ps(wtp, wt);
 }
 
+// Decodes 32 bytes of 8-bit intensity data, obtaining 32 floating-point intensities and
+// 32 floating-point weights.  The kernel assumes nt_per_packet = 16.  Thus there are two
+// relevant scales 'scale0', 'scale1' and two offsets 'offset0', 'offset1'.
+//
+// 'data' is a 256-bit SIMD register holding the input data.
+//
+// scale0, scale1, offset0, offset1 are scalar values, redundantly packed eight times into
+// a 256-bit SIMD register.
 
 inline void _decode_kernel32(float *intp, float *wtp, __m256i data, __m256 scale0, __m256 scale1, __m256 offset0, __m256 offset1)
 {
@@ -213,8 +257,9 @@ inline void _decode_kernel32(float *intp, float *wtp, __m256i data, __m256 scale
     _decode_weights(wtp+24, in3, i0, i254, f0, f1);
 }
 
+// Decodes 128 bytes of 8-bit intensity data.
 
-inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *data, const float *scalep, const float *offsetp)
 {
     __m256 scale = _mm256_loadu_ps(scalep);
     __m256 offset = _mm256_loadu_ps(offsetp);
@@ -224,14 +269,14 @@ inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *src, const
     offset0 = _mm256_permute2f128_ps(offset, offset, 0x00);
 
     _decode_kernel32(intp, wtp, 
-		     _mm256_loadu_si256((const __m256i *) (src)),
+		     _mm256_loadu_si256((const __m256i *) (data)),
 		     _mm256_shuffle_ps(scale0, scale0, 0x00), 
 		     _mm256_shuffle_ps(scale0, scale0, 0x55),
 		     _mm256_shuffle_ps(offset0, offset0, 0x00), 
 		     _mm256_shuffle_ps(offset0, offset0, 0x55));
 
     _decode_kernel32(intp + 32, wtp + 32, 
-		     _mm256_loadu_si256((const __m256i *) (src + 32)),
+		     _mm256_loadu_si256((const __m256i *) (data + 32)),
 		     _mm256_shuffle_ps(scale0, scale0, 0xaa), 
 		     _mm256_shuffle_ps(scale0, scale0, 0xff),
 		     _mm256_shuffle_ps(offset0, offset0, 0xaa), 
@@ -242,14 +287,14 @@ inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *src, const
     offset0 = _mm256_permute2f128_ps(offset, offset, 0x11);
 
     _decode_kernel32(intp + 64, wtp + 64,
-		     _mm256_loadu_si256((const __m256i *) (src + 64)),
+		     _mm256_loadu_si256((const __m256i *) (data + 64)),
 		     _mm256_shuffle_ps(scale0, scale0, 0x00), 
 		     _mm256_shuffle_ps(scale0, scale0, 0x55),
 		     _mm256_shuffle_ps(offset0, offset0, 0x00), 
 		     _mm256_shuffle_ps(offset0, offset0, 0x55));
 
     _decode_kernel32(intp + 96, wtp + 96, 
-		     _mm256_loadu_si256((const __m256i *) (src + 96)),
+		     _mm256_loadu_si256((const __m256i *) (data + 96)),
 		     _mm256_shuffle_ps(scale0, scale0, 0xaa), 
 		     _mm256_shuffle_ps(scale0, scale0, 0xff),
 		     _mm256_shuffle_ps(offset0, offset0, 0xaa), 
@@ -257,14 +302,16 @@ inline void _decode_kernel128(float *intp, float *wtp, const uint8_t *src, const
 }
 
 
-inline void _decode_kernel(float *intp, float *wtp, const uint8_t *src, const float *scalep, const float *offsetp)
+// Decodes one "row" (i.e. nt_per_assembled_chunk time values) of 8-bit intensity data.
+
+inline void _decode_kernel(float *intp, float *wtp, const uint8_t *data, const float *scalep, const float *offsetp)
 {
     static_assert(constants::nt_per_assembled_chunk % 128 == 0, "_decode_kernel() assumes nt_per_assembled_chunk divisible by 128");
 
     constexpr int n = constants::nt_per_assembled_chunk / 128;
 
     for (int i = 0; i < n; i++)
-	_decode_kernel128(intp + i*128, wtp + i*128, src + i*128, scalep + i*8, offsetp + i*8);
+	_decode_kernel128(intp + i*128, wtp + i*128, data + i*128, scalep + i*8, offsetp + i*8);
 }
 
 
@@ -329,7 +376,7 @@ void fast_assembled_chunk::decode(float *intensity, float *weights, int stride) 
 
 // -------------------------------------------------------------------------------------------------
 //
-// Testing
+// Unit testing
 
 
 // helper function used by test_avx2_kernels()

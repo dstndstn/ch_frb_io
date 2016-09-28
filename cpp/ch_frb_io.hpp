@@ -529,7 +529,8 @@ struct assembled_chunk : noncopyable {
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
 
-    // Static factory function which returns either an instance of the assembled_chunk base class, or one of its subclasses.
+    // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
+    // subclass (see below), based on the packet parameters.
     static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
 
     // Utility functions currently used only for testing.
@@ -538,11 +539,16 @@ struct assembled_chunk : noncopyable {
 };
 
 
-// Special case nt_per_packet=16 optimized with avx2 kernels, used in full CHIME
+// For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
+// nupfreq % 2 == 0) we can speed up assembled_chunk::add_packet() and assembled_chunk::decode()
+// using assembly language kernels.
+
 struct fast_assembled_chunk : public assembled_chunk
 {
+    // Constructor throws exception unless nt_per_packet == 16 and (nupfreq % 2) == 0.
     fast_assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
 
+    // Overrides assembled_chunk::add_packet() and assembled_chunk::decode() with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
 };
