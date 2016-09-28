@@ -406,13 +406,11 @@ protected:
     static void *assembler_pthread_main(void *);
 
     // Private methods called by the network thread.    
-    void _network_thread_start();
     void _network_thread_body();
     void _network_thread_exit();
     void _put_unassembled_packets();
 
     // Private methods called by the assembler thread.     
-    void _assembler_thread_start();
     void _assembler_thread_body();
     void _assembler_thread_exit();
 };

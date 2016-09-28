@@ -161,9 +161,6 @@ INSTALLATION (PYTHON)
   - Minor: implement an optimization to intensity_network_ostream which doesn't send
     a packet which is entirely masked (i.e. data array is all zeros)
 
-  - It would probably be a good idea to implement more argument checking in 
-    intensity_packet::encode().
-
   - It would be natural to include event counting / logging in the packet output stream,
     along the lines of what has already been implemented for the input stream.  For example,
     we could count

@@ -96,7 +96,6 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     this->nt_per_chunk = nt_per_packet * randint(rng, 1, 512/nt_per_packet + 1);
 
     // Assign nt_tot.  We require <= 1024 chunks, and <= 1 GB total (summed over all beams).
-    // FIXME think about increasing the 1 GB limit.  (Watch out for 32-bit overflow!)
     int packet_nbytes = intensity_packet::packet_size(nbeams, nfreq_coarse_per_packet, nupfreq, nt_per_packet);
     int chunk_nbytes = packet_nbytes * (nfreq_coarse_tot / nfreq_coarse_per_packet) * (nt_per_chunk / nt_per_packet);
     int max_nchunks = min(1024, (1<<30) / chunk_nbytes);

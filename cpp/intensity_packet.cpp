@@ -78,7 +78,6 @@ bool intensity_packet::decode(const uint8_t *src, int src_nbytes)
 
 // Encodes a floating-point array of intensities into raw packet data, before sending packet.
 // The precise semantics aren't very intuitive, see extended comment in ch_frb_io_internals.hpp for details!
-// FIXME: it would probably be a good idea to do more argument checking in intensity_packet::encode().
 
 int intensity_packet::encode(uint8_t *dst, const float *intensity, const float *weights, int beam_stride, int freq_stride, float wt_cutoff)
 {

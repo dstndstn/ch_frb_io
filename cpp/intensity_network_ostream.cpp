@@ -386,9 +386,9 @@ void intensity_network_ostream::_network_thread_body()
 
 void intensity_network_ostream::_announce_end_of_stream()
 {
-    // FIXME temporary hack.  For testing, it is convenient to have a way of ending the stream. 
-    // We make the rule that a packet with nbeams = nfreq_coarse = nupfreq = ntsamp = 0 means "end of stream".
-    // Later this will be replaced by something better!  
+    // Send end-of-stream packets.  (This isn't part of the packet protocol, but the network _input_
+    // stream contains an option to shut down gracefully if a special packet with nbeams=nupfreq=nt=0
+    // is received.)
     //
     // Since UDP doesn't guarantee delivery, we have no way to ensure that the end-of-stream packet 
     // reaches the other side, but we'll make a best effort by sending 10 packets separated by 0.1 sec.
