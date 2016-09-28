@@ -1,3 +1,10 @@
+// This is a long-running unit test which creates (input_stream, output_stream) pairs
+// on the same machine, which communicate over the loopback interface 127.0.0.1.
+//
+// We check that the data captured and decoded by the input_stream is consistent
+// with the data that was given to the output_stream to encode.  This is an end-to-end
+// test of essentially all the network code, but it takes a long time to run!
+
 #include <cassert>
 #include <algorithm>
 #include "ch_frb_io_internals.hpp"
@@ -57,13 +64,13 @@ struct unit_test_instance {
     int npackets_per_chunk = 0;
 
     // not protected by lock
-    pthread_t consumer_threads[maxbeams];    
+    pthread_t processing_threads[maxbeams];    
     shared_ptr<ch_frb_io::intensity_network_stream> istream;
     shared_ptr<ch_frb_io::intensity_network_ostream> ostream;
 
     pthread_mutex_t tpos_lock;
     pthread_cond_t cond_tpos_changed;
-    uint64_t consumer_tpos[maxbeams];
+    uint64_t processing_tpos[maxbeams];
 
     unit_test_instance(std::mt19937 &rng, int irun, int nrun, double target_gbps);
     ~unit_test_instance();
@@ -157,7 +164,7 @@ unit_test_instance::unit_test_instance(std::mt19937 &rng, int irun, int nrun, do
     pthread_cond_init(&this->cond_tpos_changed, NULL);
     
     for (int ithread = 0; ithread < nbeams; ithread++)
-	this->consumer_tpos[ithread] = initial_t0;
+	this->processing_tpos[ithread] = initial_t0;
 
     cout << "\nStarting test run " << irun << "/" << nrun << endl;
 
@@ -219,7 +226,7 @@ unit_test_instance::~unit_test_instance()
 // -------------------------------------------------------------------------------------------------
 
 
-struct consumer_thread_context {
+struct processing_thread_context {
     shared_ptr<unit_test_instance> tp;
     int ithread = 0;
 
@@ -227,14 +234,14 @@ struct consumer_thread_context {
     pthread_cond_t cond_running;
     bool is_running = false;
 
-    consumer_thread_context(const shared_ptr<unit_test_instance> &tp_, int ithread_)
+    processing_thread_context(const shared_ptr<unit_test_instance> &tp_, int ithread_)
 	: tp(tp_), ithread(ithread_)
     {
 	pthread_mutex_init(&lock, NULL);
 	pthread_cond_init(&cond_running, NULL);
     }
 
-    ~consumer_thread_context()
+    ~processing_thread_context()
     {
 	pthread_mutex_destroy(&lock);
 	pthread_cond_destroy(&cond_running);
@@ -242,19 +249,19 @@ struct consumer_thread_context {
 };
 
 
-static void *consumer_thread_main(void *opaque_arg)
+static void *processing_thread_main(void *opaque_arg)
 {
-    consumer_thread_context *context = reinterpret_cast<consumer_thread_context *> (opaque_arg);
+    processing_thread_context *context = reinterpret_cast<processing_thread_context *> (opaque_arg);
 
     //
-    // Note: the consumer thread startup logic works like this:
+    // Note: the processing thread startup logic works like this:
     //
-    //   - parent thread puts a context struct on its stack, in spawn_consumer_thread()
-    //   - parent thread calls pthread_create() to spawn consumer thread
-    //   - parent thread blocks waiting for consumer thread to set context->is_running
-    //   - when parent thread unblocks, spawn_consumer_thread() removes and the context struct becomes invalid
+    //   - parent thread puts a context struct on its stack, in spawn_processing_thread()
+    //   - parent thread calls pthread_create() to spawn processing thread
+    //   - parent thread blocks waiting for processing thread to set context->is_running
+    //   - when parent thread unblocks, spawn_processing_thread() removes and the context struct becomes invalid
     //
-    // Therefore, the consumer thread is only allowed to access the context struct _before_
+    // Therefore, the processing thread is only allowed to access the context struct _before_
     // setting context->is_running to unblock the parent thread.  The first thing we do is
     // extract all members of the context struct so we don't need to access it again.
     //
@@ -302,7 +309,7 @@ static void *consumer_thread_main(void *opaque_arg)
 	tpos_initialized = true;
 
 	pthread_mutex_lock(&tp->tpos_lock);
-	tp->consumer_tpos[ithread] = tpos;
+	tp->processing_tpos[ithread] = tpos;
 	pthread_cond_broadcast(&tp->cond_tpos_changed);
 	pthread_mutex_unlock(&tp->tpos_lock);
 
@@ -368,13 +375,13 @@ static void *consumer_thread_main(void *opaque_arg)
 }
 
 
-static void spawn_consumer_thread(const shared_ptr<unit_test_instance> &tp, int ithread)
+static void spawn_processing_thread(const shared_ptr<unit_test_instance> &tp, int ithread)
 {
-    consumer_thread_context context(tp, ithread);
+    processing_thread_context context(tp, ithread);
 
-    int err = pthread_create(&tp->consumer_threads[ithread], NULL, consumer_thread_main, &context);
+    int err = pthread_create(&tp->processing_threads[ithread], NULL, processing_thread_main, &context);
     if (err)
-	throw runtime_error(string("pthread_create() failed to create consumer thread: ") + strerror(errno));
+	throw runtime_error(string("pthread_create() failed to create processing thread: ") + strerror(errno));
 
     pthread_mutex_lock(&context.lock);
     while (!context.is_running)
@@ -395,7 +402,7 @@ static void spawn_all_receive_threads(const shared_ptr<unit_test_instance> &tp)
     tp->istream = intensity_network_stream::make(initializer);
     
     for (int ithread = 0; ithread < tp->nbeams; ithread++)
-	spawn_consumer_thread(tp, ithread);
+	spawn_processing_thread(tp, ithread);
 }
 
 
@@ -457,11 +464,11 @@ static void send_data(const shared_ptr<unit_test_instance> &tp)
 	    }
 	}
 
-	// Wait for consumer threads if necessary.
+	// Wait for processing threads if necessary.
 	// Note that for some choices of unit_test_instance parameters, this can test the timeout logic.
 	pthread_mutex_lock(&tp->tpos_lock);
 	for (int i = 0; i < nbeams; i++) {
-	    while (tp->consumer_tpos[i] + nt_assembler < uint64_t(chunk_t0))
+	    while (tp->processing_tpos[i] + nt_assembler < uint64_t(chunk_t0))
 		pthread_cond_wait(&tp->cond_tpos_changed, &tp->tpos_lock);
 	}
 	pthread_mutex_unlock(&tp->tpos_lock);
@@ -548,7 +555,7 @@ int main(int argc, char **argv)
 	tp->istream->join_threads();
 
 	for (int ibeam = 0; ibeam < tp->nbeams; ibeam++) {
-	    int err = pthread_join(tp->consumer_threads[ibeam], NULL);
+	    int err = pthread_join(tp->processing_threads[ibeam], NULL);
 	    if (err)
 		throw runtime_error("pthread_join() failed");	    
 	}
