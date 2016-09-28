@@ -532,7 +532,7 @@ void intensity_network_stream::_assembler_thread_body()
 	    pthread_mutex_unlock(&this->state_lock);
 	    return;
 	}
-	if (this->stream_started) {
+	if (this->first_packet_received) {
 	    pthread_mutex_unlock(&this->state_lock);
 	    break;
 	}
@@ -654,10 +654,13 @@ void intensity_network_stream::_assembler_thread_exit()
     unassembled_ringbuf->end_stream();
 
     // Use assemblers.size() instead of 'nassemblers', to correctly handle the case where end_stream()
-    // gets called early, and the assemblers never get allocated.
+    // gets called early, and the assemblers never get allocated.  (We also test for empty pointers, to
+    // handle a corner case where an exception is thrown in the middle of the ring buffer allocation.)
 
-    for (unsigned int i = 0; i < assemblers.size(); i++)
-	assemblers[i]->end_stream(&assembler_thread_event_subcounts[0]);
+    for (unsigned int i = 0; i < assemblers.size(); i++) {
+	if (assemblers[i])
+	    assemblers[i]->end_stream(&assembler_thread_event_subcounts[0]);
+    }
 
     // Make sure all event counts are accumulated.
     this->_add_event_counts(assembler_thread_event_subcounts);
