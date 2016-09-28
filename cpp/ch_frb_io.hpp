@@ -38,8 +38,7 @@ class assembled_chunk_ringbuf;
 // -------------------------------------------------------------------------------------------------
 //
 // Compile-time constants
-//
-// Note: many of these could be 
+// Note: many of these don't really need to be fixed at compile time, and could be runtime parameters instead.
 
 
 namespace constants {
@@ -247,131 +246,14 @@ struct intensity_hdf5_ofile {
 };
 
 
-// -------------------------------------------------------------------------------------------------
-//
-// Network ostream
-
-
-// intensity_network_ostream: this class is used to packetize intensity data and send
-// it over the network.
-//
-// The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
-// over the network.  Because the packet protocol only allows a boolean mask, rather than
-// floating-point weights, the packet encoding logic masks all values whose weight is below
-// a chosen cutoff.  See class intensity_network_
-//
-//  
-class intensity_network_ostream : noncopyable {
-public:
-    struct initializer {
-	std::string dstname;
-	std::vector<int> beam_ids;
-	std::vector<int> coarse_freq_ids;
-
-	int nupfreq = 0;
-	int nt_per_chunk = 0;
-	int nfreq_coarse_per_packet = 0;
-	int nt_per_packet = 0;
-	int fpga_counts_per_sample = 0;
-	float wt_cutoff = constants::default_wt_cutoff;
-	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
-
-	bool is_blocking = true;
-	bool emit_warning_on_buffer_drop = true;
-	bool throw_exception_on_buffer_drop = false;
-    };
-
-    const initializer ini_params;
-    
-    // Some of these fields are redundant with ini_params
-    const int nbeams;
-    const int nfreq_coarse_per_packet;
-    const int nfreq_coarse_per_chunk;
-    const int nupfreq;
-    const int nt_per_packet;
-    const int nt_per_chunk;
-    const int nbytes_per_packet;
-    const int npackets_per_chunk;
-    const int nbytes_per_chunk;
-    const int elts_per_chunk;
-    const uint64_t fpga_counts_per_sample;
-    const uint64_t fpga_counts_per_packet;
-    const uint64_t fpga_counts_per_chunk;
-    const double target_gbps;
-
-    //
-    // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
-    // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
-    // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
-    // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
-    //
-    // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
-    // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
-    //
-    static std::shared_ptr<intensity_network_ostream> make(const initializer &ini_params);
-
-    //
-    // Called from 'external' context (i.e. same context that called make())
-    // 
-    // The 'intensity' and 'weights' arrays have logical shape
-    //   (nbeam, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
-    //
-    // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
-    //
-    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
-    
-    // Can be called from either external context or network thread
-    void end_stream(bool join_network_thread);
-
-    ~intensity_network_ostream();
-
-    // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
-    void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
-    
-protected:
-    std::vector<uint16_t> beam_ids_16bit;
-    std::vector<uint16_t> coarse_freq_ids_16bit;
-
-    int sockfd = -1;
-    std::string hostname;
-    uint16_t udp_port = constants::default_udp_port;
-    
-    // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
-    // If we want to make this data accessible by other threads, this needs to be changed.
-    int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
-    int64_t npackets_sent = 0;
-    int64_t nbytes_sent = 0;
-
-    pthread_t network_thread;
-    pthread_mutex_t state_lock;
-    pthread_cond_t cond_state_changed;
-    bool network_thread_started = false;
-    bool network_thread_joined = false;
-
-    // Ring buffer used to exchange packets with network thread
-    std::unique_ptr<udp_packet_ringbuf> ringbuf;
-    
-    // Temp buffers for packet encoding
-    std::unique_ptr<udp_packet_list> tmp_packet_list;
-
-    // Real constructor is protected
-    intensity_network_ostream(const initializer &ini_params);
-
-    static void *network_pthread_main(void *opaque_args);
-
-    void _network_thread_start();
-    void _network_thread_body();
-
-    void _open_socket();
-    void _announce_end_of_stream();
-};
-
 
 // -------------------------------------------------------------------------------------------------
 //
 // intensity_network_stream: stream object which receives a packet stream from the network.
 //
-// When the stream object is constructed, threads are automatically spawned to read and process
+// (Writing a packet stream is handled by a separate class intensity_network_ostream, see below.)
+//
+// When the intensity_network_stream object is constructed, threads are automatically spawned to read and process
 // packets.  The stream presents the incoming data to the "outside world" as a per-beam sequence 
 // of regular arrays which are obtained by calling get_assembled_chunk().
 
@@ -572,6 +454,124 @@ struct fast_assembled_chunk : public assembled_chunk
     // Overrides assembled_chunk::add_packet() and assembled_chunk::decode() with fast assembly language versions.
     virtual void add_packet(const intensity_packet &p) override;
     virtual void decode(float *intensity, float *weights, int stride) const override;
+};
+
+
+
+// -------------------------------------------------------------------------------------------------
+//
+// intensity_network_ostream: this class is used to packetize intensity data and send
+// it over the network.
+//
+// The 'wt_cutoff' argument applies when a weighted intensity stream is sent (not received)
+// over the network.  Because the packet protocol only allows a boolean mask, rather than
+// floating-point weights, the packet encoding logic masks all values whose weight is below
+// a chosen cutoff.
+
+
+class intensity_network_ostream : noncopyable {
+public:
+    struct initializer {
+	std::string dstname;
+	std::vector<int> beam_ids;
+	std::vector<int> coarse_freq_ids;
+
+	int nupfreq = 0;
+	int nt_per_chunk = 0;
+	int nfreq_coarse_per_packet = 0;
+	int nt_per_packet = 0;
+	int fpga_counts_per_sample = 0;
+	float wt_cutoff = constants::default_wt_cutoff;
+	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
+
+	bool is_blocking = true;
+	bool emit_warning_on_buffer_drop = true;
+	bool throw_exception_on_buffer_drop = false;
+    };
+
+    const initializer ini_params;
+    
+    // Some of these fields are redundant with ini_params
+    const int nbeams;
+    const int nfreq_coarse_per_packet;
+    const int nfreq_coarse_per_chunk;
+    const int nupfreq;
+    const int nt_per_packet;
+    const int nt_per_chunk;
+    const int nbytes_per_packet;
+    const int npackets_per_chunk;
+    const int nbytes_per_chunk;
+    const int elts_per_chunk;
+    const uint64_t fpga_counts_per_sample;
+    const uint64_t fpga_counts_per_packet;
+    const uint64_t fpga_counts_per_chunk;
+    const double target_gbps;
+
+    //
+    // This factory function is the "de facto constructor", used to create a new intensity_network_ostream.
+    // When the intensity_network_ostream is created, a network thread is automatically spawned, which runs
+    // in the background.  Data is added to the network stream by calling send_chunk().  This routine packetizes
+    // the data and puts the packets in a thread-safe ring buffer, for the network thread to send.
+    //
+    // If the 'target_gbps' argument is nonzero, then output will be "throttled" to the target bandwidth, specified
+    // in Gbps.  If target_gbps=0, then packets will be sent as quickly as possible.
+    //
+    static std::shared_ptr<intensity_network_ostream> make(const initializer &ini_params);
+
+    //
+    // Called from 'external' context (i.e. same context that called make())
+    // 
+    // The 'intensity' and 'weights' arrays have logical shape
+    //   (nbeam, nfreq_coarse_per_chunk, nupfreq, nt_per_chunk).
+    //
+    // The 'stride' arg is the memory offset between time series whose (beam, freq_coarse, upfreq) are consecutive.
+    //
+    void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
+    
+    // Can be called from either external context or network thread
+    void end_stream(bool join_network_thread);
+
+    ~intensity_network_ostream();
+
+    // This is a helper function called by send_chunk(), but we make it public so that the unit tests can call it.
+    void _encode_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count, const std::unique_ptr<udp_packet_list> &out);
+    
+protected:
+    std::vector<uint16_t> beam_ids_16bit;
+    std::vector<uint16_t> coarse_freq_ids_16bit;
+
+    int sockfd = -1;
+    std::string hostname;
+    uint16_t udp_port = constants::default_udp_port;
+    
+    // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
+    // If we want to make this data accessible by other threads, this needs to be changed.
+    int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
+    int64_t npackets_sent = 0;
+    int64_t nbytes_sent = 0;
+
+    pthread_t network_thread;
+    pthread_mutex_t state_lock;
+    pthread_cond_t cond_state_changed;
+    bool network_thread_started = false;
+    bool network_thread_joined = false;
+
+    // Ring buffer used to exchange packets with network thread
+    std::unique_ptr<udp_packet_ringbuf> ringbuf;
+    
+    // Temp buffers for packet encoding
+    std::unique_ptr<udp_packet_list> tmp_packet_list;
+
+    // Real constructor is protected
+    intensity_network_ostream(const initializer &ini_params);
+
+    static void *network_pthread_main(void *opaque_args);
+
+    void _network_thread_start();
+    void _network_thread_body();
+
+    void _open_socket();
+    void _announce_end_of_stream();
 };
 
 
