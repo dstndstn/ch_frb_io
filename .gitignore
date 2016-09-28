@@ -1,3 +1,10 @@
+Makefile.local
+ch-show-intensity-file
+test-intensity-hdf5-file
+test-misc
+test-network-streams
+*.o
+
 # emacs save files
 *~
 
