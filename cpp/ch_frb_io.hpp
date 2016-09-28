@@ -362,6 +362,10 @@ protected:
     // Used to exchange data between the network and assembler threads
     std::unique_ptr<udp_packet_ringbuf> unassembled_ringbuf;
 
+    // I'm not sure how much it actually helps bottom-line performace, but it seemed like a good idea
+    // to insert padding so that data accessed by different threads is in different cache lines.
+    char _pad1[constants::cache_line_size];
+
     // Used only by the network thread (not protected by lock)
     //
     // Note on event counting implementation: on short timescales, the network and assembler 
@@ -373,12 +377,14 @@ protected:
     int sockfd = -1;
     std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
+    char _pad2[constants::cache_line_size];
 
     // Used only by the assembler thread
     std::vector<int64_t> assembler_thread_event_subcounts;
 
     pthread_t network_thread;
     pthread_t assembler_thread;
+    char _pad3[constants::cache_line_size];
 
     // State model.  These flags are protected by the state_lock and are set in sequence.
     // Note that the 'stream_ended_requested' flag means that the stream shutdown is imminent,
@@ -394,6 +400,7 @@ protected:
     bool assemblers_initialized = false;     // set by assembler thread
     bool stream_end_requested = false;       // can be set asynchronously by calling end_stream(), or by network/assembler threads on exit
     bool join_called = false;                // set by calling join_threads()
+    char _pad4[constants::cache_line_size];
 
     pthread_mutex_t event_lock;
     std::vector<int64_t> cumulative_event_counts;
