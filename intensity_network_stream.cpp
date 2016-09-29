@@ -676,7 +676,7 @@ void intensity_network_stream::_assembler_thread_exit()
 
     stringstream ss;
     ss << "ch_frb_io: assembler thread exiting\n"
-       << "    bytes recevied (GB): " << (1.0e-9 * counts[event_type::byte_received]) << "\n"
+       << "    bytes received (GB): " << (1.0e-9 * counts[event_type::byte_received]) << "\n"
        << "    packets received: " << counts[event_type::packet_received] << "\n"
        << "    good packets: " << counts[event_type::packet_good] << "\n"
        << "    bad packets: " << counts[event_type::packet_bad] << "\n"
