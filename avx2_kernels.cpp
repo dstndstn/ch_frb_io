@@ -36,7 +36,8 @@ namespace ch_frb_io {
 
 // If compiling on a machine without the AVX2 instruction set, we include some placeholder routines
 
-fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
+fast_assembled_chunk::fast_assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_) :
+    assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_)
 {
     throw runtime_error("ch_frb_io: internal error: fast_assembled_chunk constructor called on a non-AVX2 machine");
 }

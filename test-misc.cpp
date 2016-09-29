@@ -24,7 +24,12 @@ static void test_encode_decode(std::mt19937 &rng)
 
 	// First, we make a random test instance
 
+#ifdef __AVX2__
 	bool use_fast_kernels = (iouter % 2) == 1;    // alternating rather than random
+#else
+	bool use_fast_kernels = false;
+#endif
+
 	int nbeams = randint(rng,1,9);
 	int nfreq_coarse_per_packet = (1 << randint(rng,0,3));
 	int nupfreq = use_fast_kernels ? (2 * randint(rng,1,9)) : randint(rng,1,17);
