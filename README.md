@@ -3,7 +3,7 @@ ch_frb_io: C++/python library for CHIME-FRB file and network streams.
 Currently there is no shared code between the C++ and python parts, so this is really two
 independent libraries in the same git repository.  In fact the C++ and python parts use
 different build systems, so you have to build and install them independently.  This is
-something that should probably be fixed later!
+something that should be fixed later!
 
 CHIME FRB files have a similar format to CHIME cosmology data and can be read
 using the tools in 'caput', in particular the caput.tod module
@@ -16,6 +16,16 @@ are available in the `rf_pipelines` repository.  The networking code is fairly m
 and well optimized/tested, but there are some missing features and loose ends noted
 later in this README.
 
+There isn't much documentation for the networking code right now, but the code is
+pretty well commented, so reading the source code shouldn't be too painful.  The following
+may also help:
+  - There are some pdf slides in docs/
+  - In the ch_frb_l1 github repo, there is a toy program which sends a network stream (ch-simulate-l0)
+    and a toy program which receives a network stream (ch-frb-l1)
+  - In the rf_pipelines repo, a python interface to the networking code is defined (but not
+    as complete as the C++ interface).  In examples/example5_network, there is a pair of toy
+    python pipelines which send and receive data over the network, making waterfall plots on
+    both sides so that the input and output can be visually compared.
 This code is mostly used as a library in other places (e.g. https://github.com/kmsmith137/ch_vdif_assembler
 or https://github.com/kmsmith137/rf_pipelines), but there are a few standalone command-line utilities here:
 ```
@@ -29,6 +39,15 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
   1. libhdf5 (https://www.hdfgroup.org/HDF5/release/obtain5.html)
      Note that this is a link to HDF5 v1.8.  I imagine v1.10 also works but haven't tested it yet.
+     Assuming you want to use bitshuffle (see below), you'll need to install a very recent hdf5,
+     so you'll need to compile one by hand instead of using 'yum'.  The following worked for me 
+     (assuming non-root privs):
+     ```
+     cd hdf5-1.8.17    # after downloading the .tar.gz from the url above
+     ./configure --prefix=$HOME
+     make
+     make install
+     ```
 
   2. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
@@ -54,8 +73,6 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
 ### INSTALLATION (C++)
 
-  - `cd cpp/`
-
   - Create a file ./Makefile.local containing compiler flags, library locations, etc.
     The details are described in the Makefile.  There are some examples in the site/
     directory.  (You may be able to just symlink one of these examples to ./Makefile.local)
@@ -69,8 +86,7 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
     ./test-network-streams        # warning: takes ~1 hour to run, CPU-intensive
     ```
 
-INSTALLATION (PYTHON)
----------------------
+### INSTALLATION (PYTHON)
 
   - To build and install, do: `python setup.py install --user`
     (If you have root privs and want to install "system-wide", omit the --user flag)
@@ -130,11 +146,11 @@ INSTALLATION (PYTHON)
     the page-faulting cost of Linux malloc.
 
   - There are Linux-specific system calls sendmmsg(), recvmmsg() which send/receive
-    multiple UDP packets, avoiding the overhead of one system call per packet.  Does
-    this help speed things up, or help reduce packet drops?
+    multiple UDP packets, avoiding the overhead of one system call per packet.  This
+    may help speed things up, or help reduce packet drops.
 
   - In the full CHIME backend, do we want to pin the network and/or assembler threads
-    to specific cores?  Do we want to increase the scheduleing priority of these threads?
+    to specific cores?  Do we want to increase the scheduling priority of these threads?
 
   - It might be possible to further optimize the assembly-language kernels for packet assembly
     and decoding, using streaming writes.  See Chapter 7 ("optimizing cache usage") of the

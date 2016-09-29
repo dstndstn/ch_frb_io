@@ -4,6 +4,8 @@
 // We check that the data captured and decoded by the input_stream is consistent
 // with the data that was given to the output_stream to encode.  This is an end-to-end
 // test of essentially all the network code, but it takes a long time to run!
+//
+// Note: this code isn't very well commented!
 
 #include <cassert>
 #include <algorithm>
@@ -21,14 +23,14 @@ inline bool array_contains(const int *arr, int len, int x)
     return false;
 }
 
-
+// An arbitrary but deterministic way of generating intensity values,
+// so that the input and output streams can be compared.
 inline float intval(int beam_id, int ifreq, int it)
 {
     return sin(0.823*beam_id + 1.319*ifreq + 1.023*it);
 }
 
-
-// weights are between 0.2 and 1
+// An arbitrary but deterministic way of generating weights.
 inline float wtval(int beam_id, int ifreq, int it)
 {
     return 0.6 + 0.4 * sin(1.328*beam_id + 2.382*ifreq + 0.883*it);
@@ -253,7 +255,6 @@ static void *processing_thread_main(void *opaque_arg)
 {
     processing_thread_context *context = reinterpret_cast<processing_thread_context *> (opaque_arg);
 
-    //
     // Note: the processing thread startup logic works like this:
     //
     //   - parent thread puts a context struct on its stack, in spawn_processing_thread()
@@ -264,7 +265,7 @@ static void *processing_thread_main(void *opaque_arg)
     // Therefore, the processing thread is only allowed to access the context struct _before_
     // setting context->is_running to unblock the parent thread.  The first thing we do is
     // extract all members of the context struct so we don't need to access it again.
-    //
+
     shared_ptr<unit_test_instance> tp = context->tp;
     int ithread = context->ithread;
     

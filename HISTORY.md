@@ -1,5 +1,7 @@
-- v3: implement network streams in "CHIMEL1" packet format
-  - **Backwards incompatible**: compile flags must now include -pthread
+- v3: network streams
+  - Backwards incompatible: compile flags must now include -pthread
+  - Backwards incompatible: re-symlink Makefile.local
+  - Describe network streamsx
 
 - v2: implement intensity hdf5 file writing (backwards-compatible update)
   - writing intensity hdf5 files from C++
