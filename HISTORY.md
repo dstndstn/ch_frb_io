@@ -14,7 +14,7 @@
         each beam.
 
       - intensity_network_ostream, which receives a sequence of regular arrays,
-        encodes and packetizes the data, and sends it over the network. X
+        encodes and packetizes the data, and sends it over the network.
 
 - v2: implement intensity hdf5 file writing (backwards-compatible update)
   - writing intensity hdf5 files from C++
