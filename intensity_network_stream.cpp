@@ -251,6 +251,73 @@ vector<int64_t> intensity_network_stream::get_event_counts()
     return ret;
 }
 
+std::vector<std::unordered_map<std::string, uint64_t> >
+intensity_network_stream::get_statistics() {
+    std::vector<std::unordered_map<std::string, uint64_t> > R;
+
+    bool first_packet;
+    bool assemblers_init;
+
+    std::unordered_map<std::string, uint64_t> m;
+
+    pthread_mutex_lock(&this->state_lock);
+    first_packet = this->first_packet_received;
+    assemblers_init = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+
+    m["first_packet_received"] = first_packet;
+
+    m["nupfreq"]                = (first_packet ? this->fp_nupfreq : 0);
+    m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
+    m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample
+                                   : 0);
+    m["fpga_count"]            = (first_packet ? this->fp_fpga_count : 0);
+
+    std::vector<int64_t> counts = get_event_counts();
+    m["count_bytes_received"     ] = counts[event_type::byte_received];
+    m["count_packets_received"   ] = counts[event_type::packet_received];
+    m["count_packets_good"       ] = counts[event_type::packet_good];
+    m["count_packets_bad"        ] = counts[event_type::packet_bad];
+    m["count_packets_dropped"    ] = counts[event_type::packet_dropped];
+    m["count_packets_endofstream"] = counts[event_type::packet_end_of_stream];
+    m["count_beam_id_mismatch"   ] = counts[event_type::beam_id_mismatch];
+    m["count_stream_mismatch"    ] = counts[event_type::first_packet_mismatch];
+    m["count_assembler_hits"     ] = counts[event_type::assembler_hit];
+    m["count_assembler_misses"   ] = counts[event_type::assembler_miss];
+    m["count_assembler_drops"    ] = counts[event_type::assembled_chunk_dropped];
+    m["count_assembler_queued"   ] = counts[event_type::assembled_chunk_queued];
+    //int nbeams = this->assemblers.size();
+    int nbeams = this->ini_params.beam_ids.size();
+    m["nbeams"] = nbeams;
+    R.push_back(m);
+
+    for (int b=0; b<nbeams; b++) {
+        cout << "get_statistics()... beam " << b << " of " << nbeams << endl;
+        cout << "assemblers_init: " << assemblers_init << endl;
+        m.clear();
+        m["beam_id"] = this->ini_params.beam_ids[b];
+        if (assemblers_init) {
+            //m["ringbuf_size"] = this->assemblers[i]->get_assembled_ringbuf_size();
+            //cout << "Getting ring buffer snapshot..." << endl;
+            std::vector<std::shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
+            m["ringbuf_size"] = snap.size();
+
+            cout << "Ring buffer length: " << snap.size() << endl;
+            uint64_t minchunk, maxchunk;
+            minchunk = maxchunk = (snap.size() ? snap[0]->ichunk : 0);
+            for (int i=1; i<snap.size(); i++) {
+                minchunk = min(minchunk, snap[i]->ichunk);
+                maxchunk = max(maxchunk, snap[i]->ichunk);
+            }
+            m["ringbuf_chunk_min"] = minchunk;
+            m["ringbuf_chunk_max"] = maxchunk;
+            cout << "Ring buffer chunk range: " << minchunk << " to " << maxchunk << endl;
+        }
+        R.push_back(m);
+    }
+
+    return R;
+}
 
 bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count)
 {

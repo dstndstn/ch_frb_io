@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <memory>
 #include <random>
 #include <hdf5.h>
@@ -334,6 +335,8 @@ public:
 
     initializer get_initializer();
     std::vector<int64_t> get_event_counts();
+
+    std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
     ~intensity_network_stream();
 

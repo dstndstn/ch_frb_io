@@ -256,6 +256,9 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
+    int get_assembled_ringbuf_size();
+
+    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot();
 
 protected:
     const intensity_network_stream::initializer ini_params;

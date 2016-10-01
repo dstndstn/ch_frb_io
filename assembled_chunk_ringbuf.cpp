@@ -52,6 +52,30 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     pthread_mutex_destroy(&this->lock);
 }
 
+int assembled_chunk_ringbuf::get_assembled_ringbuf_size()
+{
+    int rtn = 0;
+    pthread_mutex_lock(&this->lock);
+    rtn = this->assembled_ringbuf_size;
+    pthread_mutex_unlock(&this->lock);
+    return rtn;
+}
+
+std::vector<std::shared_ptr<assembled_chunk> >
+assembled_chunk_ringbuf::get_ringbuf_snapshot()
+{
+    std::vector<std::shared_ptr<assembled_chunk> > ring;
+    pthread_mutex_lock(&this->lock);
+    for (int i=0; i<constants::assembled_ringbuf_capacity; i++) {
+        cout << "Chunk " << assembled_ringbuf[i] << endl;
+        if (assembled_ringbuf[i]) {
+            // Here we make a copy of the shared_ptr, thus preserving the chunk
+            ring.push_back(assembled_ringbuf[i]);
+        }
+    }
+    pthread_mutex_unlock(&this->lock);
+    return ring;
+}
 
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
@@ -139,7 +163,7 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 	if (assembled_ringbuf_size > 0) {
 	    int i = assembled_ringbuf_pos % constants::assembled_ringbuf_capacity;
 	    shared_ptr<assembled_chunk> chunk = assembled_ringbuf[i];
-	    assembled_ringbuf[i] = shared_ptr<assembled_chunk> ();
+	    //assembled_ringbuf[i] = shared_ptr<assembled_chunk> ();
 
 	    this->assembled_ringbuf_pos++;
 	    this->assembled_ringbuf_size--;
