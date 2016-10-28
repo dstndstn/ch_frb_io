@@ -484,6 +484,9 @@ struct assembled_chunk : noncopyable {
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);
+
+    // HDF5 file output
+    void write_hdf5_file(const std::string &filename);
 };
 
 

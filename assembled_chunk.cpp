@@ -1,5 +1,6 @@
 #include <iostream>
 #include <immintrin.h>
+#include <sstream>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -157,6 +158,51 @@ shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, in
 
     return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
 }
+
+
+void assembled_chunk::write_hdf5_file(const string &filename)
+{
+    bool write = true;
+    bool clobber = true;
+    cout << "Creating HDF5 file " << filename << endl;
+    hdf5_file f(filename, write, clobber);
+
+    hdf5_group g_root(f, ".");
+
+    bool create = true;
+    //hdf5_group g_chunks(f, "/assembled_chunks", create);
+
+    stringstream ss;
+    //ss << "/assembled-chunks/assembled-chunk-beam" << beam_id
+    ss << "/assembled-chunk-beam" << beam_id
+       << "-ichunk" << ichunk;
+    string chunkname = ss.str();
+    cout << "Chunk name: " << chunkname << endl;
+
+    hdf5_group g_chunk(f, chunkname, create);
+
+    g_chunk.write_attribute("beam_id", this->beam_id);
+
+    vector<hsize_t> scaleshape = { (hsize_t)this->nscales };
+    g_chunk.write_dataset("scales", this->scales, scaleshape);
+    g_chunk.write_dataset("offsets", this->offsets, scaleshape);
+
+    int bitshuffle = 0;
+    vector<hsize_t> datashape = {
+        (hsize_t)constants::nfreq_coarse_tot,
+        (hsize_t)nupfreq,
+        (hsize_t)constants::nt_per_assembled_chunk };
+
+    unique_ptr<hdf5_extendable_dataset<uint8_t> > data_dataset =
+        make_unique<hdf5_extendable_dataset<uint8_t> >
+        (g_chunk, "data", datashape, 2, bitshuffle);
+    data_dataset->write(this->data, datashape);
+
+    // close
+    data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
+
+}
+
 
 
 }  // namespace ch_frb_io
