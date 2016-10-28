@@ -319,6 +319,34 @@ intensity_network_stream::get_statistics() {
     return R;
 }
 
+std::vector< std::vector< std::shared_ptr<assembled_chunk> > >
+intensity_network_stream::get_ringbuf_snapshots(std::vector<uint64_t> beams)
+{
+    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > R;
+
+    pthread_mutex_lock(&this->state_lock);
+    bool assemblers_init = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+
+    if (!assemblers_init)
+        return R;
+
+    int nbeams = this->ini_params.beam_ids.size();
+
+    for (int ib=0; ib<beams.size(); ib++) {
+        uint64_t beam = beams[ib];
+        std::vector<std::shared_ptr<assembled_chunk> > chunks;
+        // Which of my assemblers (if any) is handling the requested beam?
+        for (int i=0; i<nbeams; i++) {
+            if (this->ini_params.beam_ids[i] != beam)
+                continue;
+            chunks = this->assemblers[i]->get_ringbuf_snapshot();
+        }
+        R.push_back(chunks);
+    }
+    return R;
+}
+
 bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count)
 {
     pthread_mutex_lock(&this->state_lock);

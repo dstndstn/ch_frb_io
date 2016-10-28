@@ -338,6 +338,8 @@ public:
 
     std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
+    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> beams);
+
     ~intensity_network_stream();
 
 protected:
