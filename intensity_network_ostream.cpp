@@ -351,35 +351,52 @@ void intensity_network_ostream::_network_thread_body()
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
 	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 
+        pthread_mutex_lock(&statistics_lock);
 	    if (npackets_sent == 0)
 		tv_ini = xgettimeofday();
 
 	    int64_t last_timestamp = this->curr_timestamp;
-	    curr_timestamp = usec_between(tv_ini, xgettimeofday());
-	    
+        int64_t tstamp = this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
+        int64_t npackets = this->npackets_sent;
+        pthread_mutex_unlock(&statistics_lock);
+
 	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
-	    if ((target_gbps > 0.0) && (npackets_sent > 0)) {
+	    if ((target_gbps > 0.0) && (npackets > 0)) {
 		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
-		if (curr_timestamp < target_timestamp) {
-		    xusleep(target_timestamp - curr_timestamp);
+		if (tstamp < target_timestamp) {
+		    xusleep(target_timestamp - tstamp);
+            pthread_mutex_lock(&statistics_lock);
 		    curr_timestamp = target_timestamp;
+            pthread_mutex_unlock(&statistics_lock);
 		}
 	    }
 
 	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
-	    
+
 	    if (n < 0)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
 	    if (n != packet_nbytes)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(packet_nbytes) + " bytes?!");
 
 	    last_packet_nbytes = packet_nbytes;
+        pthread_mutex_lock(&statistics_lock);
 	    this->nbytes_sent += packet_nbytes;
 	    this->npackets_sent++;
+        pthread_mutex_unlock(&statistics_lock);
 	}
     }
     
     this->_announce_end_of_stream();
+}
+
+void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,
+                                               int64_t& npackets_sent,
+                                               int64_t& nbytes_sent) {
+    pthread_mutex_lock(&statistics_lock);
+    curr_timestamp = this->curr_timestamp;
+    npackets_sent  = this->npackets_sent;
+    nbytes_sent    = this->nbytes_sent;
+    pthread_mutex_unlock(&statistics_lock);
 }
 
 

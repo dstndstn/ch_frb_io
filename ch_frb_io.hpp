@@ -589,6 +589,10 @@ public:
     //   intensity + ((b + fcoarse*nupfreq) * nupfreq + u) * stride + t
 
     void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
+
+    void get_statistics(int64_t& curr_timestamp,
+                        int64_t& npackets_sent,
+                        int64_t& nbytes_sent);
     
     // Called when there is no more data; sends end-of-stream packets.
     void end_stream(bool join_network_thread);
@@ -606,8 +610,7 @@ protected:
     std::string hostname;
     uint16_t udp_port = constants::default_udp_port;
     
-    // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
-    // If we want to make this data accessible by other threads, this needs to be changed.
+    pthread_mutex_t statistics_lock;
     int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
     int64_t npackets_sent = 0;
     int64_t nbytes_sent = 0;
