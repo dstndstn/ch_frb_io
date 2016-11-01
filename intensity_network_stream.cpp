@@ -428,8 +428,6 @@ void intensity_network_stream::_network_thread_body()
 	pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
     }
 
-    cout << "Network thread: stream started." << endl;
-
     // Start listening on socket 
 
     struct sockaddr_in server_address;
@@ -477,17 +475,14 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
 	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
-        cout << "Network thread flushing to assembler thread" << endl;
 	    this->_put_unassembled_packets();
 	    this->_add_event_counts(network_thread_event_subcounts);
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
-    //cout << "Network thread reading from socket..." << endl;
 	uint8_t *packet_data = incoming_packet_list->data_end;
 	int packet_nbytes = read(sockfd, packet_data, constants::max_input_udp_packet_size + 1);
-    //cout << "Read " << packet_nbytes << "-byte packet from socket" << endl;
 
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
@@ -495,11 +490,6 @@ void intensity_network_stream::_network_thread_body()
 		continue;  // normal timeout
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
-
-    {
-        intensity_packet* inpacket = (intensity_packet*)packet_data;
-        cout << "Received packet with fpga_counts " << inpacket->fpga_count << endl;
-    }
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -515,8 +505,6 @@ void intensity_network_stream::_network_thread_body()
 	// Special logic for processing first packet, which triggers some initializations.
 	if (is_first_packet) {
 	    intensity_packet packet;
-
-        cout << "First packet" << endl;
 
 	    if (!packet.decode(packet_data, packet_nbytes)) {
 		event_subcounts[event_type::packet_bad]++;
@@ -543,10 +531,7 @@ void intensity_network_stream::_network_thread_body()
 
 	incoming_packet_list->add_packet(packet_nbytes);
 
-    cout << "Adding packet to incoming list: now " << incoming_packet_list->curr_npackets << "/" << incoming_packet_list->max_npackets << " packets" << endl;
-
 	if (incoming_packet_list->is_full) {
-        cout << "Flushing packets to assembler because packet list full" << endl;
 	    this->_put_unassembled_packets();
 	    this->_add_event_counts(network_thread_event_subcounts);
 	}
@@ -637,11 +622,9 @@ void intensity_network_stream::_assembler_thread_body()
 
     // ... and wait for first_packet_received flag to be set
     for (;;) {
-        cout << "Assembler thread waiting for first packet..." << endl;
    	if (this->stream_end_requested) {
 	    // This case can arise if end_stream() is called early
 	    pthread_mutex_unlock(&this->state_lock);
-        cout << "Stream end requested!" << endl;
 	    return;
 	}
 	if (this->first_packet_received) {
@@ -659,8 +642,6 @@ void intensity_network_stream::_assembler_thread_body()
     // in the network thread, since we could coalesce the 'first_packet_received' and 'assemblers_initialized'
     // states into a single state, but this led to transient packet loss which was problematic for unit tests.)
 
-    cout << "Assembler: Received first packet!" << endl;
-
     this->assemblers.resize(nassemblers);
     for (int ix = 0; ix < nassemblers; ix++)
 	assemblers[ix] = make_unique<assembled_chunk_ringbuf>(ini_params, ini_params.beam_ids[ix], nupfreq, nt_per_packet, fpga_counts_per_sample, this->fp_fpga_count);
@@ -669,8 +650,6 @@ void intensity_network_stream::_assembler_thread_body()
     this->assemblers_initialized = true;
     pthread_cond_broadcast(&this->cond_state_changed);
     pthread_mutex_unlock(&this->state_lock);
-
-    cout << "Assemblers initialized!" << endl;
     
     auto packet_list = make_unique<udp_packet_list> (constants::max_unassembled_packets_per_list, constants::max_unassembled_nbytes_per_list);
     int64_t *event_subcounts = &this->assembler_thread_event_subcounts[0];
@@ -678,29 +657,10 @@ void intensity_network_stream::_assembler_thread_body()
     // Main packet loop
 
     while (unassembled_ringbuf->get_packet_list(packet_list)) {
-
-        {
-            cout << "Assembling packet list: " << packet_list->curr_npackets <<
-                " with fpga_counts: { ";
-            uint64_t last_fpga_count = 999999999;
-            for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
-                uint8_t *packet_data = packet_list->get_packet_data(ipacket);
-                intensity_packet* inpacket = (intensity_packet*)packet_data;
-                if (inpacket->fpga_count != last_fpga_count) {
-                    cout << inpacket->fpga_count << "  ";
-                    last_fpga_count = inpacket->fpga_count;
-                }
-            }
-            cout << "}" << endl;
-        }
-            
-
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
             uint8_t *packet_data = packet_list->get_packet_data(ipacket);
             int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 	    intensity_packet packet;
-
-        //cout << "Packet (" << packet_nbytes << " bytes) for beams " << this->ini_params.beam_ids[0] << "+" << endl;
 
 	    if (!packet.decode(packet_data, packet_nbytes)) {
 		event_subcounts[event_type::packet_bad]++;
@@ -740,12 +700,6 @@ void intensity_network_stream::_assembler_thread_body()
 	    // Danger zone: we modify the packet by leaving its pointers in place, but shortening its
 	    // length fields.  The new packet corresponds to a subset of the original packet containing
 	    // only beam index zero.  This scheme avoids the overhead of copying the packet.
-
-        cout << "Packet " << ipacket << "/" << packet_list->curr_npackets
-             << ": fpga_count " << packet.fpga_count
-             << ", nbeams " << packet.nbeams
-             << ", nfcoarse " << packet.nfreq_coarse
-             << ", ntsamp " << packet.ntsamp << endl;
 	    
 	    packet.data_nbytes = new_data_nbytes;
 	    packet.nbeams = 1;
@@ -773,7 +727,6 @@ void intensity_network_stream::_assembler_thread_body()
 		    }
 
 		    // Match found
-            //cout << "Packet for beam " << packet_id << endl;
 		    assemblers[assembler_ix]->put_unassembled_packet(packet, event_subcounts);
 		    break;
 		}
