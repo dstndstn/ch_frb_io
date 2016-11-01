@@ -374,9 +374,9 @@ void intensity_network_ostream::_network_thread_body()
 		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
 		if (tstamp < target_timestamp) {
 		    xusleep(target_timestamp - tstamp);
-            pthread_mutex_lock(&statistics_lock);
+                    pthread_mutex_lock(&statistics_lock);
 		    curr_timestamp = target_timestamp;
-            pthread_mutex_unlock(&statistics_lock);
+                    pthread_mutex_unlock(&statistics_lock);
 		}
 	    }
 
