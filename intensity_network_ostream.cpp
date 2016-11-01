@@ -360,14 +360,14 @@ void intensity_network_ostream::_network_thread_body()
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
 	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 
-        pthread_mutex_lock(&statistics_lock);
+            pthread_mutex_lock(&statistics_lock);
 	    if (npackets_sent == 0)
 		tv_ini = xgettimeofday();
 
 	    int64_t last_timestamp = this->curr_timestamp;
-        int64_t tstamp = this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
-        int64_t npackets = this->npackets_sent;
-        pthread_mutex_unlock(&statistics_lock);
+            int64_t tstamp = this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
+            int64_t npackets = this->npackets_sent;
+            pthread_mutex_unlock(&statistics_lock);
 
 	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
 	    if ((target_gbps > 0.0) && (npackets > 0)) {
@@ -388,10 +388,10 @@ void intensity_network_ostream::_network_thread_body()
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(packet_nbytes) + " bytes?!");
 
 	    last_packet_nbytes = packet_nbytes;
-        pthread_mutex_lock(&statistics_lock);
+            pthread_mutex_lock(&statistics_lock);
 	    this->nbytes_sent += packet_nbytes;
 	    this->npackets_sent++;
-        pthread_mutex_unlock(&statistics_lock);
+            pthread_mutex_unlock(&statistics_lock);
 	}
     }
     
