@@ -482,8 +482,7 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
 	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
-	    this->_put_unassembled_packets();
-	    this->_add_event_counts(network_thread_event_subcounts);
+        _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
@@ -555,19 +554,24 @@ void intensity_network_stream::_network_thread_body()
 	incoming_packet_list->add_packet(packet_nbytes);
 
 	if (incoming_packet_list->is_full) {
-	    this->_put_unassembled_packets();
-	    this->_add_event_counts(network_thread_event_subcounts);
-
-        pthread_mutex_lock(&this->event_lock);
-        for (auto it = network_thread_perhost_packets.begin();
-             it != network_thread_perhost_packets.end(); it++) {
-            perhost_packets[it->first] += it->second;
-        }
-        pthread_mutex_unlock(&this->event_lock);
+        _network_flush_packets();
 	}
     }
 }
 
+// This gets called from the network thread to flush packets to the assembler
+// threads.
+void intensity_network_stream::_network_flush_packets() {
+    this->_put_unassembled_packets();
+    this->_add_event_counts(network_thread_event_subcounts);
+
+    pthread_mutex_lock(&this->event_lock);
+    for (auto it = network_thread_perhost_packets.begin();
+         it != network_thread_perhost_packets.end(); it++) {
+        perhost_packets[it->first] += it->second;
+    }
+    pthread_mutex_unlock(&this->event_lock);
+}
 
 // This gets called when the network thread exits (on all exit paths).
 void intensity_network_stream::_network_thread_exit()

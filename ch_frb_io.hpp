@@ -419,6 +419,7 @@ protected:
     intensity_network_stream(const initializer &x);
 
     void _open_socket();
+    void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
 
     static void *network_pthread_main(void *);
