@@ -296,6 +296,9 @@ intensity_network_stream::get_statistics() {
     m["nbeams"] = nbeams;
     R.push_back(m);
 
+    // Report per-host packet counts
+    R.push_back(this->get_perhost_packets());
+
     // Collect statistics per beam:
     for (int b=0; b<nbeams; b++) {
         m.clear();
