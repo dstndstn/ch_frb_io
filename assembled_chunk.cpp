@@ -1,6 +1,5 @@
 #include <iostream>
 #include <immintrin.h>
-#include <sstream>
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -164,43 +163,40 @@ void assembled_chunk::write_hdf5_file(const string &filename)
 {
     bool write = true;
     bool clobber = true;
-    cout << "Creating HDF5 file " << filename << endl;
     hdf5_file f(filename, write, clobber);
 
-    hdf5_group g_root(f, ".");
-
+    string chunkname = "/assembled-chunk-beam" + to_string(beam_id)
+        + "-ichunk" + to_string(ichunk);
     bool create = true;
-    //hdf5_group g_chunks(f, "/assembled_chunks", create);
-
-    stringstream ss;
-    //ss << "/assembled-chunks/assembled-chunk-beam" << beam_id
-    ss << "/assembled-chunk-beam" << beam_id
-       << "-ichunk" << ichunk;
-    string chunkname = ss.str();
-    cout << "Chunk name: " << chunkname << endl;
-
     hdf5_group g_chunk(f, chunkname, create);
 
+    // Header
     g_chunk.write_attribute("beam_id", this->beam_id);
+    g_chunk.write_attribute("nupfreq", this->nupfreq);
+    g_chunk.write_attribute("nt_per_packet", this->nt_per_packet);
+    g_chunk.write_attribute("fpga_counts_per_sample", this->fpga_counts_per_sample);
+    g_chunk.write_attribute("nt_coarse", this->nt_coarse);
+    g_chunk.write_attribute("nscales", this->nscale);
+    g_chunk.write_attribute("ndata", this->ndata);
+    g_chunk.write_attribute("ichunk", this->ichunk);
+    g_chunk.write_attribute("isample", this->isample);
 
+    // Offset & scale vectors
     vector<hsize_t> scaleshape = { (hsize_t)this->nscales };
     g_chunk.write_dataset("scales", this->scales, scaleshape);
     g_chunk.write_dataset("offsets", this->offsets, scaleshape);
 
+    // Raw data
     int bitshuffle = 0;
     vector<hsize_t> datashape = {
         (hsize_t)constants::nfreq_coarse_tot,
         (hsize_t)nupfreq,
         (hsize_t)constants::nt_per_assembled_chunk };
-
     unique_ptr<hdf5_extendable_dataset<uint8_t> > data_dataset =
-        make_unique<hdf5_extendable_dataset<uint8_t> >
-        (g_chunk, "data", datashape, 2, bitshuffle);
+        make_unique<hdf5_extendable_dataset<uint8_t> >(g_chunk, "data", datashape, 2, bitshuffle);
     data_dataset->write(this->data, datashape);
-
     // close
     data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
-
 }
 
 

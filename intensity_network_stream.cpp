@@ -263,10 +263,8 @@ unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 vector<unordered_map<string, uint64_t> >
 intensity_network_stream::get_statistics() {
     vector<unordered_map<string, uint64_t> > R;
-
     bool first_packet;
     bool assemblers_init;
-
     unordered_map<string, uint64_t> m;
 
     pthread_mutex_lock(&this->state_lock);
@@ -274,6 +272,7 @@ intensity_network_stream::get_statistics() {
     assemblers_init = this->assemblers_initialized;
     pthread_mutex_unlock(&this->state_lock);
 
+    // Collect statistics for this stream as a whole:
     m["first_packet_received"]  =  first_packet;
     m["nupfreq"]                = (first_packet ? this->fp_nupfreq : 0);
     m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
@@ -298,27 +297,22 @@ intensity_network_stream::get_statistics() {
     m["nbeams"] = nbeams;
     R.push_back(m);
 
+    // Collect statistics per beam:
     for (int b=0; b<nbeams; b++) {
-        //cout << "get_statistics()... beam " << b << " of " << nbeams << endl;
-        //cout << "assemblers_init: " << assemblers_init << endl;
         m.clear();
         m["beam_id"] = this->ini_params.beam_ids[b];
         if (assemblers_init) {
-            //m["ringbuf_size"] = this->assemblers[i]->get_assembled_ringbuf_size();
-            //cout << "Getting ring buffer snapshot..." << endl;
+            // Grab the ring buffer to find the min & max chunk numbers and size.
             vector<shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
-            m["ringbuf_size"] = snap.size();
-
-            //cout << "Ring buffer length: " << snap.size() << endl;
             uint64_t minchunk, maxchunk;
             minchunk = maxchunk = (snap.size() ? snap[0]->ichunk : 0);
             for (int i=1; i<snap.size(); i++) {
                 minchunk = min(minchunk, snap[i]->ichunk);
                 maxchunk = max(maxchunk, snap[i]->ichunk);
             }
+            m["ringbuf_size"] = snap.size();
             m["ringbuf_chunk_min"] = minchunk;
             m["ringbuf_chunk_max"] = maxchunk;
-            //cout << "Ring buffer chunk range: " << minchunk << " to " << maxchunk << endl;
         }
         R.push_back(m);
     }
@@ -482,26 +476,18 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
 	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
-        _network_flush_packets();
+            _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
 
-    // Read from socket, recording the sender IP & port.
-    sockaddr_in sender_addr;
-    int slen = sizeof(sender_addr);
-    int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
-                                 (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
-    //char ntoa_buffer[64];
-    //string sender = string(::inet_ntoa_r(sender_addr.sin_addr, ntoa_buffer, 64)) +":" + to_string(ntohs(sender_addr.sin_port));
-    // UGH, apparently some unixes (ahem, Mac OSX) do not have inet_ntoa_r, so homebrew it.
-    uint32_t ip = ntohl(sender_addr.sin_addr.s_addr);
-    string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
-        + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
-        + ":" + to_string(ntohs(sender_addr.sin_port));
-
+        // Read from socket, recording the sender IP & port.
+        sockaddr_in sender_addr;
+        int slen = sizeof(sender_addr);
+        int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+                                       (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
@@ -509,9 +495,13 @@ void intensity_network_stream::_network_thread_body()
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
 
-    network_thread_perhost_packets[sender]++;
-    //cout << "Received packet from " << sender
-    //  << ", total now " << network_thread_perhost_packets[sender] << endl;
+        // Increment the number of packets we've received from this sender:
+        // UGH, apparently some unixes (ahem, Mac OSX) do not have inet_ntoa_r, so homebrew an IP:port string.
+        uint32_t ip = ntohl(sender_addr.sin_addr.s_addr);
+        string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
+            + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
+            + ":" + to_string(ntohs(sender_addr.sin_port));
+        network_thread_perhost_packets[sender]++;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -553,9 +543,8 @@ void intensity_network_stream::_network_thread_body()
 
 	incoming_packet_list->add_packet(packet_nbytes);
 
-	if (incoming_packet_list->is_full) {
-        _network_flush_packets();
-	}
+	if (incoming_packet_list->is_full)
+            _network_flush_packets();
     }
 }
 
@@ -565,6 +554,7 @@ void intensity_network_stream::_network_flush_packets() {
     this->_put_unassembled_packets();
     this->_add_event_counts(network_thread_event_subcounts);
 
+    // Update the "perhost_packets" counter from "network_thread_perhost_packets"
     pthread_mutex_lock(&this->event_lock);
     for (auto it = network_thread_perhost_packets.begin();
          it != network_thread_perhost_packets.end(); it++) {
