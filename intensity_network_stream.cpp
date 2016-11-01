@@ -1,6 +1,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
@@ -251,14 +252,22 @@ vector<int64_t> intensity_network_stream::get_event_counts()
     return ret;
 }
 
-std::vector<std::unordered_map<std::string, uint64_t> >
+unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
+{
+    pthread_mutex_lock(&this->event_lock);
+    unordered_map<string, uint64_t> ret(perhost_packets);
+    pthread_mutex_unlock(&this->event_lock);
+    return ret;
+}
+
+vector<unordered_map<string, uint64_t> >
 intensity_network_stream::get_statistics() {
-    std::vector<std::unordered_map<std::string, uint64_t> > R;
+    vector<unordered_map<string, uint64_t> > R;
 
     bool first_packet;
     bool assemblers_init;
 
-    std::unordered_map<std::string, uint64_t> m;
+    unordered_map<string, uint64_t> m;
 
     pthread_mutex_lock(&this->state_lock);
     first_packet = this->first_packet_received;
@@ -271,7 +280,7 @@ intensity_network_stream::get_statistics() {
     m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
     m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
 
-    std::vector<int64_t> counts = get_event_counts();
+    vector<int64_t> counts = get_event_counts();
     m["count_bytes_received"     ] = counts[event_type::byte_received];
     m["count_packets_received"   ] = counts[event_type::packet_received];
     m["count_packets_good"       ] = counts[event_type::packet_good];
@@ -297,7 +306,7 @@ intensity_network_stream::get_statistics() {
         if (assemblers_init) {
             //m["ringbuf_size"] = this->assemblers[i]->get_assembled_ringbuf_size();
             //cout << "Getting ring buffer snapshot..." << endl;
-            std::vector<std::shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
+            vector<shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
             m["ringbuf_size"] = snap.size();
 
             //cout << "Ring buffer length: " << snap.size() << endl;
@@ -317,10 +326,10 @@ intensity_network_stream::get_statistics() {
     return R;
 }
 
-std::vector< std::vector< std::shared_ptr<assembled_chunk> > >
-intensity_network_stream::get_ringbuf_snapshots(std::vector<uint64_t> beams)
+vector< vector< shared_ptr<assembled_chunk> > >
+intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> beams)
 {
-    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > R;
+    vector< vector< shared_ptr<assembled_chunk> > > R;
 
     pthread_mutex_lock(&this->state_lock);
     bool assemblers_init = this->assemblers_initialized;
@@ -333,7 +342,7 @@ intensity_network_stream::get_ringbuf_snapshots(std::vector<uint64_t> beams)
 
     for (int ib=0; ib<beams.size(); ib++) {
         uint64_t beam = beams[ib];
-        std::vector<std::shared_ptr<assembled_chunk> > chunks;
+        vector<shared_ptr<assembled_chunk> > chunks;
         // Which of my assemblers (if any) is handling the requested beam?
         for (int i=0; i<nbeams; i++) {
             if (this->ini_params.beam_ids[i] != beam)
@@ -480,7 +489,19 @@ void intensity_network_stream::_network_thread_body()
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
-	int packet_nbytes = read(sockfd, packet_data, constants::max_input_udp_packet_size + 1);
+
+    // Read from socket, recording the sender IP & port.
+    sockaddr_in sender_addr;
+    int slen = sizeof(sender_addr);
+    int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+                                 (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
+    //char ntoa_buffer[64];
+    //string sender = string(::inet_ntoa_r(sender_addr.sin_addr, ntoa_buffer, 64)) +":" + to_string(ntohs(sender_addr.sin_port));
+    // UGH, apparently some unixes (ahem, Mac OSX) do not have inet_ntoa_r, so homebrew it.
+    uint32_t ip = ntohl(sender_addr.sin_addr.s_addr);
+    string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
+        + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
+        + ":" + to_string(ntohs(sender_addr.sin_port));
 
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
@@ -488,6 +509,10 @@ void intensity_network_stream::_network_thread_body()
 		continue;  // normal timeout
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
+
+    network_thread_perhost_packets[sender]++;
+    //cout << "Received packet from " << sender
+    //  << ", total now " << network_thread_perhost_packets[sender] << endl;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -532,6 +557,13 @@ void intensity_network_stream::_network_thread_body()
 	if (incoming_packet_list->is_full) {
 	    this->_put_unassembled_packets();
 	    this->_add_event_counts(network_thread_event_subcounts);
+
+        pthread_mutex_lock(&this->event_lock);
+        for (auto it = network_thread_perhost_packets.begin();
+             it != network_thread_perhost_packets.end(); it++) {
+            perhost_packets[it->first] += it->second;
+        }
+        pthread_mutex_unlock(&this->event_lock);
 	}
     }
 }
