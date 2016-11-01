@@ -176,7 +176,7 @@ void assembled_chunk::write_hdf5_file(const string &filename)
     g_chunk.write_attribute("nt_per_packet", this->nt_per_packet);
     g_chunk.write_attribute("fpga_counts_per_sample", this->fpga_counts_per_sample);
     g_chunk.write_attribute("nt_coarse", this->nt_coarse);
-    g_chunk.write_attribute("nscales", this->nscale);
+    g_chunk.write_attribute("nscales", this->nscales);
     g_chunk.write_attribute("ndata", this->ndata);
     g_chunk.write_attribute("ichunk", this->ichunk);
     g_chunk.write_attribute("isample", this->isample);

@@ -432,6 +432,7 @@ template<typename T> inline hid_t hdf5_type();
 
 // Reference: https://www.hdfgroup.org/HDF5/doc/H5.user/Datatypes.html
 template<> inline hid_t hdf5_type<int>()            { return H5T_NATIVE_INT; }
+template<> inline hid_t hdf5_type<unsigned long long>() { return H5T_NATIVE_ULLONG; }
 template<> inline hid_t hdf5_type<float>()          { return H5T_NATIVE_FLOAT; }
 template<> inline hid_t hdf5_type<double>()         { return H5T_NATIVE_DOUBLE; }
 template<> inline hid_t hdf5_type<unsigned char>()  { return H5T_NATIVE_UCHAR; }
