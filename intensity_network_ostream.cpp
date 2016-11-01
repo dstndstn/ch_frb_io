@@ -204,7 +204,16 @@ void intensity_network_ostream::_open_socket()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
     
-    // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
+    if (ini_params.bind_port) {
+        struct sockaddr_in server_address;
+        memset(&server_address, 0, sizeof(server_address));
+        server_address.sin_family = AF_INET;
+        inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
+        server_address.sin_port = htons(ini_params.bind_port);
+        int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+        if (err < 0)
+            throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
+    }
 
     if (connect(sockfd, reinterpret_cast<struct sockaddr *> (&saddr), sizeof(saddr)) < 0)
 	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + ini_params.dstname + "': " + strerror(errno));
