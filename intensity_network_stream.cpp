@@ -265,13 +265,11 @@ intensity_network_stream::get_statistics() {
     assemblers_init = this->assemblers_initialized;
     pthread_mutex_unlock(&this->state_lock);
 
-    m["first_packet_received"] = first_packet;
-
+    m["first_packet_received"]  =  first_packet;
     m["nupfreq"]                = (first_packet ? this->fp_nupfreq : 0);
     m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
-    m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample
-                                   : 0);
-    m["fpga_count"]            = (first_packet ? this->fp_fpga_count : 0);
+    m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
+    m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
 
     std::vector<int64_t> counts = get_event_counts();
     m["count_bytes_received"     ] = counts[event_type::byte_received];
@@ -286,14 +284,14 @@ intensity_network_stream::get_statistics() {
     m["count_assembler_misses"   ] = counts[event_type::assembler_miss];
     m["count_assembler_drops"    ] = counts[event_type::assembled_chunk_dropped];
     m["count_assembler_queued"   ] = counts[event_type::assembled_chunk_queued];
-    //int nbeams = this->assemblers.size();
+
     int nbeams = this->ini_params.beam_ids.size();
     m["nbeams"] = nbeams;
     R.push_back(m);
 
     for (int b=0; b<nbeams; b++) {
-        cout << "get_statistics()... beam " << b << " of " << nbeams << endl;
-        cout << "assemblers_init: " << assemblers_init << endl;
+        //cout << "get_statistics()... beam " << b << " of " << nbeams << endl;
+        //cout << "assemblers_init: " << assemblers_init << endl;
         m.clear();
         m["beam_id"] = this->ini_params.beam_ids[b];
         if (assemblers_init) {
@@ -302,7 +300,7 @@ intensity_network_stream::get_statistics() {
             std::vector<std::shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
             m["ringbuf_size"] = snap.size();
 
-            cout << "Ring buffer length: " << snap.size() << endl;
+            //cout << "Ring buffer length: " << snap.size() << endl;
             uint64_t minchunk, maxchunk;
             minchunk = maxchunk = (snap.size() ? snap[0]->ichunk : 0);
             for (int i=1; i<snap.size(); i++) {
@@ -311,7 +309,7 @@ intensity_network_stream::get_statistics() {
             }
             m["ringbuf_chunk_min"] = minchunk;
             m["ringbuf_chunk_max"] = maxchunk;
-            cout << "Ring buffer chunk range: " << minchunk << " to " << maxchunk << endl;
+            //cout << "Ring buffer chunk range: " << minchunk << " to " << maxchunk << endl;
         }
         R.push_back(m);
     }

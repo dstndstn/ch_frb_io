@@ -67,7 +67,6 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot()
     std::vector<std::shared_ptr<assembled_chunk> > ring;
     pthread_mutex_lock(&this->lock);
     for (int i=0; i<constants::assembled_ringbuf_capacity; i++) {
-        cout << "Chunk " << assembled_ringbuf[i] << endl;
         if (assembled_ringbuf[i]) {
             // Here we make a copy of the shared_ptr, thus preserving the chunk
             ring.push_back(assembled_ringbuf[i]);
