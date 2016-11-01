@@ -52,15 +52,6 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     pthread_mutex_destroy(&this->lock);
 }
 
-int assembled_chunk_ringbuf::get_assembled_ringbuf_size()
-{
-    int rtn = 0;
-    pthread_mutex_lock(&this->lock);
-    rtn = this->assembled_ringbuf_size;
-    pthread_mutex_unlock(&this->lock);
-    return rtn;
-}
-
 std::vector<std::shared_ptr<assembled_chunk> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot()
 {
