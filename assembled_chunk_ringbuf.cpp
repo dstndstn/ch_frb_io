@@ -67,7 +67,7 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot()
     std::vector<std::shared_ptr<assembled_chunk> > ring;
     pthread_mutex_lock(&this->lock);
     for (int i=0; i<constants::assembled_ringbuf_capacity; i++) {
-        cout << "Chunk " << assembled_ringbuf[i] << endl;
+        //cout << "Chunk " << assembled_ringbuf[i] << endl;
         if (assembled_ringbuf[i]) {
             // Here we make a copy of the shared_ptr, thus preserving the chunk
             ring.push_back(assembled_ringbuf[i]);
@@ -87,6 +87,9 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
     uint64_t active_ichunk = assembled_ringbuf_pos + assembled_ringbuf_size;
 
+    cout << "put_unassembled_packet: ichunk " << packet_ichunk 
+         << " vs active_ichunk " << active_ichunk << endl;
+
     if (packet_ichunk >= active_ichunk + 2) {
 	//
 	// If we receive a packet whose timestamps extend past the range of our current
@@ -98,6 +101,7 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// timestamp.  This is to avoid a situation where a single rogue packet timestamped
 	// in the far future effectively kills the L1 node.
 	//
+        cout << "Flushing chunk: " << active_chunk0 << endl;
 	this->_put_assembled_chunk(active_chunk0, event_counts);
 	active_chunk0 = active_chunk1;
 	active_chunk1 = this->_make_assembled_chunk(active_ichunk+2);
@@ -124,6 +128,8 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
+
+    cout << "Put assembled chunk" << endl;
 	
     pthread_mutex_lock(&this->lock);
 

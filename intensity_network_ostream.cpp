@@ -147,6 +147,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
     int capacity = constants::output_ringbuf_capacity;
     this->ringbuf = make_unique<udp_packet_ringbuf> (capacity, npackets_per_chunk, nbytes_per_chunk);
     this->tmp_packet_list = make_unique<udp_packet_list> (npackets_per_chunk, nbytes_per_chunk);
+    cout << "Created tmp_packet_list to hold " << npackets_per_chunk << " packets" << endl;
 }
 
 
@@ -218,6 +219,8 @@ void intensity_network_ostream::_encode_chunk(const float *intensity, const floa
     int beam_stride = nfreq_coarse_per_chunk * nupfreq * stride;
     int nf_outer = nfreq_coarse_per_chunk / nfreq_coarse_per_packet;
     int nt_outer = nt_per_chunk / nt_per_packet;
+
+    cout << "encode_chunk: nf_outer " << nf_outer << ", nt_outer " << nt_outer << " -> n packets " << nf_outer * nt_outer << endl;
 
     if (fpga_count % (fpga_counts_per_sample * nt_per_packet) != 0)
 	throw runtime_error("intensity_network_ostream::_encode_chunk(): fpga count must be divisible by (fpga_counts_per_sample * nt_per_packet)");
@@ -340,16 +343,22 @@ void intensity_network_ostream::_network_thread_body()
 
     // to be initialized when first packet is sent
     struct timeval tv_ini;
+
+    cout << "Network thread body starting" << endl;
     
     // Loop over packet_lists
     for (;;) {
 	if (!ringbuf->get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
+
+    //cout << "Sending " << packet_list->curr_npackets << " packets" << endl;
 	
 	// Loop over packets
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
 	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
+
+        
 
         pthread_mutex_lock(&statistics_lock);
 	    if (npackets_sent == 0)
@@ -371,6 +380,11 @@ void intensity_network_ostream::_network_thread_body()
 		}
 	    }
 
+        /*{
+            intensity_packet* inpacket = (intensity_packet*)packet;
+            cout << "Sending packet " << ipacket << "/" << packet_list->curr_npackets << ": fpga_counts " << inpacket->fpga_count << endl;
+         }*/
+
 	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
 
 	    if (n < 0)
@@ -385,6 +399,8 @@ void intensity_network_ostream::_network_thread_body()
         pthread_mutex_unlock(&statistics_lock);
 	}
     }
+
+    cout << "Network thread body quitting" << endl;
     
     this->_announce_end_of_stream();
 }
