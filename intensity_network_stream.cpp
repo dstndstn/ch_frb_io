@@ -568,7 +568,7 @@ void intensity_network_stream::_network_flush_packets() {
     pthread_mutex_lock(&this->event_lock);
     for (auto it = network_thread_perhost_packets.begin();
          it != network_thread_perhost_packets.end(); it++) {
-        perhost_packets[it->first] += it->second;
+        perhost_packets[it->first] = it->second;
     }
     pthread_mutex_unlock(&this->event_lock);
 }
