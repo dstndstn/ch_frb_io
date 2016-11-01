@@ -162,7 +162,6 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 	if (assembled_ringbuf_size > 0) {
 	    int i = assembled_ringbuf_pos % constants::assembled_ringbuf_capacity;
 	    shared_ptr<assembled_chunk> chunk = assembled_ringbuf[i];
-	    //assembled_ringbuf[i] = shared_ptr<assembled_chunk> ();
 
 	    this->assembled_ringbuf_pos++;
 	    this->assembled_ringbuf_size--;
