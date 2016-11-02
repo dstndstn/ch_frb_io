@@ -182,8 +182,9 @@ void assembled_chunk::write_hdf5_file(const string &filename)
     g_chunk.write_attribute("isample", this->isample);
 
     // Offset & scale vectors
-    vector<hsize_t> scaleshape = { (hsize_t)this->nscales };
-    g_chunk.write_dataset("scales", this->scales, scaleshape);
+    vector<hsize_t> scaleshape = { (hsize_t)constants::nfreq_coarse,
+                                   (hsize_t)this->nt_coarse };
+    g_chunk.write_dataset("scales",  this->scales,  scaleshape);
     g_chunk.write_dataset("offsets", this->offsets, scaleshape);
 
     // Raw data
