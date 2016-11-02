@@ -52,16 +52,21 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
     pthread_mutex_destroy(&this->lock);
 }
 
-std::vector<std::shared_ptr<assembled_chunk> >
+vector<shared_ptr<assembled_chunk> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot()
 {
-    std::vector<std::shared_ptr<assembled_chunk> > ring;
+    vector<shared_ptr<assembled_chunk> > ring(assembled_ringbuf_size);
     pthread_mutex_lock(&this->lock);
-    for (int i=0; i<constants::assembled_ringbuf_capacity; i++) {
-        if (assembled_ringbuf[i]) {
+    // The chunks waiting to be consumed by get_assembled_chunk() are
+    // from assembled_ringbuf_pos to assembled_ringbuf_pos +
+    // assembled_ringbuf_size - 1; one after that is the oldest chunk
+    // in the buffer; that's where we start reading.
+    uint64_t i0 = this->assembled_ringbuf_pos + this->assembled_ringbuf_size;
+    for (uint64_t off=0; off<constants::assembled_ringbuf_capacity; off++) {
+        uint64_t i = (i0 + off) % constants::assembled_ringbuf_capacity;
+        if (assembled_ringbuf[i])
             // Here we make a copy of the shared_ptr, thus preserving the chunk
             ring.push_back(assembled_ringbuf[i]);
-        }
     }
     pthread_mutex_unlock(&this->lock);
     return ring;
@@ -200,7 +205,7 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 }
 
 
-std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
+shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
 {
     if (ini_params.mandate_fast_kernels)
 	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
