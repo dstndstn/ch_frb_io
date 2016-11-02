@@ -50,6 +50,7 @@ INSTALLED_BINARIES=ch-show-intensity-file
 INSTALLED_SCRIPTS=ch-plot-intensity-file
 
 TEST_BINARIES = test-intensity-hdf5-file \
+	test-assembled-chunk-hdf5-file \
 	test-misc \
 	test-network-streams
 
@@ -79,6 +80,9 @@ ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.so
+	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
+test-assembled-chunk-hdf5-file: test-assembled-chunk-hdf5-file.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
