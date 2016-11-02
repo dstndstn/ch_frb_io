@@ -291,8 +291,8 @@ protected:
     pthread_cond_t cond_assembled_chunks_added;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
-    int assembled_ringbuf_pos = 0;
-    int assembled_ringbuf_size = 0;
+    uint64_t assembled_ringbuf_pos  = 0;
+    uint64_t assembled_ringbuf_size = 0;
     bool doneflag = false;
 };
 

@@ -38,7 +38,7 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 
     this->active_chunk0 = this->_make_assembled_chunk(ichunk);
     this->active_chunk1 = this->_make_assembled_chunk(ichunk+1);
-    this->assembled_ringbuf_pos = ichunk;
+    this->assembled_ringbuf_pos  = ichunk;
     this->assembled_ringbuf_size = 0;
 
     pthread_mutex_init(&this->lock, NULL);
