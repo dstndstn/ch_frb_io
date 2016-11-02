@@ -254,9 +254,20 @@ vector<int64_t> intensity_network_stream::get_event_counts()
 unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
 {
     pthread_mutex_lock(&this->event_lock);
-    unordered_map<string, uint64_t> ret(perhost_packets);
+    unordered_map<uint64_t, uint64_t> raw(perhost_packets);
     pthread_mutex_unlock(&this->event_lock);
-    return ret;
+    // Convert to strings
+    unordered_map<string, uint64_t> rtn;
+    for (auto it = raw.begin(); it != raw.end(); it++) {
+        // IPv4 address in high 32 bits, port in low 16 bits
+        uint32_t ip = (it->first >> 32) & 0xffffffff;
+        uint32_t port = (it->first & 0xffff);
+        string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
+            + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
+            + ":" + to_string(port);
+        rtn[sender] = it->second;
+    }
+    return rtn;
 }
 
 vector<unordered_map<string, uint64_t> >
@@ -498,11 +509,10 @@ void intensity_network_stream::_network_thread_body()
 	}
 
         // Increment the number of packets we've received from this sender:
-        // UGH, apparently some unixes (ahem, Mac OSX) do not have inet_ntoa_r, so homebrew an IP:port string.
-        uint32_t ip = ntohl(sender_addr.sin_addr.s_addr);
-        string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
-            + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
-            + ":" + to_string(ntohs(sender_addr.sin_port));
+        uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
+        uint64_t port = ntohs(sender_addr.sin_port);
+        // IPv4 address in high 32 bits, port in low 16 bits
+        uint64_t sender = (ip << 32) | port;
         network_thread_perhost_packets[sender]++;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;

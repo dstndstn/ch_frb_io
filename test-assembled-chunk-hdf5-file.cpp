@@ -31,7 +31,6 @@ int main(int argc, char **argv)
     chunk->randomize(rng);
 
     chunk->write_hdf5_file(string(filename));
-
     
     return 0;
 }

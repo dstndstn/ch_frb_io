@@ -337,6 +337,7 @@ public:
     std::vector<int64_t> get_event_counts();
 
     std::unordered_map<std::string, uint64_t> get_perhost_packets();
+    std::unordered_map<uint64_t, uint64_t> get_perhost_packets_raw();
 
     std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
@@ -384,7 +385,7 @@ protected:
     int sockfd = -1;
     std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
-    std::unordered_map<std::string, uint64_t> network_thread_perhost_packets;
+    std::unordered_map<uint64_t, uint64_t> network_thread_perhost_packets;
     char _pad2[constants::cache_line_size];
 
     // Used only by the assembler thread
@@ -412,7 +413,7 @@ protected:
 
     pthread_mutex_t event_lock;
     std::vector<int64_t> cumulative_event_counts;
-    std::unordered_map<std::string, uint64_t> perhost_packets;
+    std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
