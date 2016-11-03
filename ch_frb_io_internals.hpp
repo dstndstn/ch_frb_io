@@ -259,14 +259,16 @@ public:
     std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot();
 
     // Returns stats about the ring buffer.
-    //  *ringbuf_pos* is the next "chunk" that will be delivered to get_assembled_chunk().
+    //  *ringbuf_chunk* is the next chunk number that will be delivered to get_assembled_chunk().  (= assembled_ringbuf_pos)
     //  *ringbuf_size* is the number of chunks available to be consumed by get_assembled_chunk().
-    //  *ringbuf_nelements* counts the number of valid chunks, including old chunks that have already been consumed by get_assembled_chunk.
     //  *ringbuf_capacity* is the maximum number of chunks that can be held in the ring buffer.
-    void get_ringbuf_size(uint64_t& ringbuf_pos,
-                          uint64_t& ringbuf_size,
-                          uint64_t& ringbuf_nelements,
-                          uint64_t& ringbuf_capacity);
+    //  *ringbuf_nelements* counts the number of valid chunks, including old chunks that have already been consumed by get_assembled_chunk.
+    //  *ringbuf_oldest_chunk* is the smallest chunk number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().)
+    void get_ringbuf_size(uint64_t* ringbuf_chunk,
+                          uint64_t* ringbuf_size,
+                          uint64_t* ringbuf_capacity,
+                          uint64_t* ringbuf_nelements,
+                          uint64_t* ringbuf_oldest_chunk);
 
 protected:
     const intensity_network_stream::initializer ini_params;

@@ -72,13 +72,14 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot()
     return ring;
 }
 
-void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_pos,
+void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_chunk,
                                                uint64_t* ringbuf_size,
+                                               uint64_t* ringbuf_capacity,
                                                uint64_t* ringbuf_nelements,
-                                               uint64_t* ringbuf_capacity) {
+                                               uint64_t* ringbuf_oldest) {
     pthread_mutex_lock(&this->lock);
-    if (ringbuf_pos)
-        *ringbuf_pos = this->assembled_ringbuf_pos;
+    if (ringbuf_chunk)
+        *ringbuf_chunk = this->assembled_ringbuf_pos;
     if (ringbuf_size)
         *ringbuf_size = this->assembled_ringbuf_size;
     if (ringbuf_capacity)
@@ -89,6 +90,20 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_pos,
             if (assembled_ringbuf[i])
                 n++;
         *ringbuf_nelements = n;
+    }
+    if (ringbuf_oldest) {
+        // rb_pos + rb_size is the index of the oldest chunk, unless
+        // we haven't filled the ringbuf and looped around yet.
+        uint64_t i0 = this->assembled_ringbuf_pos + this->assembled_ringbuf_size;
+        *ringbuf_oldest = 0;
+        for (uint64_t off=0; off<constants::assembled_ringbuf_capacity; off++) {
+            uint64_t i = (i0 + off) % constants::assembled_ringbuf_capacity;
+            // the first non-NULL chunk is the one we want
+            if (assembled_ringbuf[i]) {
+                *ringbuf_oldest = assembled_ringbuf[i]->ichunk;
+                break;
+            }
+        }
     }
     pthread_mutex_unlock(&this->lock);
 }
