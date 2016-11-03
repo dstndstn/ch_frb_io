@@ -72,6 +72,27 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot()
     return ring;
 }
 
+void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_pos,
+                                               uint64_t* ringbuf_size,
+                                               uint64_t* ringbuf_nelements,
+                                               uint64_t* ringbuf_capacity) {
+    pthread_mutex_lock(&this->lock);
+    if (ringbuf_pos)
+        *ringbuf_pos = this->assembled_ringbuf_pos;
+    if (ringbuf_size)
+        *ringbuf_size = this->assembled_ringbuf_size;
+    if (ringbuf_capacity)
+        *ringbuf_capacity = constants::assembled_ringbuf_capacity;
+    if (ringbuf_nelements) {
+        uint64_t n = 0;
+        for (uint64_t i=0; i<constants::assembled_ringbuf_capacity; i++)
+            if (assembled_ringbuf[i])
+                n++;
+        *ringbuf_nelements = n;
+    }
+    pthread_mutex_unlock(&this->lock);
+}
+
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
     // We test these pointers instead of 'doneflag' so that we don't need to acquire the lock in every call.
