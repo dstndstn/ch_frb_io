@@ -1,5 +1,6 @@
 #include <iostream>
 #include <immintrin.h>
+#include <msgpack/fbuffer.hpp>
 #include "assembled_chunk_msgpack.hpp"
 #include "ch_frb_io_internals.hpp"
 
@@ -203,16 +204,14 @@ void assembled_chunk::write_hdf5_file(const string &filename)
 
 void assembled_chunk::write_msgpack_file(const string &filename)
 {
-    msgpack::sbuffer buffer;
-    shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
-    //msgpack::pack(buffer, shared_from_this());
-    //msgpack::pack(buffer, this);
-    msgpack::pack(buffer, shthis);
     FILE* f = fopen(filename.c_str(), "w+");
-    int nw = fwrite(buffer.data(), 1, buffer.size(), f);
-    if (nw != buffer.size()) {
-        throw runtime_error("ch_frb_io: failed to write assembled_chunk msgpack file " + filename + string(strerror(errno)));
-    }
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
+    // msgpack buffer that will write to file "f"
+    msgpack::fbuffer buffer(f);
+    // Construct a shared_ptr from this, carefully
+    shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
+    msgpack::pack(buffer, shthis);
     if (fclose(f)) {
         throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
     }
