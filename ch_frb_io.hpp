@@ -475,6 +475,8 @@ struct assembled_chunk : noncopyable {
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
+    bool msgpack_bitshuffle = false;
+
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
     
@@ -486,6 +488,8 @@ struct assembled_chunk : noncopyable {
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.
     static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
+
+    static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);

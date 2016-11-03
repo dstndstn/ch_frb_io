@@ -212,9 +212,36 @@ void assembled_chunk::write_msgpack_file(const string &filename)
     // Construct a shared_ptr from this, carefully
     shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
     msgpack::pack(buffer, shthis);
-    if (fclose(f)) {
+    if (fclose(f))
         throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
+}
+
+shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
+{
+    struct stat st;
+    if (stat(filename.c_str(), &st)) {
+        throw runtime_error("ch_frb_io: failed to stat file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
     }
+    size_t len = st.st_size;
+    FILE* f = fopen(filename.c_str(), "r");
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+
+    char* fdata = (char*)malloc(len);
+    if (!fdata)
+        throw runtime_error("ch_frb_io: failed to malloc an array of size " + to_string(len) + " for reading an assembled_chunk in msgpack format from file " + filename);
+
+    size_t nr = fread(fdata, 1, len, f);
+    if (nr != len)
+        throw runtime_error("ch_frb_io: failed to read " + to_string(len) + " from file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+    fclose(f);
+
+    msgpack::object_handle oh = msgpack::unpack(fdata, len);
+    msgpack::object obj = oh.get();
+    shared_ptr<assembled_chunk> ch;
+    obj.convert(&ch);
+    free(fdata);
+    return ch;
 }
 
 
