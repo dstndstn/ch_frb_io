@@ -314,18 +314,21 @@ intensity_network_stream::get_statistics() {
     for (int b=0; b<nbeams; b++) {
         m.clear();
         m["beam_id"] = this->ini_params.beam_ids[b];
-        if (assemblers_init) {
+        if (assemblers_init && (assemblers.size() > 0)) {
             // Grab the ring buffer to find the min & max chunk numbers and size.
-            vector<shared_ptr<assembled_chunk> > snap = this->assemblers[b]->get_ringbuf_snapshot();
-            uint64_t minchunk, maxchunk;
-            minchunk = maxchunk = (snap.size() ? snap[0]->ichunk : 0);
-            for (int i=1; i<snap.size(); i++) {
-                minchunk = min(minchunk, snap[i]->ichunk);
-                maxchunk = max(maxchunk, snap[i]->ichunk);
+            uint64_t ichunk, nchunks, capacity, ntot, oldest;
+            this->assemblers[b]->get_ringbuf_size(&ichunk, &nchunks, &capacity, &ntot, &oldest);
+            m["ringbuf_next"] = ichunk;
+            m["ringbuf_ready"] = nchunks;
+            m["ringbuf_capacity"] = capacity;
+            m["ringbuf_ntotal"] = ntot;
+            if (ntot == 0) {
+                m["ringbuf_chunk_min"] = 0;
+                m["ringbuf_chunk_max"] = 0;
+            } else {
+                m["ringbuf_chunk_min"] = oldest;
+                m["ringbuf_chunk_max"] = ichunk + nchunks - 1;
             }
-            m["ringbuf_size"] = snap.size();
-            m["ringbuf_chunk_min"] = minchunk;
-            m["ringbuf_chunk_max"] = maxchunk;
         }
         R.push_back(m);
     }
