@@ -478,6 +478,7 @@ void intensity_network_stream::_network_thread_body()
 
 	    if (this->stream_end_requested) {
 		pthread_mutex_unlock(&this->state_lock);    
+                _network_flush_packets();
 		return;
 	    }
 

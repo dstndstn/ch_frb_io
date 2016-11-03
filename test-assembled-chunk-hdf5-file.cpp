@@ -2,6 +2,9 @@
 #include <iostream>
 #include "ch_frb_io.hpp"
 
+#include "assembled_chunk_msgpack.hpp"
+
+
 using namespace std;
 using namespace ch_frb_io;
 
@@ -31,6 +34,8 @@ int main(int argc, char **argv)
     chunk->randomize(rng);
 
     chunk->write_hdf5_file(string(filename));
+
+    chunk->write_msgpack_file("test_assembled_chunk.msgpack");
     
     return 0;
 }

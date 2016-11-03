@@ -493,7 +493,14 @@ struct assembled_chunk : noncopyable {
 
     // HDF5 file output
     void write_hdf5_file(const std::string &filename);
+
+    // msgpack file output
+    void write_msgpack_file(const std::string &filename);
+
 };
+
+
+//#include <assembled_chunk_msgpack.hpp>
 
 
 // For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and

@@ -356,7 +356,7 @@ void intensity_network_ostream::_network_thread_body()
     for (;;) {
 	if (!ringbuf->get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
-	
+
 	// Loop over packets
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
@@ -396,7 +396,7 @@ void intensity_network_ostream::_network_thread_body()
             pthread_mutex_unlock(&statistics_lock);
 	}
     }
-    
+
     this->_announce_end_of_stream();
 }
 

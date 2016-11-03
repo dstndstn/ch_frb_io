@@ -1,5 +1,6 @@
 #include <iostream>
 #include <immintrin.h>
+#include "assembled_chunk_msgpack.hpp"
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -200,6 +201,22 @@ void assembled_chunk::write_hdf5_file(const string &filename)
     data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
 }
 
+void assembled_chunk::write_msgpack_file(const string &filename)
+{
+    msgpack::sbuffer buffer;
+    shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
+    //msgpack::pack(buffer, shared_from_this());
+    //msgpack::pack(buffer, this);
+    msgpack::pack(buffer, shthis);
+    FILE* f = fopen(filename.c_str(), "w+");
+    int nw = fwrite(buffer.data(), 1, buffer.size(), f);
+    if (nw != buffer.size()) {
+        throw runtime_error("ch_frb_io: failed to write assembled_chunk msgpack file " + filename + string(strerror(errno)));
+    }
+    if (fclose(f)) {
+        throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
+    }
+}
 
 
 }  // namespace ch_frb_io
