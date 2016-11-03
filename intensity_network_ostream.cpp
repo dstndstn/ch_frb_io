@@ -142,6 +142,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 	coarse_freq_ids_16bit[i] = uint16_t(ini_params.coarse_freq_ids[i]);
     
     pthread_mutex_init(&this->state_lock, NULL);
+    pthread_mutex_init(&this->statistics_lock, NULL);
     pthread_cond_init(&this->cond_state_changed, NULL);
 
     int capacity = constants::output_ringbuf_capacity;
@@ -159,6 +160,7 @@ intensity_network_ostream::~intensity_network_ostream()
 
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
+    pthread_mutex_destroy(&statistics_lock);
 }
 
 
