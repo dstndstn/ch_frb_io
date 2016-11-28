@@ -3,21 +3,21 @@
  Sketch of the L1 ring buffer desired API -- what the RPC server would
  look like.
 
- ZMQ_DONTWAIT -- blocks on zmq_send when high-water-mark is reached (DEALER)
  */
 
-//#include <zmq.hpp>
-
-
 /*
- For write_chunks: we need to keep the assembled_chunks alive via a
- shared_ptr.  This can be achieved by the RPC server pulling requests
- off the client-facing socket in one thread, retrieving shared_ptrs to
- the assembled_chunks, and putting them in a (thread-safe) queue which
- will keep the shared_ptrs alive.  After enqueuing a chunk + args, it
- should send a request to a back-end worker to pull some work from the
- queue.  The worker can dequeue the assembled_chunk, msgpack it or
- otherwise write it to disk, and then drop the shared_ptr.
+ For RPC write_chunks: we need to keep the assembled_chunks alive via
+ a shared_ptr.  This can be achieved by the RPC server pulling
+ requests off the client-facing socket in one thread, retrieving
+ shared_ptrs to the assembled_chunks, and putting them in a
+ (thread-safe) queue which will keep the shared_ptrs alive.  After
+ enqueuing a chunk + args, it should send a request to a back-end
+ worker to pull some work from the queue.  The worker can dequeue the
+ assembled_chunk, msgpack it or otherwise write it to disk, and then
+ drop the shared_ptr.
+
+ ZMQ_DONTWAIT -- blocks on zmq_send when high-water-mark is reached (DEALER)
+ //#include <zmq.hpp>
  */
 
 /*
@@ -26,9 +26,7 @@
  end of the ring buffer, we want to take two chunks and compile them
  into one chunk.  While this is happening, we still want to be able to
  access them. (ie, the RPC callbacks should still know about them).
- */
 
-/*
  Each of these ~4 ring buffers should use a fixed amount of space; we
  may want to re-use the assembled_chunk memory.
  */
@@ -50,9 +48,8 @@ For the telescoping chain, we want the ring buffer to tell us when an
 assembled_chunk is being dropped.
  */
 
-
 /*
- assembled_chunk::make() is a factor for assembled_chunks.
+ assembled_chunk::make() is a factory for assembled_chunks.
 
  assembled_chunk_ringbuf::_make_assembled_chunk() wraps that or calls directly
 
@@ -94,8 +91,8 @@ assembled_chunk is being dropped.
    next ring buffer.
 
 
-- note that the longer-duration ring buffers do not have a
-  'downstream' consumer.
+ - the longer-duration ring buffers do not have 'downstream'
+   consumers.
 
 - Huh, what if the queue of assembled chunks waiting for the
   downstream consumer and the ring buffer per se are two separate data
@@ -124,20 +121,22 @@ assembled_chunk is being dropped.
  vector<T> snapshot(bool test(T*)) ?
 
 
-
-
  where T : shared_ptr<assembled_chunk> and we will subclass it to
  override drop() to do the telescoping.
  
 
  */
+
 #include <iostream>
 #include <queue>
+#include <deque>
 
 using namespace std;
+using namespace std::placeholders;
 
 #include "ch_frb_io.hpp"
 using namespace ch_frb_io;
+
 
 std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
     s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << ")";
@@ -155,50 +154,81 @@ class Ringbuf {
     friend class RingbufDeleter<T>;
 
 public:
+    /*
+     Creates a new Ringbuf with the given maximum quota size.
+     */
     Ringbuf(int maxsize) :
         _deleter(this),
+        _q(maxsize),
+        _live(0),
         _maxsize(maxsize)
     {}
 
+    virtual ~Ringbuf() {}
+
+    /*
+     Tries to push a new frame onto the ring buffer.  If the quota of
+     frames has been reached, frames will be popped off the front
+     until the buffer is empty.  If space is still not available, will
+     return an empty shared_ptr.
+
+     Returns the enqueued shared_ptr if successful.
+     */
     shared_ptr<T> push(T* t) {
         while (_live >= _maxsize) {
-            cout << "Push: _live >= _maxsize." << endl;
+            cout << "Push: _live >= _maxsize." << " (" << _live << " >= " << _maxsize << ")" << endl;
             if (_q.empty()) {
                 cout << "Ring buffer empty but still too many live elements -- push fails" << endl;
-                //
-                //return false;
                 return shared_ptr<T>();
             }
             cout << "Dropping an element..." << endl;
             shared_ptr<T> p = _q.front();
-            _q.pop();
+            _q.pop_front();
             dropping(p);
+            p.reset();
+            cout << "Now " << _live << " live" << endl;
         }
         cout << "Creating shared_ptr..." << endl;
         shared_ptr<T> p(t, _deleter);
         _live++;
-        _q.push(p);
-        //cout << "Pushing shared_ptr..." << endl;
+        _q.push_back(p);
         cout << "Now " << _live << " objects are live" << endl;
         return p;
     }
 
+    /*
+     Pops the oldest frame from this buffer.
+     */
     shared_ptr<T> pop() {
         cout << "Popping..." << endl;
-        shared_ptr<T> p = _q.front();
-        _q.pop();
+        shared_ptr<T> p = _q.pop_front();
         cout << "Pop: returning " << *p << endl;
         return p;
     }
+
+    vector<shared_ptr<T> > snapshot(bool (*testFunc)(const shared_ptr<T>)) {
+        vector<shared_ptr<T> > vec;
+        for (auto it = _q.begin(); it != _q.end(); it++) {
+            if (!testFunc || testFunc(*it))
+                vec.push_back(*it);
+        }
+        return vec;
+    }
     
 protected:
+    // Small helper class that calls deleted() when one of our frames
+    // is deleted.
     RingbufDeleter<T> _deleter;
 
-    std::queue<shared_ptr<T> > _q;
+    // The actual queue of frames.
+    deque<shared_ptr<T> > _q;
 
+    // Number of live frames.
     size_t _live;
+    // Maximum allowable number of live frames.
     size_t _maxsize;
 
+    // We're about to drop this frame.
     virtual void dropping(shared_ptr<T> t) {}
 
     // Called by the RingbufDeleter when a shared_ptr is deleted
@@ -239,29 +269,43 @@ public:
         _parent(parent)
     {}
 
+    virtual ~AssembledChunkRingbuf() {}
+
 protected:
-    // my time-binning level: 0 = original intensity stream; 1 = binned x 2,
-    // 2 = binned x 4.
+    // my time-binning. level: 0 = original intensity stream; 1 =
+    // binned x 2, 2 = binned x 4.
     int _binlevel;
     L1Ringbuf* _parent;
 
+    // Called when the given frame *t* is being dropped off the buffer
+    // to free up some space for a new frame.
     virtual void dropping(shared_ptr<assembled_chunk> t);
 
 };
 
-
 class L1Ringbuf {
     friend class AssembledChunkRingbuf;
 
+    static const size_t Nbins = 4;
+
 public:
     L1Ringbuf() :
-        _bin0(0, this, 4),
-        _bin1(1, this, 4),
-        _bin2(2, this, 4)
-    {}
+        _q(),
+        _rb(),
+        _dropped()
+    {
+        for (int i=0; i<Nbins; i++)
+            _rb.push_back(new AssembledChunkRingbuf(i, this, 4));
+            //_rb[i] = new AssembledChunkRingbuf(i, this, 4);
+    }
+
+    ~L1Ringbuf() {
+        for (int i=0; i<Nbins; i++)
+            delete _rb[i];
+    }
 
     bool push(assembled_chunk* ch) {
-        shared_ptr<assembled_chunk> p = _bin0.push(ch);
+        shared_ptr<assembled_chunk> p = _rb[0]->push(ch);
         if (!p)
             return false;
         _q.push(p);
@@ -273,28 +317,53 @@ public:
         _q.pop();
         return p;
     }
-    
-protected:
-    std::queue<shared_ptr<assembled_chunk> > _q;
 
-    AssembledChunkRingbuf _bin0;
-    shared_ptr<assembled_chunk> _dropped0;
+    void print() {
+        cout << "L1 ringbuf:" << endl;
 
-    AssembledChunkRingbuf _bin1;
-    shared_ptr<assembled_chunk> _dropped1;
-
-    AssembledChunkRingbuf _bin2;
-
-    void dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
-        cout << "Bin level " << binlevel << " dropping a chunk" << endl;
-        if (binlevel == 0) {
-            if (_dropped0) {
-                cout << "Now have 2 dropped chunks from bin level 0" << endl;
-                // FIXME -- bin down and push onto _bin1
-                _dropped0.reset();
+        for (int i=0; i<Nbins; i++) {
+            vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
+            cout << "  binning " << i << ": [ ";
+            for (auto it = v.begin(); it != v.end(); it++) {
+                cout << (*it)->ichunk << " ";
+            }
+            cout << "]" << endl;
+            if (i < Nbins-1) {
+                cout << "  dropped " << i << ": ";
+                if (_dropped[i])
+                    cout << _dropped[i]->ichunk << endl;
+                else
+                    cout << "none" << endl;
             }
         }
-        // FIXME -- ... etc...
+    }
+    
+protected:
+    // The queue for downstream
+    queue<shared_ptr<assembled_chunk> > _q;
+
+    vector<AssembledChunkRingbuf*> _rb;
+    //array<AssembledChunkRingbuf*, Nbins> _rb;
+    vector<shared_ptr<assembled_chunk> > _dropped;
+    //array<shared_ptr<assembled_chunk>, Nbins> _dropped;
+ 
+    void dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
+        cout << "Bin level " << binlevel << " dropping a chunk" << endl;
+        if (binlevel >= Nbins-1)
+            return;
+
+        if (_dropped[binlevel]) {
+            cout << "Now have 2 dropped chunks from bin level " << binlevel << endl;
+            // FIXME -- bin down
+            assembled_chunk* binned = new assembled_chunk(ch->beam_id, ch->nupfreq, ch->nt_per_packet, ch->fpga_counts_per_sample, _dropped[binlevel]->ichunk);
+            // push onto _rb[level+1]
+            _rb[binlevel+1]->push(binned);
+            _dropped[binlevel].reset();
+        } else {
+            // Keep this one until its partner arrives!
+            cout << "Saving as _dropped" << binlevel << endl;
+            _dropped[binlevel] = ch;
+        }
     }
 
 };
@@ -304,48 +373,33 @@ void AssembledChunkRingbuf::dropping(shared_ptr<assembled_chunk> t) {
     _parent->dropping(_binlevel, t);
 }
 
-
-
-class Tester {
-public:
-    void push(shared_ptr<assembled_chunk> ch) {
-        _p = shared_ptr<assembled_chunk>(ch, nullptr);
-        _p.swap(ch);
-    }
-    
-    shared_ptr<assembled_chunk> _p;
-};
-
-
-/*
-
 int main() {
 
     L1Ringbuf rb;
 
+    int beam = 77;
     int nupfreq = 4;
     int nt_per = 16;
     int fpga_per = 400;
 
-    shared_ptr<assembled_chunk> ch;
-    ch = assembled_chunk::make(4, nupfreq, nt_per, fpga_per, 42);
+    assembled_chunk* ch;
+    //ch = assembled_chunk::make(4, nupfreq, nt_per, fpga_per, 42);
 
-    Tester t;
-    t.push(ch);
-    ch.reset();
+    for (int i=0; i<32; i++) {
+        ch = new assembled_chunk(beam, nupfreq, nt_per, fpga_per, i);
+        rb.push(ch);
 
-     rb.push(ch.get());
-     cout << "ch: " << (void*)ch.get() << endl;
-     shared_ptr<assembled_chunk> s(ch, nullptr);
-     ch.swap(s);
-     // however...
-     cout << "Reset ch" << endl;
-     ch.reset();
-     cout << endl;
+        cout << "Pushed " << i << endl;
+        rb.print();
+        cout << endl;
+
+        // downstream thread consumes with a lag of 2...
+        if (i >= 2) {
+            rb.pop();
+        }
+    }
 
 }
-     */
-
 
 
 /*
@@ -396,74 +450,4 @@ int main() {
 
 }
  */
-
-
-class Int {
-public:
-    Int(int x) : _x(x) {}
-    ~Int() { cout << "Destructor: " << _x << endl; }
-    int _x;
-};
-
-class Deleter {
-public:
-    void operator()(Int* x) {
-        if (x) {
-            cout << "Deleter: " << x->_x << endl;
-            delete x;
-        } else {
-            cout << "Deleter: null" << endl;
-        }
-    }
-};
-
-class DoNotDelete {
-public:
-    void operator()(Int* x) {
-        if (x) {
-            cout << "DoNotDelete: " << x->_x << endl;
-            delete x;
-        } else {
-            cout << "DoNotDelete: null" << endl;
-        }
-    }
-};
-
-int main() {
-
-    shared_ptr<Int> a(new Int(42));
-
-    Deleter dd;
-
-    shared_ptr<Int> x(a.get(), dd);
-    cout << "a.reset()" << endl;
-    a.reset(x.get(), DoNotDelete());
-
-    //cout << "reset s" << endl;
-    //s.reset();
-    cout << "reset a" << endl;
-    a.reset();
-
-    cout << "reset x" << endl;
-    x.reset();
-
-
-#if 0
-    //shared_ptr<Int> b(new Int(43), dd);
-    shared_ptr<Int> b(new Int(43), dd);
-
-    shared_ptr<Int> c(b);
-    
-    a.swap(b);
-    cout << "a.reset()..." << endl;
-    a.reset();
-
-    cout << "b.reset()..." << endl;
-    b.reset();
-#endif
-
-    cout << "Done" << endl;
-}
-
-
 
