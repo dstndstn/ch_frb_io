@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include <random>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
@@ -382,8 +383,7 @@ void intensity_network_ostream::_network_thread_body()
 		}
 	    }
 
-	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
-
+            ssize_t n = this->_send(this->sockfd, packet, packet_nbytes, 0);
 	    if (n < 0)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
 	    if (n != packet_nbytes)
@@ -398,6 +398,10 @@ void intensity_network_ostream::_network_thread_body()
     }
 
     this->_announce_end_of_stream();
+}
+
+ssize_t intensity_network_ostream::_send(int socket, const uint8_t* packet, int nbytes, int flags) {
+    return send(socket, packet, nbytes, flags);
 }
 
 void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,

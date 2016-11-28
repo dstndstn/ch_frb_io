@@ -589,7 +589,6 @@ public:
     const uint64_t fpga_counts_per_chunk;
     const double target_gbps;
 
-    
     // It's convenient to initialize intensity_network_ostreams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns a network thread which runs
     // in the background.
@@ -653,6 +652,9 @@ protected:
     static void *network_pthread_main(void *opaque_args);
 
     void _network_thread_body();
+
+    // For testing purposes (eg, can create a subclass that randomly drops packets), a wrapper on the underlying packet send() function.
+    virtual ssize_t _send(int socket, const uint8_t* packet, int nbytes, int flags);
 
     void _open_socket();
     void _announce_end_of_stream();
