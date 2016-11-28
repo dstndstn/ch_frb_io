@@ -130,6 +130,7 @@ assembled_chunk is being dropped.
 #include <iostream>
 #include <queue>
 #include <deque>
+#include <functional>
 
 using namespace std;
 using namespace std::placeholders;
@@ -159,7 +160,7 @@ public:
      */
     Ringbuf(int maxsize) :
         _deleter(this),
-        _q(maxsize),
+        _q(),
         _live(0),
         _maxsize(maxsize)
     {}
@@ -209,8 +210,10 @@ public:
     vector<shared_ptr<T> > snapshot(bool (*testFunc)(const shared_ptr<T>)) {
         vector<shared_ptr<T> > vec;
         for (auto it = _q.begin(); it != _q.end(); it++) {
-            if (!testFunc || testFunc(*it))
-                vec.push_back(*it);
+	  if (!testFunc || testFunc(*it)) {
+	    cout << "snapshot: " << (*it) << endl;
+	    vec.push_back(*it);
+	  }
         }
         return vec;
     }
@@ -294,15 +297,15 @@ public:
         _rb(),
         _dropped()
     {
-        for (int i=0; i<Nbins; i++)
+        for (size_t i=0; i<Nbins; i++)
             _rb.push_back(new AssembledChunkRingbuf(i, this, 4));
             //_rb[i] = new AssembledChunkRingbuf(i, this, 4);
-        for (int i=0; i<Nbins-1; i++)
+        for (size_t i=0; i<Nbins-1; i++)
             _dropped.push_back(shared_ptr<assembled_chunk>());
     }
 
     ~L1Ringbuf() {
-        for (int i=0; i<Nbins; i++)
+        for (size_t i=0; i<Nbins; i++)
             delete _rb[i];
     }
 
@@ -323,7 +326,7 @@ public:
     void print() {
         cout << "L1 ringbuf:" << endl;
 
-        for (int i=0; i<Nbins; i++) {
+        for (size_t i=0; i<Nbins; i++) {
             vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
             cout << "  binning " << i << ": [ ";
             for (auto it = v.begin(); it != v.end(); it++) {
@@ -351,7 +354,7 @@ protected:
  
     void dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
         cout << "Bin level " << binlevel << " dropping a chunk" << endl;
-        if (binlevel >= Nbins-1)
+        if (binlevel >= (int)(Nbins-1))
             return;
 
         if (_dropped[binlevel]) {
