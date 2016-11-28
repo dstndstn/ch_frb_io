@@ -297,6 +297,8 @@ public:
         for (int i=0; i<Nbins; i++)
             _rb.push_back(new AssembledChunkRingbuf(i, this, 4));
             //_rb[i] = new AssembledChunkRingbuf(i, this, 4);
+        for (int i=0; i<Nbins-1; i++)
+            _dropped.push_back(shared_ptr<assembled_chunk>());
     }
 
     ~L1Ringbuf() {
