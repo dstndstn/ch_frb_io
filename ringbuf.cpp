@@ -136,6 +136,16 @@ assembled_chunk is being dropped.
 
 using namespace std;
 
+#include "ch_frb_io.hpp"
+using namespace ch_frb_io;
+
+std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
+    s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << ")";
+    return s;
+}
+
+
+
 // forward decl
 template<class T>
 class RingbufDeleter;
@@ -184,7 +194,6 @@ public:
 protected:
     RingbufDeleter<T> _deleter;
 
-    // TEST
     std::queue<shared_ptr<T> > _q;
 
     size_t _live;
@@ -197,6 +206,8 @@ protected:
         cout << "Deleting object: " << *t << endl;
         _live--;
         cout << "Now " << _live << " objects are live" << endl;
+        // FIXME --?
+        delete t;
     }
 
 };
@@ -216,6 +227,128 @@ protected:
     Ringbuf<T>* _ringbuf;
 };
 
+
+class L1Ringbuf;
+
+class AssembledChunkRingbuf : public Ringbuf<assembled_chunk> {
+
+public:
+    AssembledChunkRingbuf(int binlevel, L1Ringbuf* parent, int maxsize) :
+        Ringbuf<assembled_chunk>(maxsize),
+        _binlevel(binlevel),
+        _parent(parent)
+    {}
+
+protected:
+    // my time-binning level: 0 = original intensity stream; 1 = binned x 2,
+    // 2 = binned x 4.
+    int _binlevel;
+    L1Ringbuf* _parent;
+
+    virtual void dropping(shared_ptr<assembled_chunk> t);
+
+};
+
+
+class L1Ringbuf {
+    friend class AssembledChunkRingbuf;
+
+public:
+    L1Ringbuf() :
+        _bin0(0, this, 4),
+        _bin1(1, this, 4),
+        _bin2(2, this, 4)
+    {}
+
+    bool push(assembled_chunk* ch) {
+        shared_ptr<assembled_chunk> p = _bin0.push(ch);
+        if (!p)
+            return false;
+        _q.push(p);
+        return true;
+    }
+
+    shared_ptr<assembled_chunk> pop() {
+        shared_ptr<assembled_chunk> p = _q.front();
+        _q.pop();
+        return p;
+    }
+    
+protected:
+    std::queue<shared_ptr<assembled_chunk> > _q;
+
+    AssembledChunkRingbuf _bin0;
+    shared_ptr<assembled_chunk> _dropped0;
+
+    AssembledChunkRingbuf _bin1;
+    shared_ptr<assembled_chunk> _dropped1;
+
+    AssembledChunkRingbuf _bin2;
+
+    void dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
+        cout << "Bin level " << binlevel << " dropping a chunk" << endl;
+        if (binlevel == 0) {
+            if (_dropped0) {
+                cout << "Now have 2 dropped chunks from bin level 0" << endl;
+                // FIXME -- bin down and push onto _bin1
+                _dropped0.reset();
+            }
+        }
+        // FIXME -- ... etc...
+    }
+
+};
+
+// after L1Ringbuf has been declared...
+void AssembledChunkRingbuf::dropping(shared_ptr<assembled_chunk> t) {
+    _parent->dropping(_binlevel, t);
+}
+
+
+
+class Tester {
+public:
+    void push(shared_ptr<assembled_chunk> ch) {
+        _p = shared_ptr<assembled_chunk>(ch, nullptr);
+        _p.swap(ch);
+    }
+    
+    shared_ptr<assembled_chunk> _p;
+};
+
+
+/*
+
+int main() {
+
+    L1Ringbuf rb;
+
+    int nupfreq = 4;
+    int nt_per = 16;
+    int fpga_per = 400;
+
+    shared_ptr<assembled_chunk> ch;
+    ch = assembled_chunk::make(4, nupfreq, nt_per, fpga_per, 42);
+
+    Tester t;
+    t.push(ch);
+    ch.reset();
+
+     rb.push(ch.get());
+     cout << "ch: " << (void*)ch.get() << endl;
+     shared_ptr<assembled_chunk> s(ch, nullptr);
+     ch.swap(s);
+     // however...
+     cout << "Reset ch" << endl;
+     ch.reset();
+     cout << endl;
+
+}
+     */
+
+
+
+/*
 int main() {
     cout << "Creating ringbuf..." << endl;
     Ringbuf<int> rb(4);
@@ -262,5 +395,75 @@ int main() {
     cout << "Done" << endl;
 
 }
+ */
+
+
+class Int {
+public:
+    Int(int x) : _x(x) {}
+    ~Int() { cout << "Destructor: " << _x << endl; }
+    int _x;
+};
+
+class Deleter {
+public:
+    void operator()(Int* x) {
+        if (x) {
+            cout << "Deleter: " << x->_x << endl;
+            delete x;
+        } else {
+            cout << "Deleter: null" << endl;
+        }
+    }
+};
+
+class DoNotDelete {
+public:
+    void operator()(Int* x) {
+        if (x) {
+            cout << "DoNotDelete: " << x->_x << endl;
+            delete x;
+        } else {
+            cout << "DoNotDelete: null" << endl;
+        }
+    }
+};
+
+int main() {
+
+    shared_ptr<Int> a(new Int(42));
+
+    Deleter dd;
+
+    shared_ptr<Int> x(a.get(), dd);
+    cout << "a.reset()" << endl;
+    a.reset(x.get(), DoNotDelete());
+
+    //cout << "reset s" << endl;
+    //s.reset();
+    cout << "reset a" << endl;
+    a.reset();
+
+    cout << "reset x" << endl;
+    x.reset();
+
+
+#if 0
+    //shared_ptr<Int> b(new Int(43), dd);
+    shared_ptr<Int> b(new Int(43), dd);
+
+    shared_ptr<Int> c(b);
+    
+    a.swap(b);
+    cout << "a.reset()..." << endl;
+    a.reset();
+
+    cout << "b.reset()..." << endl;
+    b.reset();
+#endif
+
+    cout << "Done" << endl;
+}
+
 
 

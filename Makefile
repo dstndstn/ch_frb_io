@@ -87,3 +87,5 @@ test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 test-network-streams: test-network-streams.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
+ringbuf: ringbuf.cpp $(OFILES)
+	$(CPP) $(CPP_LFLAGS) -o $@ $^ -lhdf5
