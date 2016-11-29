@@ -266,18 +266,19 @@ protected:
     const uint64_t fpga_counts_per_sample;
 
     // Helper function: adds assembled chunk to the ring buffer
-    void _put_assembled_chunk(const std::shared_ptr<assembled_chunk> &chunk, int64_t *event_counts);
+    // Post-condition: chunk has been reset().
+    void _put_assembled_chunk(std::unique_ptr<assembled_chunk> &chunk, int64_t *event_counts);
 
     // Helper function: allocates new assembled chunk
-    std::shared_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
+    std::unique_ptr<assembled_chunk> _make_assembled_chunk(uint64_t ichunk);
 
     // The "active" chunks are in the process of being filled with data as packets arrive.
     // Currently we take the active window to be two assembled_chunks long, but this could be generalized.
     // When an active chunk is finished, it is added to the ring buffer.
     // Note: the active_chunk pointers are not protected by a lock, but are only accessed by the assembler thread.
     // Note: active_chunk0->ichunk is always equal to (assembled_ringbuf_pos + assembled_ringbuf_size).
-    std::shared_ptr<assembled_chunk> active_chunk0;
-    std::shared_ptr<assembled_chunk> active_chunk1;
+    std::unique_ptr<assembled_chunk> active_chunk0;
+    std::unique_ptr<assembled_chunk> active_chunk1;
 
     // Not sure if this really affects bottom-line performance, but thought it would be a good idea
     // to ensure that the "assembler-only" and "shared" fields were on different cache lines.

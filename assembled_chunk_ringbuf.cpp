@@ -75,7 +75,9 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	// in the far future effectively kills the L1 node.
 	//
 	this->_put_assembled_chunk(active_chunk0, event_counts);
-	active_chunk0 = active_chunk1;
+        // after _put_assembled_chunk(), active_chunk0 has been reset.
+	//active_chunk0 = active_chunk1;
+        active_chunk0.swap(active_chunk1);
 	active_chunk1 = this->_make_assembled_chunk(active_ichunk+2);
 	active_ichunk++;
     }
@@ -96,22 +98,23 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 }
 
 
-void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_chunk> &chunk, int64_t *event_counts)
+void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
     if (!chunk)
 	throw runtime_error("ch_frb_io: internal error: empty pointer passed to assembled_chunk_ringbuf::_put_unassembled_packet()");
-	
+
     pthread_mutex_lock(&this->lock);
 
     if (this->doneflag) {
 	pthread_mutex_unlock(&this->lock);
+        chunk.reset();
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
     }
 
     if (assembled_ringbuf_size < constants::assembled_ringbuf_capacity) {
 	// Add chunk to ring buffer
 	int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
-	this->assembled_ringbuf[i] = chunk;
+	this->assembled_ringbuf[i] = shared_ptr<assembled_chunk>(chunk.release());
 	this->assembled_ringbuf_size++;
 	
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
@@ -123,6 +126,7 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(const shared_ptr<assembled_ch
     // If we get here, the ring buffer was full.
     pthread_mutex_unlock(&this->lock);
     event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
+    chunk.reset();
 
     if (ini_params.emit_warning_on_buffer_drop)
 	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
@@ -170,7 +174,7 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 
     this->_put_assembled_chunk(active_chunk0, event_counts);
     this->_put_assembled_chunk(active_chunk1, event_counts);
-    this->active_chunk0 = this->active_chunk1 = shared_ptr<assembled_chunk> ();
+    //this->active_chunk0 = this->active_chunk1 = unique_ptr<assembled_chunk> ();
 
     pthread_mutex_lock(&this->lock);
 
@@ -187,14 +191,15 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 }
 
 
-std::shared_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
+std::unique_ptr<assembled_chunk> assembled_chunk_ringbuf::_make_assembled_chunk(uint64_t ichunk)
 {
+    bool force_ref  = false;
+    bool force_fast = false;
     if (ini_params.mandate_fast_kernels)
-	return make_shared<fast_assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+        force_fast = true;
     else if (ini_params.mandate_reference_kernels)
-	return make_shared<assembled_chunk> (beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
-    else
-	return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
+        force_ref = true;
+    return assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk, force_ref, force_fast);
 }
 
 

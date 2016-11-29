@@ -148,14 +148,22 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 }
 
 
-shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
+unique_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_, bool force_reference, bool force_fast)
 {
+    // FIXME -- if C++14 is available, use make_unique()
+    if (force_reference && force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): both force_reference and force_fast were set!");
+
 #ifdef __AVX2__
-    if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
-	return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    if (force_fast ||
+        ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0) && !force_reference))
+	return unique_ptr<fast_assembled_chunk>(new fast_assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+#else
+    if (force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast set on a machine without AVX2!");
 #endif
 
-    return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    return unique_ptr<assembled_chunk>(new assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
 }
 
 

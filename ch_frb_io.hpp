@@ -474,7 +474,7 @@ struct assembled_chunk : noncopyable {
 
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.
-    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
+    static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk, bool force_reference=false, bool force_fast=false);
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
