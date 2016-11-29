@@ -130,139 +130,123 @@ assembled_chunk is being dropped.
 #include <iostream>
 #include <queue>
 #include <deque>
-#include <functional>
 
 using namespace std;
-using namespace std::placeholders;
+
+#include "ringbuf.hpp"
+
+
+
+
+
+
+
 
 #include "ch_frb_io.hpp"
 using namespace ch_frb_io;
-
 
 std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
     s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << ")";
     return s;
 }
 
+template <class T>
+Ringbuf<T>::Ringbuf(int maxsize) :
+    _deleter(this),
+    _q(),
+    _live(0),
+    _maxsize(maxsize)
+{}
+
+template <class T>
+Ringbuf<T>::~Ringbuf() {}
+
+template <class T>
+shared_ptr<T> Ringbuf<T>::push(T* t) {
+    bool can = _can_push();
+    if (!can)
+        return shared_ptr<T>();
 
 
-// forward decl
-template<class T>
-class RingbufDeleter;
+    cout << "Creating shared_ptr..." << endl;
+    shared_ptr<T> p(t, _deleter);
+    _live++;
+    _q.push_back(p);
+    cout << "Now " << _live << " objects are live" << endl;
+    return p;
+}
 
-template<class T>
-class Ringbuf {
-    friend class RingbufDeleter<T>;
+template <class T>
+bool Ringbuf<T>::can_push() {
+    return _can_push();
+}
 
-public:
-    /*
-     Creates a new Ringbuf with the given maximum quota size.
-     */
-    Ringbuf(int maxsize) :
-        _deleter(this),
-        _q(),
-        _live(0),
-        _maxsize(maxsize)
-    {}
-
-    virtual ~Ringbuf() {}
-
-    /*
-     Tries to push a new frame onto the ring buffer.  If the quota of
-     frames has been reached, frames will be popped off the front
-     until the buffer is empty.  If space is still not available, will
-     return an empty shared_ptr.
-
-     Returns the enqueued shared_ptr if successful.
-     */
-    shared_ptr<T> push(T* t) {
-        while (_live >= _maxsize) {
-            cout << "Push: _live >= _maxsize." << " (" << _live << " >= " << _maxsize << ")" << endl;
-            if (_q.empty()) {
-                cout << "Ring buffer empty but still too many live elements -- push fails" << endl;
-                return shared_ptr<T>();
-            }
-            cout << "Dropping an element..." << endl;
-            shared_ptr<T> p = _q.front();
-            _q.pop_front();
-            dropping(p);
-            p.reset();
-            cout << "Now " << _live << " live" << endl;
-        }
-        cout << "Creating shared_ptr..." << endl;
-        shared_ptr<T> p(t, _deleter);
-        _live++;
-        _q.push_back(p);
-        cout << "Now " << _live << " objects are live" << endl;
-        return p;
+template <class T>
+shared_ptr<T> Ringbuf<T>::pop() {
+    cout << "Popping..." << endl;
+    if (_q.empty()) {
+        cout << "Pop: empty" << endl;
+        return shared_ptr<T>();
     }
+    shared_ptr<T> p = _q.pop_front();
+    cout << "Pop: returning " << *p << endl;
+    return p;
+}
 
-    /*
-     Pops the oldest frame from this buffer.
-     */
-    shared_ptr<T> pop() {
-        cout << "Popping..." << endl;
-        shared_ptr<T> p = _q.pop_front();
-        cout << "Pop: returning " << *p << endl;
-        return p;
-    }
-
-    /*
-     Retrieves frames from this ring buffer that satisfy the
-     (optional) selection function.
-     */
-    vector<shared_ptr<T> > snapshot(bool (*testFunc)(const shared_ptr<T>)) {
-        vector<shared_ptr<T> > vec;
-        for (auto it = _q.begin(); it != _q.end(); it++) {
-	  if (!testFunc || testFunc(*it)) {
+template <class T>
+vector<shared_ptr<T> > Ringbuf<T>::snapshot(bool (*testFunc)(const shared_ptr<T>)) {
+    vector<shared_ptr<T> > vec;
+    for (auto it = _q.begin(); it != _q.end(); it++) {
+        if (!testFunc || testFunc(*it)) {
 	    vec.push_back(*it);
-	  }
         }
-        return vec;
     }
-    
-protected:
-    // Small helper class that calls deleted() when one of our frames
-    // is deleted.
-    RingbufDeleter<T> _deleter;
+    return vec;
+}
 
-    // The actual queue of frames.
-    deque<shared_ptr<T> > _q;
+template <class T>
+void Ringbuf<T>::dropping(shared_ptr<T> t) {}
 
-    // Number of live frames.
-    size_t _live;
-    // Maximum allowable number of live frames.
-    size_t _maxsize;
+// Called by the RingbufDeleter when a shared_ptr is deleted
+template <class T>
+void Ringbuf<T>::deleted(T* t) {
+    cout << "Deleting object: " << *t << endl;
+    _live--;
+    cout << "Now " << _live << " objects are live" << endl;
+    // FIXME --?
+    delete t;
+}
 
-    // We're about to drop this frame.
-    virtual void dropping(shared_ptr<T> t) {}
-
-    // Called by the RingbufDeleter when a shared_ptr is deleted
-    void deleted(T* t) {
-        cout << "Deleting object: " << *t << endl;
-        _live--;
-        cout << "Now " << _live << " objects are live" << endl;
-        // FIXME --?
-        delete t;
+template <class T>
+bool Ringbuf<T>::_can_push() {
+    while (_live >= _maxsize) {
+        cout << "Push: _live >= _maxsize." << " (" << _live << " >= " << _maxsize << ")" << endl;
+        if (_q.empty()) {
+            cout << "Ring buffer empty but still too many live elements -- push fails" << endl;
+            return false;
+        }
+        cout << "Dropping an element..." << endl;
+        shared_ptr<T> p = _q.front();
+        _q.pop_front();
+        dropping(p);
+        p.reset();
+        cout << "Now " << _live << " live" << endl;
     }
-
-};
+    return true;
+}
 
 // Helper class that is the Deleter for our shared_ptr<frames>.  Calls
 // Ringbuf.deleted() to track number of live frames.
-template<class T>
-class RingbufDeleter {
-public:
-    RingbufDeleter(Ringbuf<T>* rb) : _ringbuf(rb) {}
+template <class T>
+RingbufDeleter<T>::RingbufDeleter(Ringbuf<T>* rb) : _ringbuf(rb) {}
 
-    void operator()(T* t) {
-        cout << "RingbufDelete::operator() called." << endl;
-        _ringbuf->deleted(t);
-    }
+template <class T>
+void RingbufDeleter<T>::operator()(T* t) {
+    cout << "RingbufDelete::operator() called." << endl;
+    _ringbuf->deleted(t);
+}
 
-protected:
-    Ringbuf<T>* _ringbuf;
-};
+
 
 
 class L1Ringbuf;

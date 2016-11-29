@@ -1,4 +1,12 @@
+#ifndef _CH_FRB_IO_RINGBUF_HPP
+#define _CH_FRB_IO_RINGBUF_HPP
+
+#if (__cplusplus < 201103) && !defined(__GXX_EXPERIMENTAL_CXX0X__)
+#error "This source file needs to be compiled with C++11 support (g++ -std=c++11)"
+#endif
+
 #include <deque>
+#include <memory>
 
 // forward decl
 template<class T>
@@ -14,7 +22,7 @@ public:
      */
     Ringbuf(int maxsize);
 
-    virtual ~Ringbuf() {}
+    virtual ~Ringbuf();
 
     /*
      Try to push a new frame onto the ring buffer.  If the quota of
@@ -59,10 +67,13 @@ protected:
     size_t _maxsize;
 
     // We're about to drop this frame.
-    virtual void dropping(shared_ptr<T> t) {}
+    virtual void dropping(shared_ptr<T> t);
 
     // Called by the RingbufDeleter when a shared_ptr is deleted
     void deleted(T* t);
+
+    // internal (unlocked) version of can_push().
+    bool _can_push();
 
 };
 
@@ -78,3 +89,4 @@ protected:
     Ringbuf<T>* _ringbuf;
 };
 
+#endif
