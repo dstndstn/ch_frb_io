@@ -406,8 +406,63 @@ void AssembledChunkRingbuf::dropping(shared_ptr<assembled_chunk> t) {
     _parent->dropping(_binlevel, t);
 }
 
+#include <new>
+#include <memory>
+
+class MyClass {
+public:
+    MyClass(int x) : _x(x) {
+        cout << "MyClass(" << x << ")" << endl;
+    }
+    ~MyClass() {
+        cout << "~MyClass(" << _x << ")" << endl;
+    }
+
+    static int _nlive;
+
+    static void* operator new(size_t count) {
+        _nlive++;
+        cout << "MyClass.new(" << count << "); nlive=" << _nlive << endl;
+        return ::operator new(count);
+    }
+
+    static void operator delete(void* ptr) {
+        _nlive--;
+        cout << "MyClass.delete(); nlive=" << _nlive << endl;
+        ::operator delete(ptr);
+    }
+
+    int _x;
+
+};
+
+int MyClass::_nlive = 0;
 
 int main() {
+
+    cout << "Create" << endl;
+
+    MyClass a(42);
+
+    MyClass* b = new MyClass(43);
+
+    // Interestingly, this does NOT call the MyClass::operator new
+    // (because make_shared merges the shared_ptr control block and
+    // MyClass memory)
+    shared_ptr<MyClass> c = make_shared<MyClass>(44);
+
+    // make_unique is new in C++14
+    //unique_ptr<MyClass> d = std::make_unique<MyClass>(45);
+    unique_ptr<MyClass> d(new MyClass(45));
+
+    cout << "Delete" << endl;
+
+    d.reset();
+    c.reset();
+    delete b;
+
+    exit(0);
+
 
     L1Ringbuf rb;
 
