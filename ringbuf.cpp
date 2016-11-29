@@ -207,11 +207,14 @@ public:
         return p;
     }
 
+    /*
+     Retrieves frames from this ring buffer that satisfy the
+     (optional) selection function.
+     */
     vector<shared_ptr<T> > snapshot(bool (*testFunc)(const shared_ptr<T>)) {
         vector<shared_ptr<T> > vec;
         for (auto it = _q.begin(); it != _q.end(); it++) {
 	  if (!testFunc || testFunc(*it)) {
-	    cout << "snapshot: " << (*it) << endl;
 	    vec.push_back(*it);
 	  }
         }
@@ -245,7 +248,8 @@ protected:
 
 };
 
-
+// Helper class that is the Deleter for our shared_ptr<frames>.  Calls
+// Ringbuf.deleted() to track number of live frames.
 template<class T>
 class RingbufDeleter {
 public:
@@ -297,35 +301,50 @@ public:
         _rb(),
         _dropped()
     {
+        // Create the ring buffer objects for each time binning
+        // (0 = native rate, 1 = binned by 2, ...)
         for (size_t i=0; i<Nbins; i++)
-            _rb.push_back(new AssembledChunkRingbuf(i, this, 4));
-            //_rb[i] = new AssembledChunkRingbuf(i, this, 4);
+            _rb.push_back(shared_ptr<AssembledChunkRingbuf>
+                          (new AssembledChunkRingbuf(i, this, 4)));
+        // Fill the "_dropped" array with empty shared_ptrs.
         for (size_t i=0; i<Nbins-1; i++)
             _dropped.push_back(shared_ptr<assembled_chunk>());
     }
 
-    ~L1Ringbuf() {
-        for (size_t i=0; i<Nbins; i++)
-            delete _rb[i];
-    }
-
+    /*
+     Tries to enqueue an assembled_chunk.  If no space can be
+     allocated, returns false.  The ring buffer now assumes ownership
+     of the assembled_chunk.
+     */
     bool push(assembled_chunk* ch) {
         shared_ptr<assembled_chunk> p = _rb[0]->push(ch);
         if (!p)
             return false;
-        _q.push(p);
+        _q.push_back(p);
         return true;
     }
 
+    /*
+     Returns the next assembled_chunk for downstream processing.
+     */
     shared_ptr<assembled_chunk> pop() {
+        if (_q.empty())
+            return shared_ptr<assembled_chunk>();
         shared_ptr<assembled_chunk> p = _q.front();
-        _q.pop();
+        _q.pop_front();
         return p;
     }
 
+    /*
+     Prints a report of the assembled_chunks currently queued.
+     */
     void print() {
         cout << "L1 ringbuf:" << endl;
-
+        cout << "  downstream: [ ";
+        for (auto it = _q.begin(); it != _q.end(); it++) {
+            cout << (*it)->ichunk << " ";
+        }
+        cout << "];" << endl;
         for (size_t i=0; i<Nbins; i++) {
             vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
             cout << "  binning " << i << ": [ ";
@@ -345,13 +364,22 @@ public:
     
 protected:
     // The queue for downstream
-    queue<shared_ptr<assembled_chunk> > _q;
+    deque<shared_ptr<assembled_chunk> > _q;
 
-    vector<AssembledChunkRingbuf*> _rb;
-    //array<AssembledChunkRingbuf*, Nbins> _rb;
+    // The ring buffers for each time-binning.  Length fixed at Nbins.
+    vector<shared_ptr<AssembledChunkRingbuf> > _rb;
+
+    // The assembled_chunks that have been dropped from the ring
+    // buffers and are waiting for a pair to be time-downsampled.
+    // Length fixed at Nbins-1.
     vector<shared_ptr<assembled_chunk> > _dropped;
-    //array<shared_ptr<assembled_chunk>, Nbins> _dropped;
- 
+
+    // Called from the AssembledChunkRingbuf objects when a chunk is
+    // about to be dropped from one binning level of the ringbuf.  If
+    // the chunk does not have a partner waiting (in _dropped), then
+    // it is saved in _dropped.  Otherwise, the two chunks are merged
+    // into one new chunk and added to the next binning level's
+    // ringbuf.
     void dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
         cout << "Bin level " << binlevel << " dropping a chunk" << endl;
         if (binlevel >= (int)(Nbins-1))
@@ -378,6 +406,7 @@ void AssembledChunkRingbuf::dropping(shared_ptr<assembled_chunk> t) {
     _parent->dropping(_binlevel, t);
 }
 
+
 int main() {
 
     L1Ringbuf rb;
@@ -390,7 +419,12 @@ int main() {
     assembled_chunk* ch;
     //ch = assembled_chunk::make(4, nupfreq, nt_per, fpga_per, 42);
 
-    for (int i=0; i<32; i++) {
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    rng.seed(42);
+    std::uniform_int_distribution<> rando(0,1);
+
+    for (int i=0; i<100; i++) {
         ch = new assembled_chunk(beam, nupfreq, nt_per, fpga_per, i);
         rb.push(ch);
 
@@ -400,7 +434,15 @@ int main() {
 
         // downstream thread consumes with a lag of 2...
         if (i >= 2) {
-            rb.pop();
+            // Randomly consume 0 to 2 chunks
+            if (rando(rng)) {
+                cout << "Downstream consumes a chunk" << endl;
+                rb.pop();
+            }
+            if (rando(rng)) {
+                cout << "Downstream consumes a chunk" << endl;
+                rb.pop();
+            }
         }
     }
 
