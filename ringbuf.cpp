@@ -138,18 +138,6 @@ using namespace std;
 
 
 
-
-
-
-
-#include "ch_frb_io.hpp"
-using namespace ch_frb_io;
-
-std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
-    s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << ")";
-    return s;
-}
-
 template <class T>
 Ringbuf<T>::Ringbuf(int maxsize) :
     _deleter(this),
@@ -210,7 +198,7 @@ void Ringbuf<T>::dropping(shared_ptr<T> t) {}
 // Called by the RingbufDeleter when a shared_ptr is deleted
 template <class T>
 void Ringbuf<T>::deleted(T* t) {
-    cout << "Deleting object: " << *t << endl;
+    //cout << "Deleting object: " << *t << endl;
     _live--;
     cout << "Now " << _live << " objects are live" << endl;
     // FIXME --?
@@ -248,6 +236,16 @@ void RingbufDeleter<T>::operator()(T* t) {
 
 
 
+////////////////////////// How we'd use this ring buffer in L1 //////////////////////////
+
+
+#include "ch_frb_io.hpp"
+using namespace ch_frb_io;
+
+std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
+    s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << ")";
+    return s;
+}
 
 class L1Ringbuf;
 
