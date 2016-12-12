@@ -61,8 +61,15 @@ protected:
     // The actual queue of frames.
     deque<shared_ptr<T> > _q;
 
+    // (and the mutex for it)
+    pthread_mutex_t _q_lock;
+
     // Number of live frames.
     size_t _live;
+
+    // (and the mutex for it)
+    pthread_mutex_t _live_lock;
+
     // Maximum allowable number of live frames.
     size_t _maxsize;
 
@@ -71,9 +78,6 @@ protected:
 
     // Called by the RingbufDeleter when a shared_ptr is deleted
     void deleted(T* t);
-
-    // internal (unlocked) version of can_push().
-    bool _can_push();
 
 };
 
