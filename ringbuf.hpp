@@ -123,7 +123,7 @@ protected:
 template<class T>
 class RingbufDeleter {
 public:
-    RingbufDeleter(Ringbuf<T>* rb) {};
+    RingbufDeleter(Ringbuf<T>* rb) : _ringbuf(rb) {};
     void operator()(T* t) {
         _ringbuf->deleted(t);
     }
