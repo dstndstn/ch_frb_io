@@ -1,9 +1,6 @@
 #include <iostream>
 #include <deque>
 
-//#include "ringbuf.hpp"
-//using namespace std;
-
 template <class T>
 Ringbuf<T>::Ringbuf(int maxsize) :
     _deleter(this),
