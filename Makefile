@@ -42,10 +42,9 @@ OFILES = assembled_chunk.o \
 	intensity_packet.o \
 	lexical_cast.o \
 	udp_packet_list.o \
-	udp_packet_ringbuf.o \
-	ringbuf.o
+	udp_packet_ringbuf.o
 
-INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp
+INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp ringbuf.cpp
 LIBFILES=libch_frb_io.so
 INSTALLED_BINARIES=ch-show-intensity-file
 INSTALLED_SCRIPTS=ch-plot-intensity-file

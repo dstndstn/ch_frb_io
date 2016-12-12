@@ -123,11 +123,17 @@ protected:
 template<class T>
 class RingbufDeleter {
 public:
-    RingbufDeleter(Ringbuf<T>* rb);
-    void operator()(T* t);
+    RingbufDeleter(Ringbuf<T>* rb) {};
+    void operator()(T* t) {
+        _ringbuf->deleted(t);
+    }
 
 protected:
     Ringbuf<T>* _ringbuf;
 };
+
+// Implementation... must appear here because Ringbuf is templated!
+#include "ringbuf.cpp"
+
 
 #endif
