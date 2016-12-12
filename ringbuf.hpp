@@ -43,6 +43,7 @@
 
 #include <deque>
 #include <memory>
+#include <vector>
 
 // forward decl
 template<class T>

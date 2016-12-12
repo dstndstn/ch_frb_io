@@ -1,5 +1,4 @@
 #include <iostream>
-#include <queue>
 #include <deque>
 
 #include "ringbuf.hpp"
@@ -120,4 +119,5 @@ void RingbufDeleter<T>::operator()(T* t) {
     //cout << "RingbufDelete::operator() called." << endl;
     _ringbuf->deleted(t);
 }
+
 
