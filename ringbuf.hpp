@@ -133,7 +133,7 @@ protected:
 };
 
 // Implementation... must appear here because Ringbuf is templated!
-#include "ringbuf.cpp"
+#include "ringbuf-impl.hpp"
 
 
 #endif
