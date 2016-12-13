@@ -91,11 +91,14 @@ public:
     std::vector<std::shared_ptr<T> > snapshot(bool (*testFunc)(const std::shared_ptr<T>) = NULL);
 
     /*
-     Retrieves frames from this ring buffer that satisfy the
-     (optional) selection function.
+     Retrieves frames from this ring buffer (into the given vector)
+     that satisfy the (optional) selection function.
      */
     void snapshot(std::vector<std::shared_ptr<T> > &v,
                   bool (*testFunc)(const std::shared_ptr<T>) = NULL);
+
+    void snapshot(std::vector<std::shared_ptr<T> > &v,
+                  std::function<bool(const std::shared_ptr<T>)>);
     
 protected:
     // Small helper class that calls deleted() when one of our frames
