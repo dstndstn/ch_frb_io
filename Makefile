@@ -83,7 +83,7 @@ clean:
 	$(CPP) -c -o $@ $<
 
 %.o: %.c $(INCFILES)
-	$(CC) -Ibitshuffle -I/usr/local/include -c -o $@ $<
+	$(CC) -std=c99 -fPIC -Ibitshuffle -I/usr/local/include -c -o $@ $<
 
 libch_frb_io.so: $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)

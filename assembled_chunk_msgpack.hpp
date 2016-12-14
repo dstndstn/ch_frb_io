@@ -6,7 +6,11 @@
 
 #include <msgpack.hpp>
 
+extern "C" {
+  // UGH: c99
+#define __STDC_VERSION__ 199901L
 #include <bitshuffle.h>
+}
 
 #include <ch_frb_io.hpp>
 
