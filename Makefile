@@ -29,14 +29,9 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5
-
 OFILES = assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
 	avx2_kernels.o \
-	hdf5.o \
-	intensity_hdf5_file.o \
-	intensity_hdf5_ofile.o \
 	intensity_network_stream.o \
 	intensity_network_ostream.o \
 	intensity_packet.o \
@@ -46,11 +41,10 @@ OFILES = assembled_chunk.o \
 
 INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp
 LIBFILES=libch_frb_io.so
-INSTALLED_BINARIES=ch-show-intensity-file
-INSTALLED_SCRIPTS=ch-plot-intensity-file
+INSTALLED_BINARIES=
+INSTALLED_SCRIPTS=
 
-TEST_BINARIES = test-intensity-hdf5-file \
-	test-misc \
+TEST_BINARIES = test-misc \
 	test-network-streams
 
 all: $(INSTALLED_BINARIES) $(TEST_BINARIES) $(LIBFILES)
@@ -74,12 +68,6 @@ clean:
 
 libch_frb_io.so: $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)
-
-ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
-
-test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.so
-	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
