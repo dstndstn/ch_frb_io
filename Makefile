@@ -49,11 +49,11 @@ OFILES = assembled_chunk.o \
 
 CPP += -Ibitshuffle
 
-INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp assembled_chunk_msgpack.hpp \
+INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp ringbuf-impl.hpp \
+	assembled_chunk_msgpack.hpp \
 	bitshuffle/bitshuffle.h bitshuffle/bitshuffle_core.h \
 	bitshuffle/bitshuffle_internals.h bitshuffle/iochain.h
 
-INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp ringbuf-impl.hpp
 LIBFILES=libch_frb_io.so
 INSTALLED_BINARIES=ch-show-intensity-file
 INSTALLED_SCRIPTS=ch-plot-intensity-file
