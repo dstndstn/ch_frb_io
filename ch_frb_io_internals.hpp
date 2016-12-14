@@ -256,6 +256,19 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
+    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot();
+
+    // Returns stats about the ring buffer.
+    //  *ringbuf_chunk* is the next chunk number that will be delivered to get_assembled_chunk().  (= assembled_ringbuf_pos)
+    //  *ringbuf_size* is the number of chunks available to be consumed by get_assembled_chunk().
+    //  *ringbuf_capacity* is the maximum number of chunks that can be held in the ring buffer.
+    //  *ringbuf_nelements* counts the number of valid chunks, including old chunks that have already been consumed by get_assembled_chunk.
+    //  *ringbuf_oldest_chunk* is the smallest chunk number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().)
+    void get_ringbuf_size(uint64_t* ringbuf_chunk,
+                          uint64_t* ringbuf_size,
+                          uint64_t* ringbuf_capacity,
+                          uint64_t* ringbuf_nelements,
+                          uint64_t* ringbuf_oldest_chunk);
 
 protected:
     const intensity_network_stream::initializer ini_params;
@@ -291,8 +304,8 @@ protected:
     pthread_cond_t cond_assembled_chunks_added;
 
     std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
-    int assembled_ringbuf_pos = 0;
-    int assembled_ringbuf_size = 0;
+    uint64_t assembled_ringbuf_pos  = 0;
+    uint64_t assembled_ringbuf_size = 0;
     bool doneflag = false;
 };
 
@@ -430,6 +443,7 @@ template<typename T> inline hid_t hdf5_type();
 
 // Reference: https://www.hdfgroup.org/HDF5/doc/H5.user/Datatypes.html
 template<> inline hid_t hdf5_type<int>()            { return H5T_NATIVE_INT; }
+template<> inline hid_t hdf5_type<unsigned long long>() { return H5T_NATIVE_ULLONG; }
 template<> inline hid_t hdf5_type<float>()          { return H5T_NATIVE_FLOAT; }
 template<> inline hid_t hdf5_type<double>()         { return H5T_NATIVE_DOUBLE; }
 template<> inline hid_t hdf5_type<unsigned char>()  { return H5T_NATIVE_UCHAR; }

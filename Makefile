@@ -29,7 +29,7 @@ endif
 ####################################################################################################
 
 
-LIBS = -lhdf5
+LIBS = -lhdf5 -llz4
 
 OFILES = assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
@@ -42,7 +42,16 @@ OFILES = assembled_chunk.o \
 	intensity_packet.o \
 	lexical_cast.o \
 	udp_packet_list.o \
-	udp_packet_ringbuf.o
+	udp_packet_ringbuf.o \
+	bitshuffle/bitshuffle.o \
+	bitshuffle/bitshuffle_core.o \
+	bitshuffle/iochain.o
+
+CPP += -Ibitshuffle
+
+INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp assembled_chunk_msgpack.hpp \
+	bitshuffle/bitshuffle.h bitshuffle/bitshuffle_core.h \
+	bitshuffle/bitshuffle_internals.h bitshuffle/iochain.h
 
 INCFILES=ch_frb_io.hpp ch_frb_io_internals.hpp ringbuf.hpp ringbuf-impl.hpp
 LIBFILES=libch_frb_io.so
@@ -50,6 +59,7 @@ INSTALLED_BINARIES=ch-show-intensity-file
 INSTALLED_SCRIPTS=ch-plot-intensity-file
 
 TEST_BINARIES = test-intensity-hdf5-file \
+	test-assembled-chunk-hdf5-file \
 	test-misc \
 	test-network-streams
 
@@ -72,6 +82,9 @@ clean:
 %.o: %.cpp $(INCFILES)
 	$(CPP) -c -o $@ $<
 
+%.o: %.c $(INCFILES)
+	$(CC) -Ibitshuffle -I/usr/local/include -c -o $@ $<
+
 libch_frb_io.so: $(OFILES)
 	$(CPP) $(CPP_LFLAGS) -o $@ -shared $^ $(LIBS)
 
@@ -80,6 +93,9 @@ ch-show-intensity-file: ch-show-intensity-file.cpp $(INCFILES) libch_frb_io.so
 
 test-intensity-hdf5-file: test-intensity-hdf5-file.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
+
+test-assembled-chunk-hdf5-file: test-assembled-chunk-hdf5-file.cpp $(INCFILES) $(OFILES)
+	$(CPP) $(CPP_LFLAGS) -o $@ $< $(OFILES) -llz4 -lhdf5
 
 test-misc: test-misc.cpp $(INCFILES) libch_frb_io.so
 	$(CPP) $(CPP_LFLAGS) -o $@ $< -lch_frb_io
