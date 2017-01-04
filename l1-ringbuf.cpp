@@ -8,13 +8,14 @@ using namespace ch_frb_io;
 using namespace std;
 
 namespace ch_frb_io {
+#if 0
+};  // pacify emacs c-mode!
+#endif
 
 std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
     s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << " at " << (void*)(&ch) << ")";
     return s;
 }
-
-} // namespace
 
 static bool
 assembled_chunk_overlaps_range(const shared_ptr<assembled_chunk> ch, 
@@ -165,4 +166,6 @@ void L1Ringbuf::dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
         _dropped[binlevel] = ch;
     }
 }
+
+} // namespace
 
