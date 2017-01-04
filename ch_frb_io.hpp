@@ -341,7 +341,8 @@ public:
 
     std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
 
-    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> beams);
+    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> &beams,
+                                                                                         uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
     ~intensity_network_stream();
 

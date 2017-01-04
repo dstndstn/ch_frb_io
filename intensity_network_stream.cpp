@@ -339,7 +339,9 @@ intensity_network_stream::get_statistics() {
 }
 
 vector< vector< shared_ptr<assembled_chunk> > >
-intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> beams)
+intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
+                                                uint64_t min_fpga_counts,
+                                                uint64_t max_fpga_counts)
 {
     vector< vector< shared_ptr<assembled_chunk> > > R;
 
@@ -359,8 +361,8 @@ intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> beams)
         for (int i=0; i<nbeams; i++) {
             if (this->ini_params.beam_ids[i] != beam)
                 continue;
-            // FIXME
-            //chunks = this->assemblers[i]->get_ringbuf_snapshot();
+            chunks = this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
+                                                               max_fpga_counts);
         }
         R.push_back(chunks);
     }

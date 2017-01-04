@@ -59,8 +59,13 @@ public:
      */
     void print();
 
+    /*
+     Retrieves assembled_chunks that overlap the given range of FPGA
+     counts values.  If min_fpga_counts is zero, no lower limit is
+     applied; likewise for max_fpga_counts.
+     */
     void retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
-                  std::vector<std::shared_ptr<ch_frb_io::assembled_chunk> >& chunks);
+                  std::vector<std::shared_ptr<ch_frb_io::assembled_chunk> >&chunks);
 
 public:
     uint64_t _beam_id;

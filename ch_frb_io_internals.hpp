@@ -258,10 +258,10 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
+    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+
     /*
      FIXME -- re-enable these calls...
-
-    std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot();
 
     // Returns stats about the ring buffer.
     //  *ringbuf_chunk* is the next chunk number that will be delivered to get_assembled_chunk().  (= assembled_ringbuf_pos)
