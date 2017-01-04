@@ -317,7 +317,9 @@ intensity_network_stream::get_statistics() {
         if (assemblers_init && (assemblers.size() > 0)) {
             // Grab the ring buffer to find the min & max chunk numbers and size.
             uint64_t ichunk, nchunks, capacity, ntot, oldest;
-            this->assemblers[b]->get_ringbuf_size(&ichunk, &nchunks, &capacity, &ntot, &oldest);
+            ichunk = nchunks = capacity = ntot = oldest = 0;
+            // FIXME
+            //this->assemblers[b]->get_ringbuf_size(&ichunk, &nchunks, &capacity, &ntot, &oldest);
             m["ringbuf_next"] = ichunk;
             m["ringbuf_ready"] = nchunks;
             m["ringbuf_capacity"] = capacity;
@@ -357,7 +359,8 @@ intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> beams)
         for (int i=0; i<nbeams; i++) {
             if (this->ini_params.beam_ids[i] != beam)
                 continue;
-            chunks = this->assemblers[i]->get_ringbuf_snapshot();
+            // FIXME
+            //chunks = this->assemblers[i]->get_ringbuf_snapshot();
         }
         R.push_back(chunks);
     }

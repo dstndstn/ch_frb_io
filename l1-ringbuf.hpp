@@ -8,12 +8,10 @@
 #include "ch_frb_io.hpp"
 #include "ringbuf.hpp"
 
-/*
-namespace ch_frb_l1 {
+namespace ch_frb_io {
 #if 0
 }; // pacify emacs c-mode
 #endif
- */
 
 std::ostream& operator<<(std::ostream& s, const ch_frb_io::assembled_chunk& ch);
 
@@ -89,8 +87,6 @@ protected:
 };
 
 
-/*
-}  // namespace ch_frb_l1
- */
+}  // namespace ch_frb_io
 
 #endif

@@ -33,6 +33,7 @@ LIBS = -lhdf5 -llz4
 
 OFILES = assembled_chunk.o \
 	assembled_chunk_ringbuf.o \
+	l1-ringbuf.o \
 	avx2_kernels.o \
 	hdf5.o \
 	intensity_hdf5_file.o \

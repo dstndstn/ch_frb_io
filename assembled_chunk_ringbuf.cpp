@@ -1,6 +1,8 @@
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
+#include "l1-ringbuf.hpp"
+
 using namespace std;
 
 namespace ch_frb_io {
@@ -33,13 +35,13 @@ assembled_chunk_ringbuf::assembled_chunk_ringbuf(const intensity_network_stream:
 	throw runtime_error("ch_frb_io: the 'mandate_fast_kernels' flag was set, but this machine does not have the AVX2 instruction set");
 #endif
 
+    ringbuf = new L1Ringbuf(beam_id_);
+
     uint64_t packet_t0 = fpga_count0 / fpga_counts_per_sample;
     uint64_t ichunk = packet_t0 / constants::nt_per_assembled_chunk;
 
     this->active_chunk0 = this->_make_assembled_chunk(ichunk);
     this->active_chunk1 = this->_make_assembled_chunk(ichunk+1);
-    this->assembled_ringbuf_pos  = ichunk;
-    this->assembled_ringbuf_size = 0;
 
     pthread_mutex_init(&this->lock, NULL);
     pthread_cond_init(&this->cond_assembled_chunks_added, NULL);
@@ -50,8 +52,10 @@ assembled_chunk_ringbuf::~assembled_chunk_ringbuf()
 {
     pthread_cond_destroy(&this->cond_assembled_chunks_added);
     pthread_mutex_destroy(&this->lock);
+    delete ringbuf;
 }
 
+/*
 vector<shared_ptr<assembled_chunk> >
 assembled_chunk_ringbuf::get_ringbuf_snapshot()
 {
@@ -107,6 +111,7 @@ void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_chunk,
     }
     pthread_mutex_unlock(&this->lock);
 }
+ */
 
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {
@@ -116,9 +121,8 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 
     uint64_t packet_t0 = packet.fpga_count / packet.fpga_counts_per_sample;
     uint64_t packet_ichunk = packet_t0 / constants::nt_per_assembled_chunk;
-    uint64_t active_ichunk = assembled_ringbuf_pos + assembled_ringbuf_size;
 
-    if (packet_ichunk >= active_ichunk + 2) {
+    if (packet_ichunk >= active_chunk0->ichunk + 2) {
 	//
 	// If we receive a packet whose timestamps extend past the range of our current
 	// assembly buffer, then we advance the buffer and send an assembled_chunk to the
@@ -131,17 +135,15 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	//
 	this->_put_assembled_chunk(active_chunk0, event_counts);
         // after _put_assembled_chunk(), active_chunk0 has been reset.
-	//active_chunk0 = active_chunk1;
         active_chunk0.swap(active_chunk1);
-	active_chunk1 = this->_make_assembled_chunk(active_ichunk+2);
-	active_ichunk++;
+	active_chunk1 = this->_make_assembled_chunk(active_chunk0->ichunk + 2);
     }
 
-    if (packet_ichunk == active_ichunk) {
+    if (packet_ichunk == active_chunk0->ichunk) {
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk0->add_packet(packet);
     }
-    else if (packet_ichunk == active_ichunk+1) {
+    else if (packet_ichunk == active_chunk1->ichunk) {
 	event_counts[intensity_network_stream::event_type::assembler_hit]++;
 	active_chunk1->add_packet(packet);
     }
@@ -151,7 +153,6 @@ void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &pac
 	    throw runtime_error("ch_frb_io: assembler miss occurred, and this stream was constructed with the 'throw_exception_on_assembler_miss' flag");
     }
 }
-
 
 void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &chunk, int64_t *event_counts)
 {
@@ -166,12 +167,12 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	throw runtime_error("ch_frb_io: internal error: assembled_chunk_ringbuf::put_unassembled_packet() called after end_stream()");
     }
 
-    if (assembled_ringbuf_size < constants::assembled_ringbuf_capacity) {
-	// Add chunk to ring buffer
-	int i = (assembled_ringbuf_pos + assembled_ringbuf_size) % constants::assembled_ringbuf_capacity;
-	this->assembled_ringbuf[i] = shared_ptr<assembled_chunk>(chunk.release());
-	this->assembled_ringbuf_size++;
-	
+    // Convert unique_ptr into bare pointer, and reset unique_ptr.
+    assembled_chunk* ch = chunk.release();
+    // Try to add to ringbuf...
+    bool added = ringbuf->push(ch);
+
+    if (added) {
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
 	event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
@@ -181,7 +182,7 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     // If we get here, the ring buffer was full.
     pthread_mutex_unlock(&this->lock);
     event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
-    chunk.reset();
+    delete ch;
 
     if (ini_params.emit_warning_on_buffer_drop)
 	cerr << "ch_frb_io: warning: processing thread is running too slow, dropping assembled_chunk\n";
@@ -189,35 +190,24 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
 }
 
-
 shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
 {
     pthread_mutex_lock(&this->lock);
+    shared_ptr<assembled_chunk> chunk;
 
     for (;;) {
-	if (assembled_ringbuf_size > 0) {
-	    int i = assembled_ringbuf_pos % constants::assembled_ringbuf_capacity;
-	    shared_ptr<assembled_chunk> chunk = assembled_ringbuf[i];
-
-	    this->assembled_ringbuf_pos++;
-	    this->assembled_ringbuf_size--;
-	    pthread_mutex_unlock(&this->lock);
-
-	    if (!chunk)
-		throw runtime_error("ch_frb_io: internal error: unexpected empty pointer in get_assembled_chunk()");
-
-	    return chunk;
-	}
-
-	if (this->doneflag) {
+        chunk = ringbuf->pop();
+        if (chunk)
+            break;
+	if (this->doneflag)
 	    // Ring buffer is empty and end_stream() has been called.
-	    pthread_mutex_unlock(&this->lock);
-	    return shared_ptr<assembled_chunk>();
-	}
-	
+            // (chunk contains null pointer)
+            break;
 	// Wait for chunks to be added to the ring buffer.
 	pthread_cond_wait(&this->cond_assembled_chunks_added, &this->lock);
     }
+    pthread_mutex_unlock(&this->lock);
+    return chunk;
 }
 
 

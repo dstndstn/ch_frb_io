@@ -7,10 +7,14 @@
 using namespace ch_frb_io;
 using namespace std;
 
+namespace ch_frb_io {
+
 std::ostream& operator<<(std::ostream& s, const assembled_chunk& ch) {
     s << "assembled_chunk(beam " << ch.beam_id << ", ichunk " << ch.ichunk << " at " << (void*)(&ch) << ")";
     return s;
 }
+
+} // namespace
 
 static bool
 assembled_chunk_overlaps_range(const shared_ptr<assembled_chunk> ch, 

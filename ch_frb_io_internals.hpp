@@ -224,6 +224,8 @@ struct udp_packet_ringbuf : noncopyable {
 // It also manages the "active" assembled_chunks, which are being filled with data as new packets arrive.
 // There is one assembled_chunk_ringbuf for each beam.
 
+// Forward declaration...
+class L1Ringbuf;
 
 class assembled_chunk_ringbuf : noncopyable {
 public:
@@ -256,6 +258,9 @@ public:
     // to indicate end-of-stream.
     std::shared_ptr<assembled_chunk> get_assembled_chunk();
 
+    /*
+     FIXME -- re-enable these calls...
+
     std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot();
 
     // Returns stats about the ring buffer.
@@ -269,6 +274,7 @@ public:
                           uint64_t* ringbuf_capacity,
                           uint64_t* ringbuf_nelements,
                           uint64_t* ringbuf_oldest_chunk);
+     */
 
 protected:
     const intensity_network_stream::initializer ini_params;
@@ -303,9 +309,8 @@ protected:
     // Processing thread waits here if the ring buffer is empty.
     pthread_cond_t cond_assembled_chunks_added;
 
-    std::shared_ptr<assembled_chunk> assembled_ringbuf[constants::assembled_ringbuf_capacity];
-    uint64_t assembled_ringbuf_pos  = 0;
-    uint64_t assembled_ringbuf_size = 0;
+    L1Ringbuf* ringbuf;
+
     bool doneflag = false;
 };
 
