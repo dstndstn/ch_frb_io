@@ -263,21 +263,19 @@ public:
 
     std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 
-    /*
-     FIXME -- re-enable these calls...
-
     // Returns stats about the ring buffer.
-    //  *ringbuf_chunk* is the next chunk number that will be delivered to get_assembled_chunk().  (= assembled_ringbuf_pos)
-    //  *ringbuf_size* is the number of chunks available to be consumed by get_assembled_chunk().
+    //  *ringbuf_fpga_next* is the FPGA-counts of the next chunk that will be delivered to get_assembled_chunk().
+    //  *ringbuf_n_ready* is the number of chunks available to be consumed by get_assembled_chunk().
     //  *ringbuf_capacity* is the maximum number of chunks that can be held in the ring buffer.
     //  *ringbuf_nelements* counts the number of valid chunks, including old chunks that have already been consumed by get_assembled_chunk.
-    //  *ringbuf_oldest_chunk* is the smallest chunk number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().)
-    void get_ringbuf_size(uint64_t* ringbuf_chunk,
-                          uint64_t* ringbuf_size,
+    //  *ringbuf_fpga_min* is the smallest FPGA-counts number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().)
+    //  *ringbuf_fpga_max* is the largest FPGA-counts number available in the ring buffer (including ones that have already been consumed by get_assembled_chunk().).  This includes the number of FPGA samples in the chunks.
+    void get_ringbuf_size(uint64_t* ringbuf_fpga_next,
+                          uint64_t* ringbuf_n_ready,
                           uint64_t* ringbuf_capacity,
                           uint64_t* ringbuf_nelements,
-                          uint64_t* ringbuf_oldest_chunk);
-     */
+                          uint64_t* ringbuf_fpga_min,
+                          uint64_t* ringbuf_fpga_max);
 
 protected:
     const intensity_network_stream::initializer ini_params;

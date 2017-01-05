@@ -85,6 +85,16 @@ public:
     std::shared_ptr<T> pop();
 
     /*
+     Returns the number of frames queued.
+     */
+    int size();
+
+    /*
+     Returns the maximum number of frames that can be alive.
+     */
+    int maxsize();
+
+    /*
      Retrieves frames from this ring buffer that satisfy the
      (optional) selection function.
      */
@@ -99,7 +109,9 @@ public:
 
     void snapshot(std::vector<std::shared_ptr<T> > &v,
                   std::function<bool(const std::shared_ptr<T>)>);
-    
+
+    void visit(std::function<void(std::shared_ptr<T>)> func);
+
 protected:
     // Small helper class that calls deleted() when one of our frames
     // is deleted.
@@ -114,11 +126,11 @@ protected:
     // Number of live frames.
     size_t _live;
 
-    // (and the mutex for it)
-    pthread_mutex_t _live_lock;
-
     // Maximum allowable number of live frames.
     size_t _maxsize;
+
+    // (and the mutex for it)
+    pthread_mutex_t _live_lock;
 
     // We're about to drop this frame.
     virtual void dropping(std::shared_ptr<T> t);

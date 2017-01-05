@@ -55,6 +55,35 @@ public:
     std::shared_ptr<ch_frb_io::assembled_chunk> pop();
 
     /*
+     Returns the next assembled_chunk for downstream processing,
+     without removing it.
+     */
+    std::shared_ptr<ch_frb_io::assembled_chunk> peek();
+
+    /*
+     Returns the number of assembled_chunks queued for downstream processing.
+     */
+    int n_ready();
+
+    /*
+     Returns the total number (across all time binnings) of
+     assembled_chunks this ring buffer is allowed to contain.
+     */
+    int total_capacity();
+
+    /*
+     Returns the total number (across all time binnings) of
+     assembled_chunks currently being held in this ring buffer.
+     */
+    int total_size();
+
+    /*
+     Returns the oldest (smallest FPGA-counts) and newest (largest
+     FPGA-counts) value of data in all levels of this ring buffer.
+     */
+    void fpga_counts_range(uint64_t* fpga_min, uint64_t* fpga_max);
+
+    /*
      Prints a report of the assembled_chunks currently queued.
      */
     void print();

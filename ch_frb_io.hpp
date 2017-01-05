@@ -485,7 +485,12 @@ struct assembled_chunk : noncopyable {
 
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
-    
+
+    // the first fpga-counts sample in this chunk
+    uint64_t fpgacounts_begin() const;
+    // the last fpga-counts sample in this chunk + 1
+    uint64_t fpgacounts_end() const;
+
     // These are virtual so that subclasses can be written with optimized implementations 
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
     virtual void add_packet(const intensity_packet &p);

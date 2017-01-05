@@ -52,6 +52,16 @@ std::shared_ptr<T> Ringbuf<T>::pop() {
 }
 
 template <class T>
+int Ringbuf<T>::size() {
+    return _q.size();
+}
+
+template <class T>
+int Ringbuf<T>::maxsize() {
+    return _maxsize;
+}
+
+template <class T>
 std::vector<std::shared_ptr<T> > Ringbuf<T>::snapshot(bool (*testFunc)(const std::shared_ptr<T>)) {
     std::vector<std::shared_ptr<T> > vec;
     snapshot(vec, testFunc);
@@ -74,6 +84,14 @@ void Ringbuf<T>::snapshot(std::vector<std::shared_ptr<T> > &vec,
 	    vec.push_back(*it);
         }
     }
+    pthread_mutex_unlock(&this->_q_lock);
+}
+
+template <class T>
+void Ringbuf<T>::visit(std::function<void(std::shared_ptr<T>)> func) {
+    pthread_mutex_lock(&this->_q_lock);
+    for (auto it = _q.begin(); it != _q.end(); it++)
+        func(*it);
     pthread_mutex_unlock(&this->_q_lock);
 }
 

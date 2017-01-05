@@ -316,20 +316,18 @@ intensity_network_stream::get_statistics() {
         m["beam_id"] = this->ini_params.beam_ids[b];
         if (assemblers_init && (assemblers.size() > 0)) {
             // Grab the ring buffer to find the min & max chunk numbers and size.
-            uint64_t ichunk, nchunks, capacity, ntot, oldest;
-            ichunk = nchunks = capacity = ntot = oldest = 0;
-            // FIXME
-            //this->assemblers[b]->get_ringbuf_size(&ichunk, &nchunks, &capacity, &ntot, &oldest);
-            m["ringbuf_next"] = ichunk;
-            m["ringbuf_ready"] = nchunks;
+            uint64_t fpgacounts_next=0, n_ready=0, capacity=0, nelements=0, fpgacounts_min=0, fpgacounts_max=0;
+            this->assemblers[b]->get_ringbuf_size(&fpgacounts_next, &n_ready, &capacity, &nelements, &fpgacounts_min, &fpgacounts_max);
+            m["ringbuf_fpga_next"] = fpgacounts_next;
+            m["ringbuf_n_ready"] = n_ready;
             m["ringbuf_capacity"] = capacity;
-            m["ringbuf_ntotal"] = ntot;
-            if (ntot == 0) {
-                m["ringbuf_chunk_min"] = 0;
-                m["ringbuf_chunk_max"] = 0;
+            m["ringbuf_ntotal"] = nelements;
+            if (nelements == 0) {
+                m["ringbuf_fpga_min"] = 0;
+                m["ringbuf_fpga_max"] = 0;
             } else {
-                m["ringbuf_chunk_min"] = oldest;
-                m["ringbuf_chunk_max"] = ichunk + nchunks - 1;
+                m["ringbuf_fpga_min"] = fpgacounts_min;
+                m["ringbuf_fpga_max"] = fpgacounts_max;
             }
         }
         R.push_back(m);

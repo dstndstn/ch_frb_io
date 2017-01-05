@@ -64,43 +64,36 @@ assembled_chunk_ringbuf::get_ringbuf_snapshot(uint64_t min_fpga_counts,
     return chunks;
 }
 
-/* FIXME -- re-enable something like this...
-void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_chunk,
-                                               uint64_t* ringbuf_size,
+void assembled_chunk_ringbuf::get_ringbuf_size(uint64_t* ringbuf_fpga_next,
+                                               uint64_t* ringbuf_n_ready,
                                                uint64_t* ringbuf_capacity,
                                                uint64_t* ringbuf_nelements,
-                                               uint64_t* ringbuf_oldest) {
+                                               uint64_t* ringbuf_fpga_min,
+                                               uint64_t* ringbuf_fpga_max) {
     pthread_mutex_lock(&this->lock);
-    if (ringbuf_chunk)
-        *ringbuf_chunk = this->assembled_ringbuf_pos;
-    if (ringbuf_size)
-        *ringbuf_size = this->assembled_ringbuf_size;
+
+    if (ringbuf_fpga_next) {
+        shared_ptr<assembled_chunk> nxt = ringbuf->peek();
+        if (!nxt)
+            *ringbuf_fpga_next = 0;
+        else
+            *ringbuf_fpga_next = nxt->fpgacounts_begin();
+    }
+
+    if (ringbuf_n_ready)
+        *ringbuf_n_ready = ringbuf->n_ready();
+
     if (ringbuf_capacity)
-        *ringbuf_capacity = constants::assembled_ringbuf_capacity;
-    if (ringbuf_nelements) {
-        uint64_t n = 0;
-        for (uint64_t i=0; i<constants::assembled_ringbuf_capacity; i++)
-            if (assembled_ringbuf[i])
-                n++;
-        *ringbuf_nelements = n;
-    }
-    if (ringbuf_oldest) {
-        // rb_pos + rb_size is the index of the oldest chunk, unless
-        // we haven't filled the ringbuf and looped around yet.
-        uint64_t i0 = this->assembled_ringbuf_pos + this->assembled_ringbuf_size;
-        *ringbuf_oldest = 0;
-        for (uint64_t off=0; off<constants::assembled_ringbuf_capacity; off++) {
-            uint64_t i = (i0 + off) % constants::assembled_ringbuf_capacity;
-            // the first non-NULL chunk is the one we want
-            if (assembled_ringbuf[i]) {
-                *ringbuf_oldest = assembled_ringbuf[i]->ichunk;
-                break;
-            }
-        }
-    }
+        *ringbuf_capacity = ringbuf->total_capacity();
+
+    if (ringbuf_nelements)
+        *ringbuf_nelements = ringbuf->total_size();
+
+    if (ringbuf_fpga_min || ringbuf_fpga_max)
+        ringbuf->fpga_counts_range(ringbuf_fpga_min, ringbuf_fpga_max);
+
     pthread_mutex_unlock(&this->lock);
 }
- */
 
 void assembled_chunk_ringbuf::put_unassembled_packet(const intensity_packet &packet, int64_t *event_counts)
 {

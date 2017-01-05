@@ -23,8 +23,8 @@ assembled_chunk_overlaps_range(const shared_ptr<assembled_chunk> ch,
                                uint64_t max_fpga_counts) {
     if (min_fpga_counts == 0 && max_fpga_counts == 0)
         return true;
-    uint64_t fpga0 = ch->isample * ch->fpga_counts_per_sample;
-    uint64_t fpga1 = fpga0 + constants::nt_per_assembled_chunk * ch->fpga_counts_per_sample;
+    uint64_t fpga0 = ch->fpgacounts_begin();
+    uint64_t fpga1 = ch->fpgacounts_end();
     cout << "Chunk FPGA counts range " << fpga0 << " to " << fpga1 << endl;
     if ((max_fpga_counts && (fpga0 > max_fpga_counts)) ||
         (min_fpga_counts && (fpga1 < min_fpga_counts)))
@@ -82,6 +82,79 @@ shared_ptr<assembled_chunk> L1Ringbuf::pop() {
     shared_ptr<assembled_chunk> p = _q.front();
     _q.pop_front();
     return p;
+}
+
+/*
+ Peeks at (returns) the next assembled_chunk for downstream processing,
+ without popping it out of the queue.
+ */
+shared_ptr<assembled_chunk> L1Ringbuf::peek() {
+    if (_q.empty())
+        return shared_ptr<assembled_chunk>();
+    shared_ptr<assembled_chunk> p = _q.front();
+    return p;
+}
+
+int L1Ringbuf::n_ready() {
+    return _q.size();
+}
+
+int L1Ringbuf::total_capacity() {
+    int n = 0;
+    for (auto it = _rb.begin(); it != _rb.end(); it++) {
+        n += (*it)->maxsize();
+    }
+    return n;
+}
+
+int L1Ringbuf::total_size() {
+    int n = 0;
+    for (auto it = _rb.begin(); it != _rb.end(); it++) {
+        n += (*it)->size();
+    }
+    return n;
+}
+
+class FpgaCountsMinMaxVisitor : noncopyable {
+public:
+    FpgaCountsMinMaxVisitor() :
+        fpga_min(numeric_limits<uint64_t>::max()),
+        fpga_max(0) {
+        //cout << "Visitor start: min = " << fpga_min << endl;
+    }
+    uint64_t fpga_min;
+    uint64_t fpga_max;
+    void operator() (std::shared_ptr<assembled_chunk> ch) {
+        cout << "Visiting " << ch->fpgacounts_begin() << "--" << ch->fpgacounts_end() << endl;
+        fpga_min = std::min(fpga_min, ch->fpgacounts_begin());
+        fpga_max = std::max(fpga_max, ch->fpgacounts_end());
+        cout << "min,max now " << fpga_min << "," << fpga_max << endl;
+    }
+};
+
+static void visit(FpgaCountsMinMaxVisitor* vis, shared_ptr<assembled_chunk> ch) {
+    vis->operator()(ch);
+}
+
+void L1Ringbuf::fpga_counts_range(uint64_t* min_fpga, uint64_t* max_fpga) {
+    FpgaCountsMinMaxVisitor vis;
+
+    std::function<void(shared_ptr<assembled_chunk>)> func = std::bind(visit, &vis, std::placeholders::_1);
+
+    for (auto it = _rb.begin(); it != _rb.end(); it++) {
+        //(*it)->visit(vis);
+        (*it)->visit(func);
+        cout << "After visiting level: min/max " << vis.fpga_min << ", " << vis.fpga_max << endl;
+    }
+
+    if (min_fpga)
+        *min_fpga = vis.fpga_min;
+
+    if (max_fpga)
+        *max_fpga = vis.fpga_max;
+
+    cout << "fpga_counts_range: " << (min_fpga ? *min_fpga : 0) << ", "
+         << (max_fpga ? *max_fpga : 0) << endl;
 }
 
 /*
