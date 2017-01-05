@@ -115,46 +115,26 @@ int L1Ringbuf::total_size() {
     return n;
 }
 
-class FpgaCountsMinMaxVisitor : noncopyable {
-public:
-    FpgaCountsMinMaxVisitor() :
-        fpga_min(numeric_limits<uint64_t>::max()),
-        fpga_max(0) {
-        //cout << "Visitor start: min = " << fpga_min << endl;
-    }
-    uint64_t fpga_min;
-    uint64_t fpga_max;
-    void operator() (std::shared_ptr<assembled_chunk> ch) {
-        cout << "Visiting " << ch->fpgacounts_begin() << "--" << ch->fpgacounts_end() << endl;
-        fpga_min = std::min(fpga_min, ch->fpgacounts_begin());
-        fpga_max = std::max(fpga_max, ch->fpgacounts_end());
-        cout << "min,max now " << fpga_min << "," << fpga_max << endl;
-    }
-};
-
-static void visit(FpgaCountsMinMaxVisitor* vis, shared_ptr<assembled_chunk> ch) {
-    vis->operator()(ch);
+// helper function used in the next function for visiting ringbuffer chunks
+static void visit(uint64_t* fpga_min, uint64_t* fpga_max, shared_ptr<assembled_chunk> ch) {
+    *fpga_min = std::min(*fpga_min, ch->fpgacounts_begin());
+    *fpga_max = std::max(*fpga_max, ch->fpgacounts_end());
 }
 
 void L1Ringbuf::fpga_counts_range(uint64_t* min_fpga, uint64_t* max_fpga) {
-    FpgaCountsMinMaxVisitor vis;
+    // set up visitor function args
+    uint64_t mn, mx;
+    mn = numeric_limits<uint64_t>::max();
+    mx = 0;
+    std::function<void(shared_ptr<assembled_chunk>)> func = std::bind(visit, &mn, &mx, std::placeholders::_1);
 
-    std::function<void(shared_ptr<assembled_chunk>)> func = std::bind(visit, &vis, std::placeholders::_1);
-
-    for (auto it = _rb.begin(); it != _rb.end(); it++) {
-        //(*it)->visit(vis);
+    for (auto it = _rb.begin(); it != _rb.end(); it++)
         (*it)->visit(func);
-        cout << "After visiting level: min/max " << vis.fpga_min << ", " << vis.fpga_max << endl;
-    }
 
     if (min_fpga)
-        *min_fpga = vis.fpga_min;
-
+        *min_fpga = mn;
     if (max_fpga)
-        *max_fpga = vis.fpga_max;
-
-    cout << "fpga_counts_range: " << (min_fpga ? *min_fpga : 0) << ", "
-         << (max_fpga ? *max_fpga : 0) << endl;
+        *max_fpga = mx;
 }
 
 /*
