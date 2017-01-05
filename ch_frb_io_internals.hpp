@@ -252,11 +252,14 @@ public:
     // Moves any remaining active chunks into the ring buffer and sets 'doneflag'.
     void end_stream(int64_t *event_counts);
 
+    // Debugging: inject the given chunk
+    void inject_assembled_chunk(assembled_chunk* chunk);
+
     // Called by processing threads, via intensity_network_stream::get_assembled_chunk().
     // Returns the next assembled_chunk from the ring buffer, blocking if necessary to wait for data.
     // If the ring buffer is empty and end_stream() has been called, it returns an empty pointer
     // to indicate end-of-stream.
-    std::shared_ptr<assembled_chunk> get_assembled_chunk();
+    std::shared_ptr<assembled_chunk> get_assembled_chunk(bool wait=true);
 
     std::vector<std::shared_ptr<assembled_chunk> > get_ringbuf_snapshot(uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
 

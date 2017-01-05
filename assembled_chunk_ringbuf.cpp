@@ -164,13 +164,15 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
     if (added) {
 	pthread_cond_broadcast(&this->cond_assembled_chunks_added);
 	pthread_mutex_unlock(&this->lock);
-	event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
+        if (event_counts)
+            event_counts[intensity_network_stream::event_type::assembled_chunk_queued]++;
 	return;
     }
 
     // If we get here, the ring buffer was full.
     pthread_mutex_unlock(&this->lock);
-    event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
+    if (event_counts)
+        event_counts[intensity_network_stream::event_type::assembled_chunk_dropped]++;
     delete ch;
 
     if (ini_params.emit_warning_on_buffer_drop)
@@ -179,7 +181,12 @@ void assembled_chunk_ringbuf::_put_assembled_chunk(unique_ptr<assembled_chunk> &
 	throw runtime_error("ch_frb_io: assembled_chunk was dropped and stream was constructed with 'throw_exception_on_buffer_drop' flag");
 }
 
-shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
+void assembled_chunk_ringbuf::inject_assembled_chunk(assembled_chunk* chunk) {
+    unique_ptr<assembled_chunk> uch(chunk);
+    _put_assembled_chunk(uch, NULL);
+}
+
+shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk(bool wait)
 {
     pthread_mutex_lock(&this->lock);
     shared_ptr<assembled_chunk> chunk;
@@ -187,6 +194,8 @@ shared_ptr<assembled_chunk> assembled_chunk_ringbuf::get_assembled_chunk()
     for (;;) {
         chunk = ringbuf->pop();
         if (chunk)
+            break;
+        if (!wait)
             break;
 	if (this->doneflag)
 	    // Ring buffer is empty and end_stream() has been called.

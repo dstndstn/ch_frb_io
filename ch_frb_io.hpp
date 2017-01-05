@@ -324,7 +324,8 @@ public:
     // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
 
-    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
+    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index,
+                                                         bool wait=true);
 
     // Will block until first packet is received, or stream ends.  Returns true if packet was received.
     bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
@@ -343,6 +344,10 @@ public:
 
     std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> &beams,
                                                                                          uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+
+    // For debugging/testing purposes: pretend that the given assembled_chunk
+    // has just arrived.
+    void inject_assembled_chunk(assembled_chunk* chunk);
 
     ~intensity_network_stream();
 

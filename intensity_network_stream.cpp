@@ -214,7 +214,7 @@ void intensity_network_stream::join_threads()
 }
 
 
-shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index)
+shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int assembler_index, bool wait)
 {
     if ((assembler_index < 0) || (assembler_index >= nassemblers))
 	throw runtime_error("ch_frb_io: bad assembler_ix passed to intensity_network_stream::get_assembled_chunk()");
@@ -230,7 +230,7 @@ shared_ptr<assembled_chunk> intensity_network_stream::get_assembled_chunk(int as
     if (assemblers.size() == 0)
 	return shared_ptr<assembled_chunk> ();
 
-    return assemblers[assembler_index]->get_assembled_chunk();
+    return assemblers[assembler_index]->get_assembled_chunk(wait);
 }
 
 
@@ -791,6 +791,36 @@ void intensity_network_stream::_assembler_thread_body()
     }
 }
 
+void intensity_network_stream::inject_assembled_chunk(assembled_chunk* chunk) {
+
+    pthread_mutex_lock(&this->state_lock);
+    if (!first_packet_received) {
+        cout << "Injecting assembled_chunk... initializing assembler threads." << endl;
+        // Init...
+        this->fp_nupfreq = chunk->nupfreq;
+        this->fp_nt_per_packet = chunk->nt_per_packet;
+        this->fp_fpga_counts_per_sample = chunk->fpga_counts_per_sample;
+        this->fp_fpga_count = chunk->isample * chunk->fpga_counts_per_sample;
+        this->first_packet_received = true;
+        pthread_cond_broadcast(&this->cond_state_changed);
+        // wait for assemblers to be initialized...
+        for (;;) {
+            if (this->assemblers_initialized)
+                break;
+            pthread_cond_wait(&this->cond_state_changed, &this->state_lock);
+        }
+    }
+    pthread_mutex_unlock(&this->state_lock);
+
+    // Find the right assembler and inject the chunk there.
+    const int *assembler_beam_ids = &ini_params.beam_ids[0];
+    for (int i = 0; i < nassemblers; i++) {
+        if (assembler_beam_ids[i] == chunk->beam_id) {
+            assemblers[i]->inject_assembled_chunk(chunk);
+            break;
+        }
+    }
+}
 
 // Called whenever the assembler thread exits (on all exit paths)
 void intensity_network_stream::_assembler_thread_exit()
