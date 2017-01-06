@@ -463,7 +463,7 @@ struct assembled_chunk : noncopyable {
     const int beam_id = 0;
     const int nupfreq = 0;
     const int nt_per_packet = 0;
-    const int fpga_counts_per_sample = 0;
+    int fpga_counts_per_sample = 0;
 
     // More parameters which are constant after construction.
     const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
@@ -501,10 +501,11 @@ struct assembled_chunk : noncopyable {
 
     // Downsamples (in time) the two given source chunks, writing into the
     // given destination chunk.
-    // *dest* can be equal to *src1* or *src2*.
-    static void downsample(assembled_chunk* dest,
-                           const assembled_chunk* src1,
-                           const assembled_chunk* src2);
+    // *dest* can be equal to *src1* to downsample in-place.
+    // If *dest* is NULL, a new assembled_chunk will be allocated.
+    static assembled_chunk* downsample(assembled_chunk* dest,
+                                       const assembled_chunk* src1,
+                                       const assembled_chunk* src2);
 
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.

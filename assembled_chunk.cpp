@@ -157,26 +157,61 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
     }
 }
 
-void assembled_chunk::downsample(assembled_chunk* dest,
-                                 const assembled_chunk* src1,
-                                 const assembled_chunk* src2) {
+assembled_chunk* assembled_chunk::downsample(assembled_chunk* dest,
+                                             const assembled_chunk* src1,
+                                             const assembled_chunk* src2) {
+
+    if (src1->beam_id != src2->beam_id)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched beam_id");
+    if (src1->nupfreq != src2->nupfreq)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
+    if (src1->nt_coarse != src2->nt_coarse)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nt_coarse");
+    if (src1->nt_per_packet != src2->nt_per_packet)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nt_per_packet");
+    if (src1->nscales != src2->nscales)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nscales");
+    if (src1->ndata != src2->ndata)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched ndata");
+
+    if (src1->ichunk >= src2->ichunk)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: expected src1 to have earlier ichunk than src2");
+
+    if (!dest) {
+        unique_ptr<assembled_chunk> up = assembled_chunk::make(src1->beam_id, src1->nupfreq, src1->nt_per_packet, 2 * src1->fpga_counts_per_sample, src1->ichunk);
+        dest = up.release();
+    }
+
+    if (src1->beam_id != dest->beam_id)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest beam_id");
+    if (src1->nupfreq != dest->nupfreq)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nupfreq");
+    if (src1->nt_coarse != dest->nt_coarse)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nt_coarse");
+    if (src1->nt_per_packet != dest->nt_per_packet)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nt_per_packet");
+    if (src1->nscales != dest->nscales)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nscales");
+    if (src1->ndata != dest->ndata)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest ndata");
 
     float* dest_scales  = dest->scales;
     float* dest_offsets = dest->offsets;
     bool temp_scales = false;
-    if (src1 == dest || src1 == dest) {
+    if (src1 == dest) {
         // enable in-place downsampling
-        dest_scales  = (float*)malloc(constants::nfreq_coarse_tot * nt_coarse * sizeof(float));
-        dest_offsets = (float*)malloc(constants::nfreq_coarse_tot * nt_coarse * sizeof(float));
+        dest_scales  = (float*)malloc(src1->nscales * sizeof(float));
+        dest_offsets = (float*)malloc(src1->nscales * sizeof(float));
         temp_scales = true;
     }
 
     // Compute destination offset + scale.
-    for (int i=0; i<(constants::nfreq_coarse_tot * nt_coarse); i++) {
-        float scale_1  = src1->scales [i];
-        float offset_1 = src1->offsets[i];
-        float scale_2  = src2->scales [i];
-        float offset_2 = src2->offsets[i];
+    // first half of destination offset + scale comes from src1.
+    for (int i=0; i<src1->nscales/2; i++) {
+        float scale_1  = src1->scales [2*i];
+        float offset_1 = src1->offsets[2*i];
+        float scale_2  = src1->scales [2*i+1];
+        float offset_2 = src1->offsets[2*i+1];
 
         // Lower and upper limits of each offset, scale
         // choice... ignoring the fact that 0 and 255 are
@@ -186,9 +221,31 @@ void assembled_chunk::downsample(assembled_chunk* dest,
 
         // Make the new range contain the old range.  (The
         // data may fill a smaller range than this...)
-        dest_scales[i]  = (hi - lo) / 255.;
+        dest_scales [i]  = (hi - lo) / 255.;
         dest_offsets[i] = lo;
     }
+    // second half of destination offset + scale comes from src2.
+    for (int i=0; i<src2->nscales/2; i++) {
+        float scale_1  = src2->scales [2*i];
+        float offset_1 = src2->offsets[2*i];
+        float scale_2  = src2->scales [2*i+1];
+        float offset_2 = src2->offsets[2*i+1];
+
+        // Lower and upper limits of each offset, scale
+        // choice... ignoring the fact that 0 and 255 are
+        // marker values for masked values.
+        float lo = min(offset_1, offset_2);
+        float hi = max(offset_1 + scale_1 * 255., offset_2 + scale_2 * 255.);
+
+        // Make the new range contain the old range.  (The
+        // data may fill a smaller range than this...)
+        dest_scales [src1->nscales/2 + i]  = (hi - lo) / 255.;
+        dest_offsets[src1->nscales/2 + i] = lo;
+    }
+
+    const int nupfreq = src1->nupfreq;
+    const int nt_coarse = src1->nt_coarse;
+    const int nt_per_packet = src1->nt_per_packet;
 
     for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
 	const float *scales_1  = src1->scales  + if_coarse * nt_coarse;
@@ -201,44 +258,85 @@ void assembled_chunk::downsample(assembled_chunk* dest,
 	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
 	    const uint8_t *data_1 = src1->data + if_fine * constants::nt_per_assembled_chunk;
 	    const uint8_t *data_2 = src2->data + if_fine * constants::nt_per_assembled_chunk;
-	    const uint8_t *data_d = dest->data + if_fine * constants::nt_per_assembled_chunk;
 
+	    uint8_t *data_d = dest->data + if_fine * constants::nt_per_assembled_chunk;
+            // First half of data comes from src1
 	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
-		float scale_1  = scales_1 [it_coarse];
-		float offset_1 = offsets_1[it_coarse];
-		float scale_2  = scales_2 [it_coarse];
-		float offset_2 = offsets_2[it_coarse];
+		float scale  = scales_1 [it_coarse];
+		float offset = offsets_1[it_coarse];
 
-                float iscale_d = 1./scales_d[it_coarse];
-                float offset_d = offsets_d[it_coarse];
+                float iscale_d = 1./scales_d[it_coarse / 2];
+                float offset_d =   offsets_d[it_coarse / 2];
 
-		for (int it_fine = it_coarse*nt_per_packet; it_fine < (it_coarse+1)*nt_per_packet; it_fine++) {
-		    float x1 = float(src_1[it_fine]);
-		    float x2 = float(src_2[it_fine]);
-                    float wt1 = ((x1==0) || (x1==255)) ? 0.0 : 1.0;
-                    float wt2 = ((x2==0) || (x2==255)) ? 0.0 : 1.0;
-                    float wtd = wt1 + wt2;
-                    if (wtd == 0.)
-                        src_d[it_fine] = 0;
+		for (int it_fine = (it_coarse*nt_per_packet)/2; it_fine < ((it_coarse+1)*nt_per_packet)/2; it_fine++) {
+		    uint8_t d1 = data_1[it_fine * 2    ];
+		    uint8_t d2 = data_1[it_fine * 2 + 1];
+                    int wtd = 0;
+                    float xd = 0;
+                    if (!(d1 == 0 || d1 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d1 * scale;
+                    }
+                    if (!(d2 == 0 || d2 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d2 * scale;
+                    }
+                    if (wtd == 0)
+                        data_d[it_fine] = 0;
                     else {
-                        x1 = offset_1 + x1 * scale_1;
-                        x2 = offset_2 + x2 * scale_2;
-                        float xd = (x1*wt1 + x2*wt2) / wtd;
+                        xd /= (float)wtd;
                         xd = (xd - offset_d) * iscale_d;
                         // FIXME -- round?
-                        src_d[it_fine] = (uint8_t)lround(xd);
+                        data_d[it_fine] = (uint8_t)lround(xd);
+                    }
+		}
+	    }
+
+	    data_d += constants::nt_per_assembled_chunk / 2;
+            // Second half of data comes from src2
+	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
+		float scale  = scales_2 [it_coarse];
+		float offset = offsets_2[it_coarse];
+
+                float iscale_d = 1./scales_d[nt_coarse / 2 + it_coarse / 2];
+                float offset_d =   offsets_d[nt_coarse / 2 + it_coarse / 2];
+
+		for (int it_fine = (it_coarse*nt_per_packet)/2; it_fine < ((it_coarse+1)*nt_per_packet)/2; it_fine++) {
+		    uint8_t d1 = data_2[it_fine * 2    ];
+		    uint8_t d2 = data_2[it_fine * 2 + 1];
+                    int wtd = 0;
+                    float xd = 0;
+                    if (!(d1 == 0 || d1 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d1 * scale;
+                    }
+                    if (!(d2 == 0 || d2 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d2 * scale;
+                    }
+                    if (wtd == 0)
+                        data_d[it_fine] = 0;
+                    else {
+                        xd /= (float)wtd;
+                        xd = (xd - offset_d) * iscale_d;
+                        // FIXME -- round?
+                        data_d[it_fine] = (uint8_t)lround(xd);
                     }
 		}
 	    }
 	}
     }
-
     if (temp_scales) {
-        memcpy(dest->scales,  dest_scales,  constants::nfreq_coarse_tot * nt_coarse * sizeof(float));
-        memcpy(dest->offsets, dest_offsets, constants::nfreq_coarse_tot * nt_coarse * sizeof(float));
+        memcpy(dest->scales,  dest_scales,  src1->nscales * sizeof(float));
+        memcpy(dest->offsets, dest_offsets, src1->nscales * sizeof(float));
         free(dest_scales);
         free(dest_offsets);
+
+        // When downsampling in place, update the sampling.
+        dest->fpga_counts_per_sample = 2 * src1->fpga_counts_per_sample;
     }
+
+    return dest;
 }
 
 

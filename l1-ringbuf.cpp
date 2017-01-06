@@ -213,8 +213,8 @@ void L1Ringbuf::dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
 
     if (_dropped[binlevel]) {
         cout << "Now have 2 dropped chunks from bin level " << binlevel << endl;
-        // FIXME -- bin down
-        assembled_chunk* binned = new assembled_chunk(ch->beam_id, ch->nupfreq, ch->nt_per_packet, ch->fpga_counts_per_sample, _dropped[binlevel]->ichunk);
+
+        assembled_chunk* binned = assembled_chunk::downsample(NULL, _dropped[binlevel].get(), ch.get());
         // push onto _rb[level+1]
         cout << "Pushing onto level " << (binlevel+1) << endl;
         _rb[binlevel+1]->push(binned);
