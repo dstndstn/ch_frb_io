@@ -44,19 +44,27 @@ void AssembledChunkRingbuf::dropping(shared_ptr<assembled_chunk> t) {
     _parent->dropping(_binlevel, t);
 }
 
-L1Ringbuf::L1Ringbuf(uint64_t beam_id) :
+L1Ringbuf::L1Ringbuf(uint64_t beam_id, vector<int> ringbuf_n) :
     _beam_id(beam_id),
     _q(),
     _rb(),
     _dropped()
 {
+    if (ringbuf_n.size() == 0) {
+        // ringbuffer sizes per binning level -- if specified,
+        // overrides the number of levels and their sizes.  Otherwise,
+        // take defaults
+        for (int i=0; i<constants::assembled_ringbuf_nlevels; i++)
+            ringbuf_n.push_back(constants::assembled_ringbuf_capacity);
+    }
+    _nbins = ringbuf_n.size();
     // Create the ring buffer objects for each time binning
     // (0 = native rate, 1 = binned by 2, ...)
-    for (size_t i=0; i<Nbins; i++)
+    for (size_t i=0; i<_nbins; i++)
         _rb.push_back(shared_ptr<AssembledChunkRingbuf>
-                      (new AssembledChunkRingbuf(i, this, 4)));
+                      (new AssembledChunkRingbuf(i, this, ringbuf_n[i])));
     // Fill the "_dropped" array with empty shared_ptrs.
-    for (size_t i=0; i<Nbins-1; i++)
+    for (size_t i=0; i<_nbins-1; i++)
         _dropped.push_back(shared_ptr<assembled_chunk>());
 }
 
@@ -147,14 +155,14 @@ void L1Ringbuf::print() {
         cout << (*it)->ichunk << " ";
     }
     cout << "];" << endl;
-    for (size_t i=0; i<Nbins; i++) {
+    for (size_t i=0; i<_nbins; i++) {
         vector<shared_ptr<assembled_chunk> > v = _rb[i]->snapshot(NULL);
         cout << "  binning " << i << ": [ ";
         for (auto it = v.begin(); it != v.end(); it++) {
             cout << (*it)->ichunk << " ";
         }
         cout << "]" << endl;
-        if (i < Nbins-1) {
+        if (i < _nbins-1) {
             cout << "  dropped " << i << ": ";
             if (_dropped[i])
                 cout << _dropped[i]->ichunk << endl;
@@ -175,14 +183,14 @@ void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
         }
     }
     // Check ring buffers
-    for (size_t i=0; i<Nbins; i++) {
+    for (size_t i=0; i<_nbins; i++) {
         cout << "Retrieve: binning " << i << endl;
         size_t size0 = chunks.size();
         _rb[i]->snapshot(chunks, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
         size_t size1 = chunks.size();
         for (size_t j=size0; j<size1; j++)
             cout << "  got: " << *(chunks[j]) << endl;
-        if ((i < Nbins-1) && (_dropped[i])) {
+        if ((i < _nbins-1) && (_dropped[i])) {
             cout << "Checking dropped chunk at level " << i << endl;
             if (assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts)) {
                 chunks.push_back(_dropped[i]);
@@ -200,7 +208,7 @@ void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
 // ringbuf.
 void L1Ringbuf::dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
     cout << "Bin level " << binlevel << " dropping a chunk" << endl;
-    if (binlevel >= (int)(Nbins-1))
+    if (binlevel >= (int)(_nbins-1))
         return;
 
     if (_dropped[binlevel]) {

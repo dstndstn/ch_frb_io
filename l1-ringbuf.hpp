@@ -37,10 +37,8 @@ protected:
 class L1Ringbuf {
     friend class AssembledChunkRingbuf;
 
-    static const size_t Nbins = 4;
-
 public:
-    L1Ringbuf(uint64_t beam_id);
+    L1Ringbuf(uint64_t beam_id, std::vector<int> ringbuf_n=std::vector<int>());
 
     /*
      Tries to enqueue an assembled_chunk.  If no space can be
@@ -100,6 +98,9 @@ public:
     uint64_t _beam_id;
     
 protected:
+    // The number of binning levels
+    int _nbins;
+
     // The queue for downstream
     std::deque<std::shared_ptr<ch_frb_io::assembled_chunk> > _q;
 

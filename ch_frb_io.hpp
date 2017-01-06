@@ -92,6 +92,8 @@ namespace constants {
 
     // Ring buffers between assembler thread and processing threads.
     static constexpr int assembled_ringbuf_capacity = 8;
+    static constexpr int assembled_ringbuf_nlevels = 4;
+
     static constexpr int nt_per_assembled_chunk = 1024;
 
     // These parameters don't really affect anything but appear in range-checking asserts.
@@ -286,6 +288,7 @@ public:
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
+        std::vector<int> ringbuf_n;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
