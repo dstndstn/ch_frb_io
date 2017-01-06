@@ -50,6 +50,9 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      ./configure --prefix=$HOME
      make
      make install
+
+     # The --prefix=$HOME flag installs libhdf5 in $HOME/lib, so I suggest adding this to .bashrc
+     export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
      ```
 
   2. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
@@ -71,10 +74,6 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      # The --h5plugin* flags will build/install the plugin needed to use bitshuffle from C++
 
      python setup.py install --user --h5plugin --h5plugin-dir=$HOME/lib/hdf5_plugins
-
-     # The --user flag installs libhdf5 in $HOME/lib, so I suggest adding this to .bashrc
-
-     export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
      ```
 
 
