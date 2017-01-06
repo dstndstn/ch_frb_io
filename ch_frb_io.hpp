@@ -499,6 +499,13 @@ struct assembled_chunk : noncopyable {
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
 
+    // Downsamples (in time) the two given source chunks, writing into the
+    // given destination chunk.
+    // *dest* can be equal to *src1* or *src2*.
+    static void downsample(assembled_chunk* dest,
+                           const assembled_chunk* src1,
+                           const assembled_chunk* src2);
+
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.
     static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk, bool force_reference=false, bool force_fast=false);
