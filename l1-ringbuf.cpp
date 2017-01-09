@@ -174,22 +174,17 @@ void L1Ringbuf::print() {
 void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
                          vector<shared_ptr<assembled_chunk> >& chunks) {
     // Check chunks queued for downstream processing
-    for (auto it = _q.begin(); it != _q.end(); it++) {
-        if (assembled_chunk_overlaps_range(*it, min_fpga_counts, max_fpga_counts)) {
+    for (auto it = _q.begin(); it != _q.end(); it++)
+        if (assembled_chunk_overlaps_range(*it, min_fpga_counts, max_fpga_counts))
             chunks.push_back(*it);
-        }
-    }
+
     // Check ring buffers
     for (size_t i=0; i<_nbins; i++) {
-        size_t size0 = chunks.size();
         _rb[i]->snapshot(chunks, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
-        size_t size1 = chunks.size();
         // Check the chunks that have been "dropped" but are waiting to be binned down.
-        if ((i < _nbins-1) && (_dropped[i])) {
-            if (assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts)) {
-                chunks.push_back(_dropped[i]);
-            }
-        }
+        if ((i < _nbins-1) && (_dropped[i]) &&
+            assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts))
+            chunks.push_back(_dropped[i]);
     }
 }
 
