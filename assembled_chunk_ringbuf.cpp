@@ -209,7 +209,6 @@ void assembled_chunk_ringbuf::end_stream(int64_t *event_counts)
 
     this->_put_assembled_chunk(active_chunk0, event_counts);
     this->_put_assembled_chunk(active_chunk1, event_counts);
-    //this->active_chunk0 = this->active_chunk1 = unique_ptr<assembled_chunk> ();
 
     pthread_mutex_lock(&this->lock);
 

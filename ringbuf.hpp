@@ -3,7 +3,7 @@
 
 /**
 
- "Ring buffer" prototype.
+ Templated "ring buffer".
 
  This class is meant to hold a data stream.  As a way of controlling
  the amount of memory used, it is allowed to have a maximum number of
@@ -33,6 +33,8 @@
  about to be deleted.  The ring buffer decrements its count of the
  number of live objects when this happens; it then knows it is allowed
  to allocate one more new object.
+
+ The CHIME FRB L1 code subclasses this class; see l1-ringbuf.hpp.
 
  */
 
