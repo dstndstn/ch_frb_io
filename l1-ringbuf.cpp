@@ -25,7 +25,6 @@ assembled_chunk_overlaps_range(const shared_ptr<assembled_chunk> ch,
         return true;
     uint64_t fpga0 = ch->fpgacounts_begin();
     uint64_t fpga1 = ch->fpgacounts_end();
-    cout << "Chunk FPGA counts range " << fpga0 << " to " << fpga1 << endl;
     if ((max_fpga_counts && (fpga0 > max_fpga_counts)) ||
         (min_fpga_counts && (fpga1 < min_fpga_counts)))
         return false;
@@ -174,27 +173,21 @@ void L1Ringbuf::print() {
 
 void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
                          vector<shared_ptr<assembled_chunk> >& chunks) {
-    // Check downstream queue
-    cout << "Retrieve: checking downstream queue" << endl;
+    // Check chunks queued for downstream processing
     for (auto it = _q.begin(); it != _q.end(); it++) {
         if (assembled_chunk_overlaps_range(*it, min_fpga_counts, max_fpga_counts)) {
-            cout << "  got: " << *(*it) << endl;
             chunks.push_back(*it);
         }
     }
     // Check ring buffers
     for (size_t i=0; i<_nbins; i++) {
-        cout << "Retrieve: binning " << i << endl;
         size_t size0 = chunks.size();
         _rb[i]->snapshot(chunks, std::bind(assembled_chunk_overlaps_range, placeholders::_1, min_fpga_counts, max_fpga_counts));
         size_t size1 = chunks.size();
-        for (size_t j=size0; j<size1; j++)
-            cout << "  got: " << *(chunks[j]) << endl;
+        // Check the chunks that have been "dropped" but are waiting to be binned down.
         if ((i < _nbins-1) && (_dropped[i])) {
-            cout << "Checking dropped chunk at level " << i << endl;
             if (assembled_chunk_overlaps_range(_dropped[i], min_fpga_counts, max_fpga_counts)) {
                 chunks.push_back(_dropped[i]);
-                cout << "  got: " << *(_dropped[i]) << endl;
             }
         }
     }
@@ -207,23 +200,20 @@ void L1Ringbuf::retrieve(uint64_t min_fpga_counts, uint64_t max_fpga_counts,
 // into one new chunk and added to the next binning level's
 // ringbuf.
 void L1Ringbuf::dropping(int binlevel, shared_ptr<assembled_chunk> ch) {
-    cout << "Bin level " << binlevel << " dropping a chunk" << endl;
+    // If it's the last binning level, just drop it
     if (binlevel >= (int)(_nbins-1))
         return;
 
+    // Was there another chunk waiting to be binned down and merged with this one?
     if (_dropped[binlevel]) {
-        cout << "Now have 2 dropped chunks from bin level " << binlevel << endl;
-
+        // Allocate a new binned-down chunk.
         assembled_chunk* binned = assembled_chunk::downsample(NULL, _dropped[binlevel].get(), ch.get());
         // push onto _rb[level+1]
-        cout << "Pushing onto level " << (binlevel+1) << endl;
         _rb[binlevel+1]->push(binned);
-        cout << "Dropping shared_ptr..." << endl;
+        // drop the old one we were saving
         _dropped[binlevel].reset();
-        cout << "Done dropping" << endl;
     } else {
         // Keep this one until its partner arrives!
-        cout << "Saving as _dropped" << binlevel << endl;
         _dropped[binlevel] = ch;
     }
 }

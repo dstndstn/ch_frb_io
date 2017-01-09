@@ -525,10 +525,6 @@ struct assembled_chunk : noncopyable {
 
 };
 
-
-//#include <assembled_chunk_msgpack.hpp>
-
-
 // For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
 // nupfreq % 2 == 0) we can speed up assembled_chunk::add_packet() and assembled_chunk::decode()
 // using assembly language kernels.
