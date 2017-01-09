@@ -100,7 +100,7 @@ namespace constants {
     static constexpr int max_allowed_beam_id = 65535;
     static constexpr int max_allowed_nupfreq = 64;
     static constexpr int max_allowed_nt_per_packet = 1024;
-    static constexpr int max_allowed_fpga_counts_per_sample = 1024;
+    static constexpr int max_allowed_fpga_counts_per_sample = 3200;
 };
 
 
