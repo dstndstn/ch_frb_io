@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
+#include <random>
 #include <iostream>
 #include "ch_frb_io_internals.hpp"
 
@@ -142,6 +143,7 @@ intensity_network_ostream::intensity_network_ostream(const initializer &ini_para
 	coarse_freq_ids_16bit[i] = uint16_t(ini_params.coarse_freq_ids[i]);
     
     pthread_mutex_init(&this->state_lock, NULL);
+    pthread_mutex_init(&this->statistics_lock, NULL);
     pthread_cond_init(&this->cond_state_changed, NULL);
 
     int capacity = constants::output_ringbuf_capacity;
@@ -159,6 +161,7 @@ intensity_network_ostream::~intensity_network_ostream()
 
     pthread_cond_destroy(&cond_state_changed);
     pthread_mutex_destroy(&state_lock);
+    pthread_mutex_destroy(&statistics_lock);
 }
 
 
@@ -204,7 +207,16 @@ void intensity_network_ostream::_open_socket()
     if (err < 0)
 	throw runtime_error(string("ch_frb_io: setsockopt(SO_SNDBUF) failed: ") + strerror(errno));
     
-    // Note: bind() not called, so source port number of outgoing packets will be arbitrarily assigned
+    if (ini_params.bind_port) {
+        struct sockaddr_in server_address;
+        memset(&server_address, 0, sizeof(server_address));
+        server_address.sin_family = AF_INET;
+        inet_pton(AF_INET, "0.0.0.0", &server_address.sin_addr);
+        server_address.sin_port = htons(ini_params.bind_port);
+        int err = ::bind(sockfd, (struct sockaddr *) &server_address, sizeof(server_address));
+        if (err < 0)
+            throw runtime_error(string("ch_frb_io: bind() failed: ") + strerror(errno));
+    }
 
     if (connect(sockfd, reinterpret_cast<struct sockaddr *> (&saddr), sizeof(saddr)) < 0)
 	throw runtime_error("ch_frb_io: couldn't connect udp socket to dstname '" + ini_params.dstname + "': " + strerror(errno));
@@ -345,41 +357,61 @@ void intensity_network_ostream::_network_thread_body()
     for (;;) {
 	if (!ringbuf->get_packet_list(packet_list))
 	    break;   // end of stream reached (probably normal termination)
-	
+
 	// Loop over packets
 	for (int ipacket = 0; ipacket < packet_list->curr_npackets; ipacket++) {
 	    const uint8_t *packet = packet_list->get_packet_data(ipacket);
 	    const int packet_nbytes = packet_list->get_packet_nbytes(ipacket);
 
+            pthread_mutex_lock(&statistics_lock);
 	    if (npackets_sent == 0)
 		tv_ini = xgettimeofday();
 
 	    int64_t last_timestamp = this->curr_timestamp;
-	    curr_timestamp = usec_between(tv_ini, xgettimeofday());
-	    
+            int64_t tstamp = this->curr_timestamp = usec_between(tv_ini, xgettimeofday());
+            int64_t npackets = this->npackets_sent;
+            pthread_mutex_unlock(&statistics_lock);
+
 	    // Throttling logic: compare actual bandwidth to 'target_gbps' and sleep if necessary.
-	    if ((target_gbps > 0.0) && (npackets_sent > 0)) {
+	    if ((target_gbps > 0.0) && (npackets > 0)) {
 		int64_t target_timestamp = last_timestamp + int64_t(8.0e-3 * last_packet_nbytes / target_gbps);		
-		if (curr_timestamp < target_timestamp) {
-		    xusleep(target_timestamp - curr_timestamp);
+		if (tstamp < target_timestamp) {
+		    xusleep(target_timestamp - tstamp);
+                    pthread_mutex_lock(&statistics_lock);
 		    curr_timestamp = target_timestamp;
+                    pthread_mutex_unlock(&statistics_lock);
 		}
 	    }
 
-	    ssize_t n = send(this->sockfd, packet, packet_nbytes, 0);
-	    
+            ssize_t n = this->_send(this->sockfd, packet, packet_nbytes, 0);
 	    if (n < 0)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() failed: ") + strerror(errno));
 	    if (n != packet_nbytes)
 		throw runtime_error(string("chime intensity_network_ostream: udp packet send() sent ") + to_string(n) + "/" + to_string(packet_nbytes) + " bytes?!");
 
 	    last_packet_nbytes = packet_nbytes;
+            pthread_mutex_lock(&statistics_lock);
 	    this->nbytes_sent += packet_nbytes;
 	    this->npackets_sent++;
+            pthread_mutex_unlock(&statistics_lock);
 	}
     }
-    
+
     this->_announce_end_of_stream();
+}
+
+ssize_t intensity_network_ostream::_send(int socket, const uint8_t* packet, int nbytes, int flags) {
+    return send(socket, packet, nbytes, flags);
+}
+
+void intensity_network_ostream::get_statistics(int64_t& curr_timestamp,
+                                               int64_t& npackets_sent,
+                                               int64_t& nbytes_sent) {
+    pthread_mutex_lock(&statistics_lock);
+    curr_timestamp = this->curr_timestamp;
+    npackets_sent  = this->npackets_sent;
+    nbytes_sent    = this->nbytes_sent;
+    pthread_mutex_unlock(&statistics_lock);
 }
 
 

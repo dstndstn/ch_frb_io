@@ -1,5 +1,7 @@
 #include <iostream>
 #include <immintrin.h>
+#include <msgpack/fbuffer.hpp>
+#include "assembled_chunk_msgpack.hpp"
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -148,14 +150,107 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
 }
 
 
-shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
+unique_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_, bool force_reference, bool force_fast)
 {
+    // FIXME -- if C++14 is available, use make_unique()
+    if (force_reference && force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): both force_reference and force_fast were set!");
+
 #ifdef __AVX2__
-    if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
-	return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    if (force_fast ||
+        ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0) && !force_reference))
+	return unique_ptr<fast_assembled_chunk>(new fast_assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+#else
+    if (force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast set on a machine without AVX2!");
 #endif
 
-    return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    return unique_ptr<assembled_chunk>(new assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+}
+
+
+void assembled_chunk::write_hdf5_file(const string &filename)
+{
+    bool write = true;
+    bool clobber = true;
+    hdf5_file f(filename, write, clobber);
+
+    string chunkname = "/assembled-chunk-beam" + to_string(beam_id)
+        + "-ichunk" + to_string(ichunk);
+    bool create = true;
+    hdf5_group g_chunk(f, chunkname, create);
+
+    // Header
+    g_chunk.write_attribute("beam_id", this->beam_id);
+    g_chunk.write_attribute("nupfreq", this->nupfreq);
+    g_chunk.write_attribute("nt_per_packet", this->nt_per_packet);
+    g_chunk.write_attribute("fpga_counts_per_sample", this->fpga_counts_per_sample);
+    g_chunk.write_attribute("nt_coarse", this->nt_coarse);
+    g_chunk.write_attribute("nscales", this->nscales);
+    g_chunk.write_attribute("ndata", this->ndata);
+    g_chunk.write_attribute("ichunk", this->ichunk);
+    g_chunk.write_attribute("isample", this->isample);
+
+    // Offset & scale vectors
+    vector<hsize_t> scaleshape = { (hsize_t)constants::nfreq_coarse_tot,
+                                   (hsize_t)this->nt_coarse };
+    g_chunk.write_dataset("scales",  this->scales,  scaleshape);
+    g_chunk.write_dataset("offsets", this->offsets, scaleshape);
+
+    // Raw data
+    int bitshuffle = 0;
+    vector<hsize_t> datashape = {
+        (hsize_t)constants::nfreq_coarse_tot,
+        (hsize_t)nupfreq,
+        (hsize_t)constants::nt_per_assembled_chunk };
+    unique_ptr<hdf5_extendable_dataset<uint8_t> > data_dataset =
+        make_unique<hdf5_extendable_dataset<uint8_t> >(g_chunk, "data", datashape, 2, bitshuffle);
+    data_dataset->write(this->data, datashape);
+    // close
+    data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
+}
+
+void assembled_chunk::write_msgpack_file(const string &filename)
+{
+    FILE* f = fopen(filename.c_str(), "w+");
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
+    // msgpack buffer that will write to file "f"
+    msgpack::fbuffer buffer(f);
+    // Construct a shared_ptr from this, carefully
+    shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
+    msgpack::pack(buffer, shthis);
+    if (fclose(f))
+        throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
+}
+
+shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
+{
+    struct stat st;
+    if (stat(filename.c_str(), &st)) {
+        throw runtime_error("ch_frb_io: failed to stat file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+    }
+    size_t len = st.st_size;
+    FILE* f = fopen(filename.c_str(), "r");
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+
+    char* fdata = (char*)malloc(len);
+    if (!fdata)
+        throw runtime_error("ch_frb_io: failed to malloc an array of size " + to_string(len) + " for reading an assembled_chunk in msgpack format from file " + filename);
+
+    size_t nr = fread(fdata, 1, len, f);
+    if (nr != len)
+        throw runtime_error("ch_frb_io: failed to read " + to_string(len) + " from file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+    fclose(f);
+
+    msgpack::object_handle oh = msgpack::unpack(fdata, len);
+    msgpack::object obj = oh.get();
+    shared_ptr<assembled_chunk> ch;
+    //obj.convert(&ch);
+    obj.convert(ch);
+    free(fdata);
+    return ch;
 }
 
 

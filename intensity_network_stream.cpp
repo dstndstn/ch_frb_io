@@ -251,6 +251,118 @@ vector<int64_t> intensity_network_stream::get_event_counts()
     return ret;
 }
 
+unordered_map<string, uint64_t> intensity_network_stream::get_perhost_packets()
+{
+    pthread_mutex_lock(&this->event_lock);
+    unordered_map<uint64_t, uint64_t> raw(perhost_packets);
+    pthread_mutex_unlock(&this->event_lock);
+    // Convert to strings
+    unordered_map<string, uint64_t> rtn;
+    for (auto it = raw.begin(); it != raw.end(); it++) {
+        // IPv4 address in high 32 bits, port in low 16 bits
+        uint32_t ip = (it->first >> 32) & 0xffffffff;
+        uint32_t port = (it->first & 0xffff);
+        string sender = to_string(ip >> 24) + "." + to_string((ip >> 16) & 0xff)
+            + "." + to_string((ip >> 8) & 0xff) + "." + to_string(ip & 0xff)
+            + ":" + to_string(port);
+        rtn[sender] = it->second;
+    }
+    return rtn;
+}
+
+vector<unordered_map<string, uint64_t> >
+intensity_network_stream::get_statistics() {
+    vector<unordered_map<string, uint64_t> > R;
+    bool first_packet;
+    bool assemblers_init;
+    unordered_map<string, uint64_t> m;
+
+    pthread_mutex_lock(&this->state_lock);
+    first_packet = this->first_packet_received;
+    assemblers_init = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+
+    // Collect statistics for this stream as a whole:
+    m["first_packet_received"]  =  first_packet;
+    m["nupfreq"]                = (first_packet ? this->fp_nupfreq : 0);
+    m["nt_per_packet"]          = (first_packet ? this->fp_nt_per_packet : 0);
+    m["fpga_counts_per_sample"] = (first_packet ? this->fp_fpga_counts_per_sample : 0);
+    m["fpga_count"]             = (first_packet ? this->fp_fpga_count : 0);
+
+    vector<int64_t> counts = get_event_counts();
+    m["count_bytes_received"     ] = counts[event_type::byte_received];
+    m["count_packets_received"   ] = counts[event_type::packet_received];
+    m["count_packets_good"       ] = counts[event_type::packet_good];
+    m["count_packets_bad"        ] = counts[event_type::packet_bad];
+    m["count_packets_dropped"    ] = counts[event_type::packet_dropped];
+    m["count_packets_endofstream"] = counts[event_type::packet_end_of_stream];
+    m["count_beam_id_mismatch"   ] = counts[event_type::beam_id_mismatch];
+    m["count_stream_mismatch"    ] = counts[event_type::first_packet_mismatch];
+    m["count_assembler_hits"     ] = counts[event_type::assembler_hit];
+    m["count_assembler_misses"   ] = counts[event_type::assembler_miss];
+    m["count_assembler_drops"    ] = counts[event_type::assembled_chunk_dropped];
+    m["count_assembler_queued"   ] = counts[event_type::assembled_chunk_queued];
+
+    int nbeams = this->ini_params.beam_ids.size();
+    m["nbeams"] = nbeams;
+    R.push_back(m);
+
+    // Report per-host packet counts
+    R.push_back(this->get_perhost_packets());
+
+    // Collect statistics per beam:
+    for (int b=0; b<nbeams; b++) {
+        m.clear();
+        m["beam_id"] = this->ini_params.beam_ids[b];
+        if (assemblers_init && (assemblers.size() > 0)) {
+            // Grab the ring buffer to find the min & max chunk numbers and size.
+            uint64_t ichunk, nchunks, capacity, ntot, oldest;
+            this->assemblers[b]->get_ringbuf_size(&ichunk, &nchunks, &capacity, &ntot, &oldest);
+            m["ringbuf_next"] = ichunk;
+            m["ringbuf_ready"] = nchunks;
+            m["ringbuf_capacity"] = capacity;
+            m["ringbuf_ntotal"] = ntot;
+            if (ntot == 0) {
+                m["ringbuf_chunk_min"] = 0;
+                m["ringbuf_chunk_max"] = 0;
+            } else {
+                m["ringbuf_chunk_min"] = oldest;
+                m["ringbuf_chunk_max"] = ichunk + nchunks - 1;
+            }
+        }
+        R.push_back(m);
+    }
+
+    return R;
+}
+
+vector< vector< shared_ptr<assembled_chunk> > >
+intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> beams)
+{
+    vector< vector< shared_ptr<assembled_chunk> > > R;
+
+    pthread_mutex_lock(&this->state_lock);
+    bool assemblers_init = this->assemblers_initialized;
+    pthread_mutex_unlock(&this->state_lock);
+
+    if (!assemblers_init)
+        return R;
+
+    int nbeams = this->ini_params.beam_ids.size();
+
+    for (int ib=0; ib<beams.size(); ib++) {
+        uint64_t beam = beams[ib];
+        vector<shared_ptr<assembled_chunk> > chunks;
+        // Which of my assemblers (if any) is handling the requested beam?
+        for (int i=0; i<nbeams; i++) {
+            if (this->ini_params.beam_ids[i] != beam)
+                continue;
+            chunks = this->assemblers[i]->get_ringbuf_snapshot();
+        }
+        R.push_back(chunks);
+    }
+    return R;
+}
 
 bool intensity_network_stream::get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count)
 {
@@ -366,6 +478,7 @@ void intensity_network_stream::_network_thread_body()
 
 	    if (this->stream_end_requested) {
 		pthread_mutex_unlock(&this->state_lock);    
+                _network_flush_packets();
 		return;
 	    }
 
@@ -380,21 +493,31 @@ void intensity_network_stream::_network_thread_body()
 
 	// Periodically flush packets to assembler thread (only happens if packet rate is low; normal case is that the packet_list fills first)
 	if (curr_timestamp > incoming_packet_list_timestamp + constants::unassembled_ringbuf_timeout_usec) {
-	    this->_put_unassembled_packets();
-	    this->_add_event_counts(network_thread_event_subcounts);
+            _network_flush_packets();
 	    incoming_packet_list_timestamp = curr_timestamp;
 	}
 
 	// Read new packet from socket (note that socket has a timeout, so this call can time out)
 	uint8_t *packet_data = incoming_packet_list->data_end;
-	int packet_nbytes = read(sockfd, packet_data, constants::max_input_udp_packet_size + 1);
 
+        // Read from socket, recording the sender IP & port.
+        sockaddr_in sender_addr;
+        int slen = sizeof(sender_addr);
+        int packet_nbytes = ::recvfrom(sockfd, packet_data, constants::max_input_udp_packet_size + 1, 0,
+                                       (struct sockaddr *)&sender_addr, (socklen_t *)&slen);
 	// Check for error or timeout in read()
 	if (packet_nbytes < 0) {
 	    if ((errno == EAGAIN) || (errno == ETIMEDOUT))
 		continue;  // normal timeout
 	    throw runtime_error(string("ch_frb_io network thread: read() failed: ") + strerror(errno));
 	}
+
+        // Increment the number of packets we've received from this sender:
+        uint64_t ip = ntohl(sender_addr.sin_addr.s_addr);
+        uint64_t port = ntohs(sender_addr.sin_port);
+        // IPv4 address in high 32 bits, port in low 16 bits
+        uint64_t sender = (ip << 32) | port;
+        network_thread_perhost_packets[sender]++;
 
 	event_subcounts[event_type::byte_received] += packet_nbytes;
 	event_subcounts[event_type::packet_received]++;
@@ -436,13 +559,25 @@ void intensity_network_stream::_network_thread_body()
 
 	incoming_packet_list->add_packet(packet_nbytes);
 
-	if (incoming_packet_list->is_full) {
-	    this->_put_unassembled_packets();
-	    this->_add_event_counts(network_thread_event_subcounts);
-	}
+	if (incoming_packet_list->is_full)
+            _network_flush_packets();
     }
 }
 
+// This gets called from the network thread to flush packets to the assembler
+// threads.
+void intensity_network_stream::_network_flush_packets() {
+    this->_put_unassembled_packets();
+    this->_add_event_counts(network_thread_event_subcounts);
+
+    // Update the "perhost_packets" counter from "network_thread_perhost_packets"
+    pthread_mutex_lock(&this->event_lock);
+    for (auto it = network_thread_perhost_packets.begin();
+         it != network_thread_perhost_packets.end(); it++) {
+        perhost_packets[it->first] = it->second;
+    }
+    pthread_mutex_unlock(&this->event_lock);
+}
 
 // This gets called when the network thread exits (on all exit paths).
 void intensity_network_stream::_network_thread_exit()
