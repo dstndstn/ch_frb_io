@@ -352,12 +352,12 @@ intensity_network_stream::get_ringbuf_snapshots(vector<uint64_t> &beams,
 
     int nbeams = this->ini_params.beam_ids.size();
 
-    for (int ib=0; ib<beams.size(); ib++) {
+    for (size_t ib=0; ib<beams.size(); ib++) {
         uint64_t beam = beams[ib];
         vector<shared_ptr<assembled_chunk> > chunks;
         // Which of my assemblers (if any) is handling the requested beam?
         for (int i=0; i<nbeams; i++) {
-            if (this->ini_params.beam_ids[i] != beam)
+	    if (this->ini_params.beam_ids[i] != (int)beam)
                 continue;
             chunks = this->assemblers[i]->get_ringbuf_snapshot(min_fpga_counts,
                                                                max_fpga_counts);

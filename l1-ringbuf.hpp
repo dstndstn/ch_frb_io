@@ -99,7 +99,7 @@ public:
     
 protected:
     // The number of binning levels
-    int _nbins;
+    size_t _nbins;
 
     // The queue for downstream
     std::deque<std::shared_ptr<ch_frb_io::assembled_chunk> > _q;

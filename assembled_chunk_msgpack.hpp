@@ -26,7 +26,7 @@ namespace adaptor {
         comp_bitshuffle = 1
     };
 
-// Place class template specialization here
+  // Unpack a msgpack object into an assembled_chunk.
 template<>
 struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
     msgpack::object const& operator()(msgpack::object const& o,
@@ -57,14 +57,14 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         ch = ch_frb_io::assembled_chunk::make(beam_id, nupfreq, nt_per_packet, fpga_counts_per_sample, ichunk);
         ch->isample = isample;
 
-        if (ch->nt_coarse != nt_coarse)
+        if (ch->nt_coarse != (int)nt_coarse)
             throw std::runtime_error("ch_frb_io: assembled_chunk msgpack nt_coarse mismatch");
 
         if (arr[13].type != msgpack::type::BIN) throw msgpack::type_error();
         if (arr[14].type != msgpack::type::BIN) throw msgpack::type_error();
         if (arr[15].type != msgpack::type::BIN) throw msgpack::type_error();
 
-        int nsdata = nscales * sizeof(float);
+        uint nsdata = nscales * sizeof(float);
         if (arr[13].via.bin.size != nsdata) throw msgpack::type_error();
         if (arr[14].via.bin.size != nsdata) throw msgpack::type_error();
         
@@ -72,10 +72,10 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         memcpy(ch->offsets, arr[14].via.bin.ptr, nsdata);
 
         if (comp == comp_none) {
-            if (arr[15].via.bin.size != ndata ) throw msgpack::type_error();
+	  if (arr[15].via.bin.size != (uint)ndata) throw msgpack::type_error();
             memcpy(ch->data,    arr[15].via.bin.ptr, ndata);
         } else if (comp == comp_bitshuffle) {
-            if (arr[15].via.bin.size != compressed_size) throw msgpack::type_error();
+	  if (arr[15].via.bin.size != (uint)compressed_size) throw msgpack::type_error();
             std::cout << "Bitshuffle: decompressing " << compressed_size << " to " << ch->ndata << std::endl;
             int64_t n = bshuf_decompress_lz4(reinterpret_cast<const void*>(arr[15].via.bin.ptr), ch->data, ch->ndata, 1, 0);
             if (n != compressed_size)
