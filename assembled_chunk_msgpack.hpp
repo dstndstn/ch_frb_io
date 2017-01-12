@@ -67,7 +67,7 @@ struct convert<std::shared_ptr<ch_frb_io::assembled_chunk> > {
         uint nsdata = nscales * sizeof(float);
         if (arr[13].via.bin.size != nsdata) throw msgpack::type_error();
         if (arr[14].via.bin.size != nsdata) throw msgpack::type_error();
-        
+
         memcpy(ch->scales,  arr[13].via.bin.ptr, nsdata);
         memcpy(ch->offsets, arr[14].via.bin.ptr, nsdata);
 

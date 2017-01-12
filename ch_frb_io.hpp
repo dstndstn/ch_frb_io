@@ -480,6 +480,9 @@ struct assembled_chunk : noncopyable {
     uint64_t ichunk = 0;
     uint64_t isample = 0;   // always equal to ichunk * constants::nt_per_assembled_chunk
 
+    // How many original samples have been binned into each sample in this chunk.  Used in the L1 telescoping ring buffer, where binning = 2, 4, 8.
+    int binning = 1;
+
     float *scales = nullptr;   // shape (constants::nfreq_coarse, nt_coarse)
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
@@ -489,10 +492,22 @@ struct assembled_chunk : noncopyable {
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
 
+    // Performs a printf-like pattern replacement on *pattern* given the parameters of this assembled_chunk.
+    // Replacements:
+    //   (BEAM)    -> %04i beam_id
+    //   (CHUNK)   -> %08i ichunk
+    //   (NCHUNK)  -> %02i  size in chunks
+    //   (BINNING) -> %02i  size in chunks
+    //   (FPGA0)   -> %012i start FPGA-counts
+    //   (FPGAN)   -> %08i  FPGA-counts size
+    std::string format_filename(const std::string &pattern) const;
+
     // the first fpga-counts sample in this chunk
     uint64_t fpgacounts_begin() const;
     // the last fpga-counts sample in this chunk + 1
     uint64_t fpgacounts_end() const;
+    // the number of fpga-counts in this chunk
+    uint64_t fpgacounts_N() const;
 
     // These are virtual so that subclasses can be written with optimized implementations 
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)

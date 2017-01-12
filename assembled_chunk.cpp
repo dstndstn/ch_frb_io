@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <iostream>
 #include <immintrin.h>
 #include <msgpack/fbuffer.hpp>
@@ -37,12 +38,62 @@ assembled_chunk::assembled_chunk(int beam_id_, int nupfreq_, int nt_per_packet_,
     this->data = aligned_alloc<uint8_t> (ndata);
 }
 
-
 assembled_chunk::~assembled_chunk()
 {
     free(data);
     free(scales);
     free(offsets);
+}
+
+static string 
+__attribute__ ((format(printf,1,2)))
+stringprintf(const char* format, ...) {
+    va_list lst;
+    /* Yarrrr vasprintf is not in the C++ standard.
+    int rtn;
+     va_start(lst, format);
+     char* strp = NULL;
+     rtn = vasprintf(strp, format, lst);
+     if (rtn == -1)
+     throw runtime_error("stringprintf failed: " + string(strerror(errno)));
+     va_end(lst);
+     string s(strp);
+     free(strp);
+     */
+    char temps[256];
+    va_start(lst, format);
+    // truncates if length > size of 'temps'
+    if (vsnprintf(temps, sizeof(temps), format, lst) < 0)
+        throw runtime_error("stringprintf failed: " + string(strerror(errno)));
+    va_end(lst);
+    return string(temps);
+}
+
+// Replaces all instances of the string "from" to the string "to" in
+// input string "input".
+static string replaceAll(const string &input, const string &from, const string &to) {
+    string s = input;
+    size_t i;
+    while ((i = s.find(from)) != std::string::npos)
+        s.replace(i, from.length(), to);
+    return s;
+}
+
+string assembled_chunk::format_filename(const string &pattern) const {
+    //   (BEAM)    -> %04i beam_id
+    //   (CHUNK)   -> %08i ichunk
+    //   (NCHUNK)  -> %02i  size in chunks
+    //   (BINNING) -> %02i  size in chunks
+    //   (FPGA0)   -> %012i start FPGA-counts
+    //   (FPGAN)   -> %08i  FPGA-counts size
+    string s = pattern;
+    s = replaceAll(s, "(BEAM)", stringprintf("%04i", beam_id));
+    s = replaceAll(s, "(CHUNK)", stringprintf("%08llu", ichunk));
+    s = replaceAll(s, "(NCHUNK)", stringprintf("%02i", binning));
+    s = replaceAll(s, "(BINNING)", stringprintf("%02i", binning));
+    s = replaceAll(s, "(FPGA0)", stringprintf("%012llu", fpgacounts_begin()));
+    s = replaceAll(s, "(FPGAN)", stringprintf("%08llu", fpgacounts_N()));
+    return s;
 }
 
 uint64_t assembled_chunk::fpgacounts_begin() const {
@@ -52,6 +103,10 @@ uint64_t assembled_chunk::fpgacounts_begin() const {
 uint64_t assembled_chunk::fpgacounts_end() const {
     return isample * this->fpga_counts_per_sample +
         constants::nt_per_assembled_chunk * this->fpga_counts_per_sample;
+}
+
+uint64_t assembled_chunk::fpgacounts_N() const {
+    return constants::nt_per_assembled_chunk * this->fpga_counts_per_sample;
 }
 
 void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
@@ -173,6 +228,9 @@ assembled_chunk* assembled_chunk::downsample(assembled_chunk* dest,
         throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nscales");
     if (src1->ndata != src2->ndata)
         throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched ndata");
+
+    if (src1->binning != src2->binning)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched binning");
 
     if (src1->ichunk >= src2->ichunk)
         throw runtime_error("ch_frb_io: assembled_chunk::downsample: expected src1 to have earlier ichunk than src2");
@@ -335,6 +393,7 @@ assembled_chunk* assembled_chunk::downsample(assembled_chunk* dest,
         // When downsampling in place, update the sampling.
         dest->fpga_counts_per_sample = 2 * src1->fpga_counts_per_sample;
     }
+    dest->binning = src1->binning * 2;
 
     return dest;
 }
@@ -437,7 +496,6 @@ shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &fil
     msgpack::object_handle oh = msgpack::unpack(fdata, len);
     msgpack::object obj = oh.get();
     shared_ptr<assembled_chunk> ch;
-    //obj.convert(&ch);
     obj.convert(ch);
     free(fdata);
     return ch;
