@@ -352,6 +352,9 @@ public:
     // has just arrived.
     void inject_assembled_chunk(assembled_chunk* chunk);
 
+    // For debugging/testing: stream data to disk.  Filename pattern: see assembled_chunk::format_filename.  Empty string to turn off streaming.
+    void stream_to_files(const std::string& filename_pattern);
+
     ~intensity_network_stream();
 
 protected:
@@ -424,9 +427,13 @@ protected:
     std::vector<int64_t> cumulative_event_counts;
     std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
+    std::string stream_filename;
+
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
+
+    void _wait_for_assemblers_initialized(bool prelocked=false);
 
     void _open_socket();
     void _network_flush_packets();
