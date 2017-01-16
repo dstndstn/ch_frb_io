@@ -1,0 +1,22 @@
+# Travis-CI.org build script
+
+# use the new containerized infrastructure
+sudo: false
+
+language: cpp
+
+compiler:
+  - gcc
+  - clang
+
+script:
+    - ln -s site/Makefile.local.travis Makefile.local
+    - make
+    - ./test-intensity-hdf5-file
+    - ./test-misc
+    - ./test-network-streams
+
+addons:
+  apt:
+    packages:
+      - libhdf5-dev
