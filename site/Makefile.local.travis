@@ -1,13 +1,13 @@
 # Makefile.local for travis-ci.org continuous integration build
 
 # Directory where C++ libraries will be installed
-LIBDIR=$(HOME)/lib
+LIBDIR=$(HOME)/chime/lib
 
 # Directory where C++ header files will be installed
-INCDIR=$(HOME)/include
+INCDIR=$(HOME)/chime/include
 
 # Directory where executables will be installed
-BINDIR=$(HOME)/bin
+BINDIR=$(HOME)/chime/bin
 
 # HDF5_INC_DIR=/usr/local/include
 # HDF5_LIB_DIR=/usr/local/lib
@@ -24,7 +24,8 @@ CXX ?= g++
 
 ifeq ($(CXX),g++)
 ## g++
-CPP=$(CXX) -std=c++0x -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
+#CPP=$(CXX) -std=c++0x -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
+CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
 else
 ## clang++
 # No -ffast-math: https://llvm.org/bugs/show_bug.cgi?id=13745

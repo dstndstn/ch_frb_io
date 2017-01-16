@@ -2,6 +2,13 @@
 
 # Default environment is Ubuntu 12.04.5 LTS "precise"
 # which is pretty old.
+# (gcc 4.6.3, which doesn't know about -std=c++11
+#  and fails with
+#  ch_frb_io.hpp:279:28: sorry, unimplemented: non-static data member initializers
+#  ch_frb_io.hpp:279:28: error: ISO C++ forbids in-class initialization of non-const static member 'udp_port'
+
+# "trusty" is Ubuntu 14.04.5 LTS
+# gcc 4.8.4
 
 dist: trusty
 
@@ -16,8 +23,11 @@ compiler:
   - clang
 
 script:
+    - pwd
+    - export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:~/chime/lib
     - ln -s site/Makefile.local.travis Makefile.local
     - make
+    - make install
     - ./test-intensity-hdf5-file
     - ./test-misc
     - ./test-network-streams
