@@ -1,7 +1,13 @@
 # Travis-CI.org build script
 
-# use the new containerized infrastructure
+# Default environment is Ubuntu 12.04.5 LTS "precise"
+# which is pretty old.
+
+dist: trusty
+
+# use containerized infrastructure (for faster startup; no sudo)
 sudo: false
+
 
 language: cpp
 
