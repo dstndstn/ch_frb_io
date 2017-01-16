@@ -15,7 +15,6 @@ dist: trusty
 # use containerized infrastructure (for faster startup; no sudo)
 sudo: false
 
-
 language: cpp
 
 compiler:

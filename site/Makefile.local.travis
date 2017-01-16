@@ -22,13 +22,15 @@ BINDIR=$(HOME)/chime/bin
 CXX ?= g++
 #CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
 
-ifeq ($(CXX),g++)
-## g++
-#CPP=$(CXX) -std=c++0x -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
-CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
-else
-## clang++
-# No -ffast-math: https://llvm.org/bugs/show_bug.cgi?id=13745
-CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
-endif
+# ifeq ($(CXX),g++)
+# ## g++
+# #CPP=$(CXX) -std=c++0x -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
+# CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
+# else
+# ## clang++
+# # No -ffast-math: https://llvm.org/bugs/show_bug.cgi?id=13745
+# CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
+# endif
 
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+CPP_LFLAGS := -L. -L$(LIBDIR)
