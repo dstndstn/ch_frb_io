@@ -28,7 +28,7 @@ script:
     - ln -s site/Makefile.local.travis Makefile.local
     - make
     - make install
-    - ./test-intensity-hdf5-file
+    - ./test-intensity-hdf5-file yes
     - ./test-misc
     - ./test-network-streams
 
