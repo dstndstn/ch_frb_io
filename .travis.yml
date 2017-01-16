@@ -30,7 +30,8 @@ script:
     - make install
     - ./test-intensity-hdf5-file yes
     - ./test-misc
-    - ./test-network-streams
+    # Takes an hour...
+    # - ./test-network-streams
 
 addons:
   apt:
