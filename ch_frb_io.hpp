@@ -521,6 +521,9 @@ struct assembled_chunk : noncopyable {
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
 
+    virtual void decode_subset(float *intensity, float *weights,
+                               int t0, int nt, int stride) const;
+
     // Downsamples (in time) the two given source chunks, writing into the
     // given destination chunk.
     // *dest* can be equal to *src1* to downsample in-place.

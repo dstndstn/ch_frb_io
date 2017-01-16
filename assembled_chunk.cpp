@@ -212,6 +212,39 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
     }
 }
 
+void assembled_chunk::decode_subset(float *intensity, float *weights,
+                                    int t0, int NT, int stride) const {
+    if (!intensity || !weights)
+	throw runtime_error("ch_frb_io: null pointer passed to assembled_chunk::decode_subset()");
+    if (stride < NT)
+	throw runtime_error("ch_frb_io: bad stride passed to assembled_chunk::decode_subset()");
+    if (NT > constants::nt_per_assembled_chunk)
+	throw runtime_error("ch_frb_io: bad NT passed to assembled_chunk::decode_subset()");
+
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
+	const float * scales_f = this->scales  + if_coarse * nt_coarse;
+	const float *offsets_f = this->offsets + if_coarse * nt_coarse;
+
+	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
+	    const uint8_t *src_f = this->data + if_fine * constants::nt_per_assembled_chunk;
+	    float *int_f = intensity + if_fine * stride;
+	    float * wt_f = weights   + if_fine * stride;
+
+            for (int i=0; i<NT; i++) {
+                int it = t0 + i;
+                int it_coarse = it / nt_per_packet;
+
+		float scale  =  scales_f[it_coarse];
+		float offset = offsets_f[it_coarse];
+
+                float x = float(src_f[it]);
+                int_f[i] = scale*x + offset;
+                wt_f [i] = ((x==0) || (x==255)) ? 0.0 : 1.0;
+	    }
+	}
+    }
+}
+
 assembled_chunk* assembled_chunk::downsample(assembled_chunk* dest,
                                              const assembled_chunk* src1,
                                              const assembled_chunk* src2) {
