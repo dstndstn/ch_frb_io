@@ -417,21 +417,18 @@ shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &fil
     if (!f)
         throw runtime_error("ch_frb_io: failed to open file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
 
-    char* fdata = (char*)malloc(len);
-    if (!fdata)
-        throw runtime_error("ch_frb_io: failed to malloc an array of size " + to_string(len) + " for reading an assembled_chunk in msgpack format from file " + filename);
+    unique_ptr<char> fdata(new char[len]);
 
-    size_t nr = fread(fdata, 1, len, f);
+    size_t nr = fread(fdata.get(), 1, len, f);
     if (nr != len)
         throw runtime_error("ch_frb_io: failed to read " + to_string(len) + " from file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
     fclose(f);
 
-    msgpack::object_handle oh = msgpack::unpack(fdata, len);
+    msgpack::object_handle oh = msgpack::unpack(fdata.get(), len);
     msgpack::object obj = oh.get();
     shared_ptr<assembled_chunk> ch;
     //obj.convert(&ch);
     obj.convert(ch);
-    free(fdata);
     return ch;
 }
 
