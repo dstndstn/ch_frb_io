@@ -49,11 +49,12 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      make install
      ```
 
-  2. The lz4 compression library.  On CentOS this is a one-liner: `sudo yum install lz4-devel`.
+  2. The lz4 compression library.  In CentOS this is a one-liner: `sudo yum install lz4-devel`.
      (TODO: osx install instructions here.)
 
-  3. The msgpack library.  On CentOS this is a one-liner: `sudo yum install cppzmq-devel.x86_64`.
-     (TODO: msgpack install instructions here.)
+  3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
+     
+     In osx, this is also a one-liner: `brew install msgpack`.
 
   4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
