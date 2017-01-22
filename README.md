@@ -49,7 +49,13 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      make install
      ```
 
-  2. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
+  2. The lz4 compression library.  On CentOS this is a one-liner: `sudo yum install lz4-devel`.
+     (TODO: osx install instructions here.)
+
+  3. The msgpack library.  On CentOS this is a one-liner: `sudo yum install cppzmq-devel.x86_64`.
+     (TODO: msgpack install instructions here.)
+
+  4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
      data is generally bitshuffle-compresed).
 
@@ -81,9 +87,10 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
   - Here are some unit tests which you may or may not want to run:
     ```
-    ./test-misc                   # no problem
-    ./test-intensity-hdf5-file    # warning: creates 100MB temp file in current directory
-    ./test-network-streams        # warning: takes ~1 hour to run, CPU-intensive
+    ./test-misc                       # no problem
+    ./test-assembled-chunk-hdf5-file  # no problem
+    ./test-intensity-hdf5-file        # warning: creates 100MB temp file in current directory
+    ./test-network-streams            # warning: takes ~1 hour to run, CPU-intensive
     ```
 
 ### INSTALLATION (PYTHON)
