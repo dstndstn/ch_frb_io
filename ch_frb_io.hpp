@@ -490,9 +490,10 @@ struct assembled_chunk : noncopyable {
     virtual ~assembled_chunk();
 
     // the first fpga-counts sample in this chunk
-    uint64_t fpgacounts_begin() const;
+    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
+
     // the last fpga-counts sample in this chunk + 1
-    uint64_t fpgacounts_end() const;
+    uint64_t fpgacounts_end() const { return (isample + constants::nt_per_assembled_chunk) * this->fpga_counts_per_sample; }
 
     // These are virtual so that subclasses can be written with optimized implementations 
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)

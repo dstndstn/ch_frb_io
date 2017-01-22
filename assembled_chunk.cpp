@@ -45,14 +45,6 @@ assembled_chunk::~assembled_chunk()
     free(offsets);
 }
 
-uint64_t assembled_chunk::fpgacounts_begin() const {
-    return isample * fpga_counts_per_sample;
-}
-
-uint64_t assembled_chunk::fpgacounts_end() const {
-    return isample * this->fpga_counts_per_sample +
-        constants::nt_per_assembled_chunk * this->fpga_counts_per_sample;
-}
 
 void assembled_chunk::fill_with_copy(const shared_ptr<assembled_chunk> &x)
 {
