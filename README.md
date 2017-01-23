@@ -50,7 +50,8 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      ```
 
   2. The lz4 compression library.  In CentOS this is a one-liner: `sudo yum install lz4-devel`.
-     (TODO: osx install instructions here.)
+
+     In osx, this is also a one-liner: `brew install lz4`.
 
   3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
      
