@@ -32,5 +32,12 @@ CXX ?= g++
 # CPP=$(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -funroll-loops -I. -I$(INCDIR) -L. -L$(LIBDIR)
 # endif
 
-CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+#CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+
+#OPT_FLAGS := -O3
+# Travis + Coverall: include coverage tracking code.  Also note that we turned off optimization!
+OPT_FLAGS := -O0 -fprofile-arcs -ftest-coverage
+
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+
 CPP_LFLAGS := -L. -L$(LIBDIR)
