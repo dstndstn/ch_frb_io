@@ -89,7 +89,7 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
   - Here are some unit tests which you may or may not want to run:
     ```
     ./test-misc                       # no problem
-    ./test-assembled-chunk-hdf5-file  # no problem
+    ./test-assembled-chunk            # no problem
     ./test-intensity-hdf5-file        # warning: creates 100MB temp file in current directory
     ./test-network-streams            # warning: takes ~1 hour to run, CPU-intensive
     ```
