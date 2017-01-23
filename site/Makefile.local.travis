@@ -34,10 +34,19 @@ CXX ?= g++
 
 #CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall -O3 -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
 
-#OPT_FLAGS := -O3
-# Travis + Coverall: include coverage tracking code.  Also note that we turned off optimization!
-OPT_FLAGS := -O0 -fprofile-arcs -ftest-coverage
+OPTIMIZE ?= yes
+ifeq ($(OPTIMIZE), yes)
+    OPT_FLAGS := -O3 -funroll-loops
+else
+    OPT_FLAGS := -O0
+endif
 
-CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -funroll-loops -I. -I$(INCDIR)
+COVERAGE ?= no
+ifeq ($(COVERAGE), yes)
+    # Travis + Coverall: include coverage tracking code.  Also note that we turned off optimization!
+    OPT_FLAGS += -fprofile-arcs -ftest-coverage
+endif
+
+CPP := $(CXX) -std=c++11 -pthread -fPIC -Wall $(OPT_FLAGS) -march=native -ffast-math -I. -I$(INCDIR)
 
 CPP_LFLAGS := -L. -L$(LIBDIR)

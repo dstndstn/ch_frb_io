@@ -30,11 +30,14 @@ script:
   - pwd
   - export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:~/chime/lib
   - ln -s site/Makefile.local.travis Makefile.local
-  - make
+  - make COVERAGE=yes OPTIMIZE=no
   - make install
   - ./test-intensity-hdf5-file yes
-  - ./test-misc
   - ./test-assembled-chunk
+  # Some tests are too slow to run with -O0...
+  - make clean
+  - make COVERAGE=yes
+  - ./test-misc
   # Takes an hour...
   # - ./test-network-streams
 
