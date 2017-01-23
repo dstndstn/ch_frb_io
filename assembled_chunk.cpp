@@ -1,5 +1,7 @@
 #include <iostream>
 #include <immintrin.h>
+#include <msgpack/fbuffer.hpp>
+#include "assembled_chunk_msgpack.hpp"
 #include "ch_frb_io_internals.hpp"
 
 using namespace std;
@@ -147,15 +149,287 @@ void assembled_chunk::decode(float *intensity, float *weights, int stride) const
     }
 }
 
+assembled_chunk* assembled_chunk::downsample(assembled_chunk* dest,
+                                             const assembled_chunk* src1,
+                                             const assembled_chunk* src2) {
 
-shared_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_)
+    if (src1->beam_id != src2->beam_id)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched beam_id");
+    if (src1->nupfreq != src2->nupfreq)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nupfreq");
+    if (src1->nt_coarse != src2->nt_coarse)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nt_coarse");
+    if (src1->nt_per_packet != src2->nt_per_packet)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nt_per_packet");
+    if (src1->nscales != src2->nscales)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched nscales");
+    if (src1->ndata != src2->ndata)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched ndata");
+
+    if (src1->ichunk >= src2->ichunk)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: expected src1 to have earlier ichunk than src2");
+
+    if (!dest) {
+        unique_ptr<assembled_chunk> up = assembled_chunk::make(src1->beam_id, src1->nupfreq, src1->nt_per_packet, 2 * src1->fpga_counts_per_sample, src1->ichunk);
+        dest = up.release();
+    }
+
+    if (src1->beam_id != dest->beam_id)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest beam_id");
+    if (src1->nupfreq != dest->nupfreq)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nupfreq");
+    if (src1->nt_coarse != dest->nt_coarse)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nt_coarse");
+    if (src1->nt_per_packet != dest->nt_per_packet)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nt_per_packet");
+    if (src1->nscales != dest->nscales)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest nscales");
+    if (src1->ndata != dest->ndata)
+        throw runtime_error("ch_frb_io: assembled_chunk::downsample: mismatched dest ndata");
+
+    float* dest_scales  = dest->scales;
+    float* dest_offsets = dest->offsets;
+    bool temp_scales = false;
+    if (src1 == dest) {
+        // enable in-place downsampling
+        dest_scales  = (float*)malloc(src1->nscales * sizeof(float));
+        dest_offsets = (float*)malloc(src1->nscales * sizeof(float));
+        temp_scales = true;
+    }
+
+    // Compute destination offset + scale.
+    // first half of destination offset + scale comes from src1.
+    for (int i=0; i<src1->nscales/2; i++) {
+        float scale_1  = src1->scales [2*i];
+        float offset_1 = src1->offsets[2*i];
+        float scale_2  = src1->scales [2*i+1];
+        float offset_2 = src1->offsets[2*i+1];
+
+        // Lower and upper limits of each offset, scale
+        // choice... ignoring the fact that 0 and 255 are
+        // marker values for masked values.
+        float lo = min(offset_1, offset_2);
+        float hi = max(offset_1 + scale_1 * 255., offset_2 + scale_2 * 255.);
+
+        // Make the new range contain the old range.  (The
+        // data may fill a smaller range than this...)
+        dest_scales [i]  = (hi - lo) / 255.;
+        dest_offsets[i] = lo;
+    }
+    // second half of destination offset + scale comes from src2.
+    for (int i=0; i<src2->nscales/2; i++) {
+        float scale_1  = src2->scales [2*i];
+        float offset_1 = src2->offsets[2*i];
+        float scale_2  = src2->scales [2*i+1];
+        float offset_2 = src2->offsets[2*i+1];
+
+        // Lower and upper limits of each offset, scale
+        // choice... ignoring the fact that 0 and 255 are
+        // marker values for masked values.
+        float lo = min(offset_1, offset_2);
+        float hi = max(offset_1 + scale_1 * 255., offset_2 + scale_2 * 255.);
+
+        // Make the new range contain the old range.  (The
+        // data may fill a smaller range than this...)
+        dest_scales [src1->nscales/2 + i]  = (hi - lo) / 255.;
+        dest_offsets[src1->nscales/2 + i] = lo;
+    }
+
+    const int nupfreq = src1->nupfreq;
+    const int nt_coarse = src1->nt_coarse;
+    const int nt_per_packet = src1->nt_per_packet;
+
+    for (int if_coarse = 0; if_coarse < constants::nfreq_coarse_tot; if_coarse++) {
+	const float *scales_1  = src1->scales  + if_coarse * nt_coarse;
+	const float *offsets_1 = src1->offsets + if_coarse * nt_coarse;
+	const float *scales_2  = src2->scales  + if_coarse * nt_coarse;
+	const float *offsets_2 = src2->offsets + if_coarse * nt_coarse;
+	const float *scales_d  = dest_scales   + if_coarse * nt_coarse;
+	const float *offsets_d = dest_offsets  + if_coarse * nt_coarse;
+
+	for (int if_fine = if_coarse*nupfreq; if_fine < (if_coarse+1)*nupfreq; if_fine++) {
+	    const uint8_t *data_1 = src1->data + if_fine * constants::nt_per_assembled_chunk;
+	    const uint8_t *data_2 = src2->data + if_fine * constants::nt_per_assembled_chunk;
+
+	    uint8_t *data_d = dest->data + if_fine * constants::nt_per_assembled_chunk;
+            // First half of data comes from src1
+	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
+		float scale  = scales_1 [it_coarse];
+		float offset = offsets_1[it_coarse];
+
+                float iscale_d = 1./scales_d[it_coarse / 2];
+                float offset_d =   offsets_d[it_coarse / 2];
+
+		for (int it_fine = (it_coarse*nt_per_packet)/2; it_fine < ((it_coarse+1)*nt_per_packet)/2; it_fine++) {
+		    uint8_t d1 = data_1[it_fine * 2    ];
+		    uint8_t d2 = data_1[it_fine * 2 + 1];
+                    int wtd = 0;
+                    float xd = 0;
+                    if (!(d1 == 0 || d1 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d1 * scale;
+                    }
+                    if (!(d2 == 0 || d2 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d2 * scale;
+                    }
+                    if (wtd == 0)
+                        data_d[it_fine] = 0;
+                    else {
+                        xd /= (float)wtd;
+                        xd = (xd - offset_d) * iscale_d;
+                        // FIXME -- round?
+                        data_d[it_fine] = (uint8_t)lround(xd);
+                    }
+		}
+	    }
+
+	    data_d += constants::nt_per_assembled_chunk / 2;
+            // Second half of data comes from src2
+	    for (int it_coarse = 0; it_coarse < nt_coarse; it_coarse++) {
+		float scale  = scales_2 [it_coarse];
+		float offset = offsets_2[it_coarse];
+
+                float iscale_d = 1./scales_d[nt_coarse / 2 + it_coarse / 2];
+                float offset_d =   offsets_d[nt_coarse / 2 + it_coarse / 2];
+
+		for (int it_fine = (it_coarse*nt_per_packet)/2; it_fine < ((it_coarse+1)*nt_per_packet)/2; it_fine++) {
+		    uint8_t d1 = data_2[it_fine * 2    ];
+		    uint8_t d2 = data_2[it_fine * 2 + 1];
+                    int wtd = 0;
+                    float xd = 0;
+                    if (!(d1 == 0 || d1 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d1 * scale;
+                    }
+                    if (!(d2 == 0 || d2 == 255)) {
+                        wtd++;
+                        xd += offset + (float)d2 * scale;
+                    }
+                    if (wtd == 0)
+                        data_d[it_fine] = 0;
+                    else {
+                        xd /= (float)wtd;
+                        xd = (xd - offset_d) * iscale_d;
+                        // FIXME -- round?
+                        data_d[it_fine] = (uint8_t)lround(xd);
+                    }
+		}
+	    }
+	}
+    }
+    if (temp_scales) {
+        memcpy(dest->scales,  dest_scales,  src1->nscales * sizeof(float));
+        memcpy(dest->offsets, dest_offsets, src1->nscales * sizeof(float));
+        free(dest_scales);
+        free(dest_offsets);
+
+        // When downsampling in place, update the sampling.
+        dest->fpga_counts_per_sample = 2 * src1->fpga_counts_per_sample;
+    }
+
+    return dest;
+}
+
+
+unique_ptr<assembled_chunk> assembled_chunk::make(int beam_id_, int nupfreq_, int nt_per_packet_, int fpga_counts_per_sample_, uint64_t ichunk_, bool force_reference, bool force_fast)
 {
+    // FIXME -- if C++14 is available, use make_unique()
+    if (force_reference && force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): both force_reference and force_fast were set!");
+
 #ifdef __AVX2__
-    if ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0))
-	return make_shared<fast_assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    if (force_fast ||
+        ((nt_per_packet_ == 16) && (nupfreq_ % 2 == 0) && !force_reference))
+	return unique_ptr<fast_assembled_chunk>(new fast_assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+#else
+    if (force_fast)
+        throw runtime_error("ch_frb_io: assembled_chunk::make(): force_fast set on a machine without AVX2!");
 #endif
 
-    return make_shared<assembled_chunk> (beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_);
+    return unique_ptr<assembled_chunk>(new assembled_chunk(beam_id_, nupfreq_, nt_per_packet_, fpga_counts_per_sample_, ichunk_));
+}
+
+
+void assembled_chunk::write_hdf5_file(const string &filename)
+{
+    bool write = true;
+    bool clobber = true;
+    hdf5_file f(filename, write, clobber);
+
+    string chunkname = "/assembled-chunk-beam" + to_string(beam_id)
+        + "-ichunk" + to_string(ichunk);
+    bool create = true;
+    hdf5_group g_chunk(f, chunkname, create);
+
+    // Header
+    g_chunk.write_attribute("beam_id", this->beam_id);
+    g_chunk.write_attribute("nupfreq", this->nupfreq);
+    g_chunk.write_attribute("nt_per_packet", this->nt_per_packet);
+    g_chunk.write_attribute("fpga_counts_per_sample", this->fpga_counts_per_sample);
+    g_chunk.write_attribute("nt_coarse", this->nt_coarse);
+    g_chunk.write_attribute("nscales", this->nscales);
+    g_chunk.write_attribute("ndata", this->ndata);
+    g_chunk.write_attribute("ichunk", this->ichunk);
+    g_chunk.write_attribute("isample", this->isample);
+
+    // Offset & scale vectors
+    vector<hsize_t> scaleshape = { (hsize_t)constants::nfreq_coarse_tot,
+                                   (hsize_t)this->nt_coarse };
+    g_chunk.write_dataset("scales",  this->scales,  scaleshape);
+    g_chunk.write_dataset("offsets", this->offsets, scaleshape);
+
+    // Raw data
+    int bitshuffle = 0;
+    vector<hsize_t> datashape = {
+        (hsize_t)constants::nfreq_coarse_tot,
+        (hsize_t)nupfreq,
+        (hsize_t)constants::nt_per_assembled_chunk };
+    unique_ptr<hdf5_extendable_dataset<uint8_t> > data_dataset =
+        make_unique<hdf5_extendable_dataset<uint8_t> >(g_chunk, "data", datashape, 2, bitshuffle);
+    data_dataset->write(this->data, datashape);
+    // close
+    data_dataset = unique_ptr<hdf5_extendable_dataset<uint8_t> > ();
+}
+
+void assembled_chunk::write_msgpack_file(const string &filename)
+{
+    FILE* f = fopen(filename.c_str(), "w+");
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for writing an assembled_chunk in msgpack format: " + strerror(errno));
+    // msgpack buffer that will write to file "f"
+    msgpack::fbuffer buffer(f);
+    // Construct a shared_ptr from this, carefully
+    shared_ptr<assembled_chunk> shthis(shared_ptr<assembled_chunk>(), this);
+    msgpack::pack(buffer, shthis);
+    if (fclose(f))
+        throw runtime_error("ch_frb_io: failed to close assembled_chunk msgpack file " + filename + string(strerror(errno)));
+}
+
+shared_ptr<assembled_chunk> assembled_chunk::read_msgpack_file(const string &filename)
+{
+    struct stat st;
+    if (stat(filename.c_str(), &st)) {
+        throw runtime_error("ch_frb_io: failed to stat file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+    }
+    size_t len = st.st_size;
+    FILE* f = fopen(filename.c_str(), "r");
+    if (!f)
+        throw runtime_error("ch_frb_io: failed to open file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+
+    unique_ptr<char> fdata(new char[len]);
+
+    size_t nr = fread(fdata.get(), 1, len, f);
+    if (nr != len)
+        throw runtime_error("ch_frb_io: failed to read " + to_string(len) + " from file " + filename + " for reading an assembled_chunk in msgpack format: " + strerror(errno));
+    fclose(f);
+
+    msgpack::object_handle oh = msgpack::unpack(fdata.get(), len);
+    msgpack::object obj = oh.get();
+    shared_ptr<assembled_chunk> ch;
+    //obj.convert(&ch);
+    obj.convert(ch);
+    return ch;
 }
 
 

@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <memory>
 #include <random>
 #include <hdf5.h>
@@ -91,13 +92,15 @@ namespace constants {
 
     // Ring buffers between assembler thread and processing threads.
     static constexpr int assembled_ringbuf_capacity = 8;
+    static constexpr int assembled_ringbuf_nlevels = 4;
+
     static constexpr int nt_per_assembled_chunk = 1024;
 
     // These parameters don't really affect anything but appear in range-checking asserts.
     static constexpr int max_allowed_beam_id = 65535;
     static constexpr int max_allowed_nupfreq = 64;
     static constexpr int max_allowed_nt_per_packet = 1024;
-    static constexpr int max_allowed_fpga_counts_per_sample = 1024;
+    static constexpr int max_allowed_fpga_counts_per_sample = 3200;
 };
 
 
@@ -285,6 +288,7 @@ public:
 	bool throw_exception_on_buffer_drop = false;
 	bool throw_exception_on_assembler_miss = false;
 	bool accept_end_of_stream_packets = true;
+        std::vector<int> ringbuf_n;
     };
 
     // Event counts are kept in an array of the form int64_t[event_type::num_types].
@@ -323,7 +327,8 @@ public:
     // corresponding to ini_params.beam_ids[assembler_ix].  (Note that the assembler_index
     // satisifes 0 <= assembler_ix < ini_params.beam_ids.size(), and is not a beam_id.)
 
-    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index);
+    std::shared_ptr<assembled_chunk> get_assembled_chunk(int assembler_index,
+                                                         bool wait=true);
 
     // Will block until first packet is received, or stream ends.  Returns true if packet was received.
     bool get_first_packet_params(int &nupfreq, int &nt_per_packet, uint64_t &fpga_counts_per_sample, uint64_t &fpga_count);
@@ -334,6 +339,18 @@ public:
 
     initializer get_initializer();
     std::vector<int64_t> get_event_counts();
+
+    std::unordered_map<std::string, uint64_t> get_perhost_packets();
+    std::unordered_map<uint64_t, uint64_t> get_perhost_packets_raw();
+
+    std::vector<std::unordered_map<std::string, uint64_t> > get_statistics();
+
+    std::vector< std::vector< std::shared_ptr<assembled_chunk> > > get_ringbuf_snapshots(std::vector<uint64_t> &beams,
+                                                                                         uint64_t min_fpga_counts=0, uint64_t max_fpga_counts=0);
+
+    // For debugging/testing purposes: pretend that the given assembled_chunk
+    // has just arrived.
+    void inject_assembled_chunk(assembled_chunk* chunk);
 
     ~intensity_network_stream();
 
@@ -377,6 +394,7 @@ protected:
     int sockfd = -1;
     std::unique_ptr<udp_packet_list> incoming_packet_list;
     std::vector<int64_t> network_thread_event_subcounts;
+    std::unordered_map<uint64_t, uint64_t> network_thread_perhost_packets;
     char _pad2[constants::cache_line_size];
 
     // Used only by the assembler thread
@@ -404,12 +422,14 @@ protected:
 
     pthread_mutex_t event_lock;
     std::vector<int64_t> cumulative_event_counts;
+    std::unordered_map<uint64_t, uint64_t> perhost_packets;
 
     // The actual constructor is protected, so it can be a helper function 
     // for intensity_network_stream::make(), but can't be called otherwise.
     intensity_network_stream(const initializer &x);
 
     void _open_socket();
+    void _network_flush_packets();
     void _add_event_counts(std::vector<int64_t> &event_subcounts);
 
     static void *network_pthread_main(void *);
@@ -443,7 +463,7 @@ struct assembled_chunk : noncopyable {
     const int beam_id = 0;
     const int nupfreq = 0;
     const int nt_per_packet = 0;
-    const int fpga_counts_per_sample = 0;
+    int fpga_counts_per_sample = 0;
 
     // More parameters which are constant after construction.
     const int nt_coarse = 0;   // equal to (constants::nt_per_assembled_chunk / nt_per_packet)
@@ -464,23 +484,47 @@ struct assembled_chunk : noncopyable {
     float *offsets = nullptr;  // shape (constants::nfreq_coarse, nt_coarse)
     uint8_t *data = nullptr;   // shape (constants::nfreq_coarse, nupfreq, constants::nt_per_assembled_chunk)
 
+    bool msgpack_bitshuffle = false;
+
     assembled_chunk(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
     virtual ~assembled_chunk();
-    
+
+    // the first fpga-counts sample in this chunk
+    uint64_t fpgacounts_begin() const { return isample * fpga_counts_per_sample; }
+
+    // the last fpga-counts sample in this chunk + 1
+    uint64_t fpgacounts_end() const { return (isample + constants::nt_per_assembled_chunk) * this->fpga_counts_per_sample; }
+
     // These are virtual so that subclasses can be written with optimized implementations 
     // for specific parameter choices (e.g. full CHIME nt_per_packet=16)
     virtual void add_packet(const intensity_packet &p);
     virtual void decode(float *intensity, float *weights, int stride) const;
 
+    // Downsamples (in time) the two given source chunks, writing into the
+    // given destination chunk.
+    // *dest* can be equal to *src1* to downsample in-place.
+    // If *dest* is NULL, a new assembled_chunk will be allocated.
+    static assembled_chunk* downsample(assembled_chunk* dest,
+                                       const assembled_chunk* src1,
+                                       const assembled_chunk* src2);
+
     // Static factory function which returns either the assembled_chunk base class, or the fast_assembled_chunk
     // subclass (see below), based on the packet parameters.
-    static std::shared_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk);
+    static std::unique_ptr<assembled_chunk> make(int beam_id, int nupfreq, int nt_per_packet, int fpga_counts_per_sample, uint64_t ichunk, bool force_reference=false, bool force_fast=false);
+
+    static std::shared_ptr<assembled_chunk> read_msgpack_file(const std::string& filename);
 
     // Utility functions currently used only for testing.
     void fill_with_copy(const std::shared_ptr<assembled_chunk> &x);
     void randomize(std::mt19937 &rng);
-};
 
+    // HDF5 file output
+    void write_hdf5_file(const std::string &filename);
+
+    // msgpack file output
+    void write_msgpack_file(const std::string &filename);
+
+};
 
 // For some choices of packet parameters (the precise criterion is nt_per_packet == 16 and
 // nupfreq % 2 == 0) we can speed up assembled_chunk::add_packet() and assembled_chunk::decode()
@@ -539,6 +583,7 @@ public:
 	int fpga_counts_per_sample = 0;
 	float wt_cutoff = constants::default_wt_cutoff;
 	double target_gbps = constants::default_gbps;   // if 0.0, then data will be written as quickly as possible!
+        int bind_port = 0; // 0: don't bind; send from randomly assigned port
 
 	bool is_blocking = true;
 	bool emit_warning_on_buffer_drop = true;
@@ -563,7 +608,6 @@ public:
     const uint64_t fpga_counts_per_chunk;
     const double target_gbps;
 
-    
     // It's convenient to initialize intensity_network_ostreams using a static factory function make(),
     // rather than having a public constructor.  Note that make() spawns a network thread which runs
     // in the background.
@@ -581,6 +625,10 @@ public:
     //   intensity + ((b + fcoarse*nupfreq) * nupfreq + u) * stride + t
 
     void send_chunk(const float *intensity, const float *weights, int stride, uint64_t fpga_count);
+
+    void get_statistics(int64_t& curr_timestamp,
+                        int64_t& npackets_sent,
+                        int64_t& nbytes_sent);
     
     // Called when there is no more data; sends end-of-stream packets.
     void end_stream(bool join_network_thread);
@@ -598,8 +646,7 @@ protected:
     std::string hostname;
     uint16_t udp_port = constants::default_udp_port;
     
-    // Currently, this data is not protected by a lock, since it's only accessed by the network thread.
-    // If we want to make this data accessible by other threads, this needs to be changed.
+    pthread_mutex_t statistics_lock;
     int64_t curr_timestamp = 0;    // microseconds between first packet and most recent packet
     int64_t npackets_sent = 0;
     int64_t nbytes_sent = 0;
@@ -624,6 +671,9 @@ protected:
     static void *network_pthread_main(void *opaque_args);
 
     void _network_thread_body();
+
+    // For testing purposes (eg, can create a subclass that randomly drops packets), a wrapper on the underlying packet send() function.
+    virtual ssize_t _send(int socket, const uint8_t* packet, int nbytes, int flags);
 
     void _open_socket();
     void _announce_end_of_stream();

@@ -55,7 +55,15 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
      export LD_LIBRARY_PATH=$HOME/lib:$LD_LIBRARY_PATH
      ```
 
-  2. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
+  2. The lz4 compression library.  In CentOS this is a one-liner: `sudo yum install lz4-devel`.
+
+     In osx, this is also a one-liner: `brew install lz4`.
+
+  3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
+     
+     In osx, this is also a one-liner: `brew install msgpack`.
+
+  4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
      data is generally bitshuffle-compresed).
 
@@ -91,9 +99,10 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
 
   - Here are some unit tests which you may or may not want to run:
     ```
-    ./test-misc                   # no problem
-    ./test-intensity-hdf5-file    # warning: creates 100MB temp file in current directory
-    ./test-network-streams        # warning: takes ~1 hour to run, CPU-intensive
+    ./test-misc                       # no problem
+    ./test-assembled-chunk            # no problem
+    ./test-intensity-hdf5-file        # warning: creates 100MB temp file in current directory
+    ./test-network-streams            # warning: takes ~1 hour to run, CPU-intensive
     ```
 
   - Note that running test-intensity-hdf5-file has the side effect of testing your

@@ -17,7 +17,12 @@ HDF5_LIB_DIR=/usr/local/lib
 # Don't forget -std=c++11 -pthread -fPIC
 # Don't forget -march=native, since we now use assembly-lagnuage kernels
 #
-CPP=clang++ -std=c++11 -stdlib=libc++ -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I. -I$(INCDIR) -I$(HDF5_INC_DIR)
+DEBUG ?= no
+ifeq ($(DEBUG),no)
+  CPP=clang++ -std=c++11 -stdlib=libc++ -pthread -fPIC -march=native -Wall -O3 -ffast-math -funroll-loops -I. -I$(INCDIR) -I$(HDF5_INC_DIR)
+else
+  CPP=clang++ -std=c++11 -stdlib=libc++ -pthread -fPIC -march=native -Wall -O0 -g -ffast-math -funroll-loops -I. -I$(INCDIR) -I$(HDF5_INC_DIR)
+endif
 
 # Any C++ flags which should only be specified when linking 
 # Don't forget to put -L. and -L$(LIBDIR) on the command line (in this order)
