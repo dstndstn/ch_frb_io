@@ -35,9 +35,9 @@ script:
   - ./test-intensity-hdf5-file yes
   #- ./test-assembled-chunk
   # Some tests are too slow to run with -O0...
-  - make clean
-  - make COVERAGE=yes
-  - ./test-misc
+  # - make clean
+  # - make COVERAGE=yes
+  # - ./test-misc
   # Takes an hour...
   # - ./test-network-streams
 
