@@ -25,6 +25,9 @@ compiler:
 
 before_install:
   - pip install --user cpp-coveralls
+  - wget https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
+  - tar xzf msgpack-2.1.0.tar.gz
+  - pwd
 
 script:
   - pwd
@@ -48,6 +51,8 @@ addons:
   apt:
     packages:
       - libhdf5-serial-dev
-      - libmsgpack-dev
       - liblz4-dev
+
+# msgpack in 'trusty' is v0.5.4 -- too early for us.
+#      - libmsgpack-dev
 
