@@ -2,6 +2,8 @@
 
 C++/python library for CHIME-FRB file and network streams.
 
+[![Build Status](https://travis-ci.org/CHIMEFRB/ch_frb_io.png?branch=master)](https://travis-ci.org/CHIMEFRB/ch_frb_io)
+
 Currently there is no shared code between the C++ and python parts, so this is really two
 independent libraries in the same git repository.  In fact the C++ and python parts use
 different build systems, so you have to build and install them independently.  This is
@@ -62,6 +64,14 @@ decompress-chfrb-data    bitshuffle-decompress an hdf5 intensity file
   3. The msgpack library.  In CentOS this is a one-liner: `sudo yum install msgpack-devel.x86_64`.
      
      In osx, this is also a one-liner: `brew install msgpack`.
+
+     Note that you need a fairly new version (v?.??) -- the version in
+     Ubuntu Trusty (14.04), v0.5.4, for example, is too old and fails
+     because it is missing "msgpack/fbuffer.hpp".  Fortunately, you
+     can download the source package from, eg,
+     https://github.com/msgpack/msgpack-c/releases/download/cpp-2.1.0/msgpack-2.1.0.tar.gz
+     and then extract it and add the "msgpack-2.1.0/include" into the
+     include path -- no need to build it.
 
   4. Optional but recommended: bitshuffle (https://github.com/kiyo-masui/bitshuffle)
      You'll need this if you want to use bitshuffle-compressed files (note that CHIME pathfinder
