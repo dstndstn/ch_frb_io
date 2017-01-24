@@ -3,6 +3,7 @@
 C++/python library for CHIME-FRB file and network streams.
 
 [![Build Status](https://travis-ci.org/CHIMEFRB/ch_frb_io.png?branch=master)](https://travis-ci.org/CHIMEFRB/ch_frb_io)
+[![Coverage Status](https://coveralls.io/repos/github/CHIMEFRB/ch_frb_io/badge.svg?branch=master)](https://coveralls.io/github/CHIMEFRB/ch_frb_io?branch=master)
 
 Currently there is no shared code between the C++ and python parts, so this is really two
 independent libraries in the same git repository.  In fact the C++ and python parts use
