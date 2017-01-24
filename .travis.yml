@@ -48,4 +48,5 @@ addons:
   apt:
     packages:
       - libhdf5-serial-dev
-
+      - libmsgpack3
+      - liblz4-dev
